@@ -1,0 +1,13 @@
+<!-- Android TV kräver 320x180. Platshållare tills du har riktig grafik. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+    <path
+        android:fillColor="#0A0C10"
+        android:pathData="M0,0h320v180h-320z" />
+    <path
+        android:fillColor="#5FC9B8"
+        android:pathData="M96,118c20,-46 40,-70 64,-70s44,24 64,70c-24,-20 -44,-30 -64,-30s-40,10 -64,30z" />
+</vector>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Norrsken</string>
+
+    <string name="nav_home">Start</string>
+    <string name="nav_live">Live TV</string>
+    <string name="nav_guide">Tablå</string>
+    <string name="nav_movies">Filmer</string>
+    <string name="nav_series">Serier</string>
+    <string name="nav_favorites">Favoriter</string>
+    <string name="nav_search">Sök</string>
+    <string name="nav_settings">Inställningar</string>
+
+    <string name="empty_library_title">Inget bibliotek än</string>
+    <string name="empty_library_body">Lägg till en spellista så hämtar appen kanaler, filmer och serier.</string>
+    <string name="empty_library_action">Lägg till spellista</string>
+</resources>

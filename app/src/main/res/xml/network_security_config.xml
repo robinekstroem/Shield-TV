@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Många IPTV-leverantörer kör fortfarande ren http. Sedan Android 9 blockeras
+  det tyst om det inte tillåts här, vilket ser ut som "streamen svarar inte".
+
+  cleartextTrafficPermitted=true är brett. När du vet vilka värdar som faktiskt
+  behöver det: byt mot <domain-config> per värd i stället.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
