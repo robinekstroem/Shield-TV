@@ -6,11 +6,11 @@
 #
 # OBS om KSP: sedan 2.3.0 är KSP frikopplad från Kotlin-versionen. Det gamla
 # formatet <kotlin>-<ksp> ("2.0.21-1.0.28") finns inte längre. ksp = "2.3.12"
-# tillsammans med kotlin = "2.4.10" är alltså rätt och inte en miss.
+# tillsammans med kotlin = "2.3.21" är alltså rätt och inte en miss.
 
 [versions]
 agp = "9.4.0"
-kotlin = "2.4.10"
+kotlin = "2.3.21"
 ksp = "2.3.12"
 coreKtx = "1.19.0"
 lifecycle = "2.11.0"
@@ -62,7 +62,6 @@ coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-androi
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
-kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
