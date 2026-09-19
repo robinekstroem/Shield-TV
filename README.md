@@ -64,6 +64,31 @@ tabellen skrivas om varje gång användaren ändrar offset.
 **Manuella EPG-kopplingar skrivs aldrig över.** `epg_mappings` är en egen
 tabell med `source`, och synken rör bara rader som inte är `MANUAL`.
 
+## Spelaren
+
+Media3/ExoPlayer. Tryck pa en kanal i Live TV sa oppnas den i helskarm.
+
+Tva installningar i `StreamSourceFactory` ar avgorande for IPTV, och bada ar
+avstangda som standard i ExoPlayer:
+
+- `setAllowCrossProtocolRedirects(true)` — leverantorernas servrar skickar
+  nastan alltid vidare mellan http och https. Utan den dor stroemmen direkt,
+  med ett fel som ser ut som om kanalen vore nere.
+- En spelarlik `User-Agent` — manga paneler svarar 403 annars.
+
+Fel oversatts till lasbar text. "Servern nekade stroemmen" betyder oftast att
+max antal samtidiga anslutningar ar natt, inte att kanalen ar trasig.
+
+## Kategorier
+
+Grupperna ur spellistan visas nu bredvid kanallistan — pa TV som en egen
+kolumn, pa telefon som en rad. Namnen ar exakt vad leverantoren angav i
+`group-title`, oftast land eller genre. Inget hittas pa.
+
+Taket pa 500 kanaler galler per kategori. Det ar darfor kategorierna spelar
+roll: en platt lista pa 20 000 kanaler gar varken att scrolla eller halla i
+minnet pa en TV-box.
+
 ## Telefon först
 
 Det finns inget att plocka bort för att köra enbart på telefon. `DeviceProfile`

@@ -11,6 +11,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
@@ -21,6 +23,7 @@ import se.norrsken.tv.feature.guide.GuideScreen
 import se.norrsken.tv.feature.home.HomeScreen
 import se.norrsken.tv.feature.livetv.LiveTvScreen
 import se.norrsken.tv.feature.movies.MoviesScreen
+import se.norrsken.tv.feature.player.PlayerScreen
 import se.norrsken.tv.feature.search.SearchScreen
 import se.norrsken.tv.feature.series.SeriesScreen
 import se.norrsken.tv.feature.settings.SettingsScreen
@@ -45,6 +48,15 @@ fun AppShell(modifier: Modifier = Modifier) {
                 restoreState = true
             }
         }
+    }
+
+    // Spelaren tar hela skarmen. En meny bredvid en TV-sandning ar inte
+    // helskarm, och pa en TV ar det direkt fel.
+    if (onPlayerRoute(navController)) {
+        Box(modifier = modifier.fillMaxSize().background(palette.background)) {
+            AppNavHost(navController)
+        }
+        return
     }
 
     Box(modifier = modifier.fillMaxSize().background(palette.background)) {
@@ -72,6 +84,12 @@ fun AppShell(modifier: Modifier = Modifier) {
 }
 
 @Composable
+private fun onPlayerRoute(navController: NavHostController): Boolean {
+    val entry by navController.currentBackStackEntryAsState()
+    return entry?.destination?.route?.startsWith(PLAYER_ROUTE) == true
+}
+
+@Composable
 private fun currentDestination(navController: NavHostController): Destination {
     val entry by navController.currentBackStackEntryAsState()
     val route = entry?.destination?.route
@@ -85,12 +103,25 @@ private fun AppNavHost(navController: NavHostController) {
         startDestination = Destination.Home.route,
     ) {
         composable(Destination.Home.route) { HomeScreen() }
-        composable(Destination.LiveTv.route) { LiveTvScreen() }
+        composable(Destination.LiveTv.route) {
+            LiveTvScreen(
+                onOpenChannel = { id -> navController.navigate(PLAYER_ROUTE + id) },
+            )
+        }
         composable(Destination.Guide.route) { GuideScreen() }
         composable(Destination.Movies.route) { MoviesScreen() }
         composable(Destination.Series.route) { SeriesScreen() }
         composable(Destination.Favorites.route) { FavoritesScreen() }
         composable(Destination.Search.route) { SearchScreen() }
         composable(Destination.Settings.route) { SettingsScreen() }
+
+        composable(
+            route = PLAYER_ROUTE + "{channelId}",
+            arguments = listOf(navArgument("channelId") { type = NavType.StringType }),
+        ) {
+            PlayerScreen(onBack = { navController.popBackStack() })
+        }
     }
 }
+
+private const val PLAYER_ROUTE = "player/"
