@@ -22,38 +22,57 @@ jobs:
           java-version: '17'
 
       # gradle-version: current installerar senaste stabila Gradle och lägger
-      # den på PATH. Med den behöver repot ingen wrapper för att bygga —
-      # utan den dog bygget på "./gradlew: not found", exit code 127.
+      # den på PATH. Med den behöver repot ingen wrapper för att bygga.
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: current
 
+      # continue-on-error här är avsiktligt: utan det avbryts jobbet direkt
+      # och nästa steg, som plockar fram felet, körs aldrig.
       - name: Build debug APK
+        id: build
+        continue-on-error: true
         run: |
+          set -o pipefail
           if [ -f ./gradlew ]; then
-            # Committad från Windows saknar gradlew ofta körbiten, vilket ger
-            # exit code 126 i stället. Sätt den här, varje gång.
+            # Committad från Windows saknar gradlew ofta körbiten.
             chmod +x ./gradlew
-            ./gradlew assembleDebug --stacktrace
+            ./gradlew assembleDebug --stacktrace 2>&1 | tee build.log
           else
-            echo "::notice::Ingen Gradle wrapper i repot – bygger med installerad Gradle."
-            gradle assembleDebug --stacktrace
+            echo "::notice::Ingen Gradle wrapper i repot - bygger med installerad Gradle."
+            gradle assembleDebug --stacktrace 2>&1 | tee build.log
           fi
+
+      # Lyfter upp felet till sammanfattningssidan, så det går att läsa och
+      # skärmdumpa på en telefon i stället för att scrolla i råloggen.
+      - name: Visa felet i sammanfattningen
+        if: steps.build.outcome == 'failure'
+        run: |
+          ERR=$(sed -n '/FAILURE: Build failed/,$p' build.log)
+          if [ -z "$ERR" ]; then
+            ERR=$(tail -n 80 build.log)
+          fi
+          {
+            echo '## Byggfel'
+            echo ''
+            echo '```'
+            printf '%s\n' "$ERR" | head -n 80
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
 
       - name: Namnge APK:n
         run: |
           mkdir -p dist
           cp app/build/outputs/apk/debug/*.apk dist/norrsken-debug.apk
 
-      # Artifacts ligger bakom inloggning och laddas ned som en zip. Bra på
-      # dator, oanvändbart på en TV.
       - uses: actions/upload-artifact@v6
         with:
           name: norrsken-debug-apk
           path: dist/norrsken-debug.apk
 
-      # Vid en tagg (git tag v0.1.0 && git push --tags) läggs APK:n som en
-      # release i stället, med en öppen direktlänk som Downloader kan hämta.
+      # Vid en tagg (git tag v0.1.0 && git push --tags) laggs APK:n som en
+      # release med en oppen direktlank som Downloader kan hamta.
       - name: Publicera release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
