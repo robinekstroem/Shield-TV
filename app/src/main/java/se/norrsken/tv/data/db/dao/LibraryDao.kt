@@ -40,6 +40,22 @@ interface LibraryDao {
     @Query("SELECT * FROM episodes WHERE seriesId = :seriesId AND (season > :season OR (season = :season AND episode > :episode)) ORDER BY season, episode LIMIT 1")
     suspend fun nextEpisode(seriesId: Long, season: Int, episode: Int): EpisodeEntity?
 
+    /** Hela biblioteket för en källa. Används för att rädda metadata över en synk. */
+    @Query("SELECT * FROM movies WHERE playlistId = :playlistId")
+    suspend fun moviesForPlaylist(playlistId: Long): List<MovieEntity>
+
+    @Query("SELECT * FROM series WHERE playlistId = :playlistId")
+    suspend fun seriesForPlaylist(playlistId: Long): List<SeriesEntity>
+
+    @Query("DELETE FROM movies WHERE playlistId = :playlistId")
+    suspend fun deleteMoviesForPlaylist(playlistId: Long)
+
+    @Query("DELETE FROM episodes WHERE seriesId IN (SELECT id FROM series WHERE playlistId = :playlistId)")
+    suspend fun deleteEpisodesForPlaylist(playlistId: Long)
+
+    @Query("DELETE FROM series WHERE playlistId = :playlistId")
+    suspend fun deleteSeriesForPlaylist(playlistId: Long)
+
     @Update
     suspend fun updateMovie(movie: MovieEntity)
 

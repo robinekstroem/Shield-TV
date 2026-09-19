@@ -10,7 +10,5 @@ fun FavoritesScreen(modifier: Modifier = Modifier) {
         modifier = modifier,
         title = "Inga favoriter",
         body = "Markera en kanal, film eller serie som favorit så hamnar den här.",
-        actionLabel = "Lägg till spellista",
-        onAction = { /* Fas 2: öppnar importflödet */ },
     )
 }

@@ -14,17 +14,31 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
+      # gradle-version: current installerar senaste stabila Gradle och lägger
+      # den på PATH. Med den behöver repot ingen wrapper för att bygga —
+      # utan den dog bygget på "./gradlew: not found", exit code 127.
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: current
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug --stacktrace
+        run: |
+          if [ -f ./gradlew ]; then
+            # Committad från Windows saknar gradlew ofta körbiten, vilket ger
+            # exit code 126 i stället. Sätt den här, varje gång.
+            chmod +x ./gradlew
+            ./gradlew assembleDebug --stacktrace
+          else
+            echo "::notice::Ingen Gradle wrapper i repot – bygger med installerad Gradle."
+            gradle assembleDebug --stacktrace
+          fi
 
       - name: Namnge APK:n
         run: |
@@ -33,14 +47,13 @@ jobs:
 
       # Artifacts ligger bakom inloggning och laddas ned som en zip. Bra på
       # dator, oanvändbart på en TV.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: norrsken-debug-apk
           path: dist/norrsken-debug.apk
 
       # Vid en tagg (git tag v0.1.0 && git push --tags) läggs APK:n som en
-      # release i stället. Den får en öppen, direkt nedladdningslänk — och
-      # det är den enda formen Shield kan hantera utan dator.
+      # release i stället, med en öppen direktlänk som Downloader kan hämta.
       - name: Publicera release
         if: startsWith(github.ref, 'refs/tags/v')
         env:

@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -60,6 +61,11 @@ fun NavigationRail(
     // innehållet.
     val initialFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) {
+        // withFrameNanos först: LaunchedEffect startar innan layouten är
+        // klar, och requestFocus mot en omonterad nod kastar. Med
+        // runCatching runt sig hade det felet inte synts — menyn hade bara
+        // aldrig fått fokus, och fjärrkontrollen varit död vid start.
+        withFrameNanos { }
         runCatching { initialFocus.requestFocus() }
     }
 

@@ -57,12 +57,13 @@ fun AppShell(modifier: Modifier = Modifier) {
             Column(Modifier.fillMaxSize()) {
                 // enableEdgeToEdge ritar under statusfältet. Utan det här
                 // hamnar rubrikerna under klockan och hålkameran.
-                Box(
+                Column(
                     Modifier
                         .weight(1f)
                         .statusBarsPadding()
                 ) {
-                    AppNavHost(navController)
+                    TopBar(current = current, onSelect = select)
+                    Box(Modifier.weight(1f)) { AppNavHost(navController) }
                 }
                 BottomBar(current = current, onSelect = select)
             }

@@ -41,9 +41,17 @@ class MetadataRepository @Inject constructor(
     /** Sätts när nyckeln avvisats — då slutar vi fråga tills den ändras. */
     @Volatile private var keyRejected = false
 
+    /**
+     * Sätts när ingen nyckel finns. Utan den läste varje synligt kort
+     * inställningen ur databasen på nytt vid varje scroll, i all evighet,
+     * för att komma fram till samma sak.
+     */
+    @Volatile private var keyMissing = false
+
     fun clearProblem() {
         _problem.value = null
         keyRejected = false
+        keyMissing = false
     }
 
     suspend fun resolveMovie(id: Long) = resolve(MetadataKind.MOVIE, id)
@@ -51,7 +59,7 @@ class MetadataRepository @Inject constructor(
     suspend fun resolveSeries(id: Long) = resolve(MetadataKind.SERIES, id)
 
     private suspend fun resolve(kind: MetadataKind, id: Long) {
-        if (keyRejected) return
+        if (keyRejected || keyMissing) return
 
         val token = "${kind.name}:$id"
         if (!inFlight.add(token)) return
@@ -60,6 +68,7 @@ class MetadataRepository @Inject constructor(
             withContext(io) {
                 val apiKey = settings.tmdbKeyNow()
                 if (apiKey == null) {
+                    keyMissing = true
                     _problem.value = "Lägg in en TMDB-nyckel under Inställningar " +
                         "för att fylla i omslag som saknas."
                     return@withContext

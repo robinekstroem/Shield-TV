@@ -9,8 +9,6 @@ fun GuideScreen(modifier: Modifier = Modifier) {
     EmptyState(
         modifier = modifier,
         title = "Ingen tablå",
-        body = "Tablån behöver en EPG-källa. Lägg till en spellista först, sedan dess EPG.",
-        actionLabel = "Lägg till spellista",
-        onAction = { /* Fas 2: öppnar importflödet */ },
+        body = "Tablån byggs i nästa fas. Den behöver en EPG-källa från din spellista.",
     )
 }

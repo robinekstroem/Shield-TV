@@ -64,14 +64,31 @@ tabellen skrivas om varje gång användaren ändrar offset.
 **Manuella EPG-kopplingar skrivs aldrig över.** `epg_mappings` är en egen
 tabell med `source`, och synken rör bara rader som inte är `MANUAL`.
 
+## Telefon först
+
+Det finns inget att plocka bort för att köra enbart på telefon. `DeviceProfile`
+frågar systemet om enheten är en TV; på en telefon komponeras TV-menyn aldrig
+och TV-måtten laddas aldrig. Koden ligger där men kör inte.
+
+Att riva ut den nu hade bara betytt att bygga den igen senare.
+
 ## Bygga och installera
 
-### 1. Committa Gradle wrapper först
+### 1. Wrappern är inte längre ett krav
 
-Workflow:en kör `./gradlew`. De filerna finns inte i det här paketet —
-`gradlew`, `gradlew.bat` och `gradle/wrapper/gradle-wrapper.jar` är delvis
-binärer. Öppna projektet i Android Studio en gång så skapas de, committa
-dem sedan. Utan dem misslyckas bygget på första raden.
+Workflow:en installerar Gradle själv (`gradle-version: current`) och
+använder wrappern bara om den finns. Bygget går alltså igenom även på ett
+repo utan `gradlew`.
+
+Committa den ändå när du öppnat projektet i Android Studio första gången —
+`gradlew`, `gradlew.bat` och `gradle/wrapper/gradle-wrapper.jar`. Då bygger
+CI med exakt samma Gradle-version som du kör lokalt, vilket tar bort en hel
+klass av "det funkar hos mig".
+
+**Symptomen om något ändå går fel här:** exit code 127 betyder att
+`./gradlew` inte finns. Exit code 126 betyder att den finns men saknar
+körbiten — vanligt när filen committats från Windows. Workflow:en kör
+`chmod +x` för att täcka det andra fallet.
 
 ### 2. Hämta APK:n
 

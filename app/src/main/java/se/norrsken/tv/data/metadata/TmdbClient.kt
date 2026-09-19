@@ -63,8 +63,9 @@ class TmdbClient @Inject constructor(
         val text = try {
             downloader.readText(url, userAgent = "Norrsken/0.1")
         } catch (e: PlaylistException) {
-            val message = e.message.orEmpty()
-            if (message.contains("nekar åtkomst")) {
+            // Koden, inte texten. Strängmatchning på ett felmeddelande går
+            // sönder tyst dagen någon skriver om meddelandet.
+            if (e.status == 401 || e.status == 403) {
                 throw MetadataAuthException("TMDB avvisade nyckeln.")
             }
             throw e

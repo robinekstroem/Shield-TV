@@ -13,6 +13,7 @@ import se.norrsken.tv.data.db.dao.PlaylistDao
 import se.norrsken.tv.data.db.entity.CategoryEntity
 import se.norrsken.tv.data.db.entity.ChannelEntity
 import se.norrsken.tv.data.db.entity.ContentKind
+import se.norrsken.tv.data.db.entity.MatchState
 import se.norrsken.tv.data.db.entity.MovieEntity
 import se.norrsken.tv.data.db.entity.PlaylistEntity
 import se.norrsken.tv.data.db.entity.SeriesEntity
@@ -125,12 +126,25 @@ class XtreamImporter @Inject constructor(
         send(ImportState.Parsing("filmer", streams.size))
         val categoryIds = storeCategories(playlist.id, ContentKind.MOVIE, categories)
 
+        // Raderna måste bort före insert. Primärnyckeln autogenereras, så en
+        // REPLACE-insert skapar nya rader i stället för att ersätta — utan
+        // det här dubblades hela filmbiblioteket vid varje uppdatering.
+        //
+        // Men först sparas det vi redan hämtat från TMDB, nycklat på
+        // leverantörens id. Annars kastas varje omslag vid varje synk och
+        // appen börjar om från noll mot metadatatjänsten.
+        val keptMovies = libraryDao.moviesForPlaylist(playlist.id)
+            .filter { it.providerId != null }
+            .associateBy { it.providerId!! }
+        libraryDao.deleteMoviesForPlaylist(playlist.id)
+
         var saved = 0
         streams.chunked(CHUNK).forEach { chunk ->
             currentCoroutineContext().ensureActive()
             libraryDao.insertMovies(
                 chunk.map { stream ->
                     val (title, year) = splitTitleAndYear(stream.name)
+                    val kept = keptMovies[stream.streamId.toString()]
                     MovieEntity(
                         playlistId = playlist.id,
                         categoryId = stream.categoryId?.let(categoryIds::get),
@@ -144,9 +158,16 @@ class XtreamImporter @Inject constructor(
                         ),
                         containerExt = stream.containerExtension,
                         providerId = stream.streamId.toString(),
-                        posterUrl = stream.icon,
-                        rating = stream.rating,
-                        ratingSource = if (stream.rating != null) "provider" else null,
+                        posterUrl = stream.icon ?: kept?.posterUrl,
+                        backdropUrl = kept?.backdropUrl,
+                        overview = kept?.overview,
+                        rating = stream.rating ?: kept?.rating,
+                        ratingSource = when {
+                            stream.rating != null -> "provider"
+                            else -> kept?.ratingSource
+                        },
+                        metadataId = kept?.metadataId,
+                        matchState = kept?.matchState ?: MatchState.UNMATCHED,
                         addedUtc = stream.addedUtc,
                     )
                 }
@@ -169,12 +190,20 @@ class XtreamImporter @Inject constructor(
         send(ImportState.Parsing("serier", list.size))
         val categoryIds = storeCategories(playlist.id, ContentKind.SERIES, categories)
 
+        val keptSeries = libraryDao.seriesForPlaylist(playlist.id)
+            .filter { it.providerId != null }
+            .associateBy { it.providerId!! }
+        // Avsnitten först: de pekar på serie-id som är på väg att försvinna.
+        libraryDao.deleteEpisodesForPlaylist(playlist.id)
+        libraryDao.deleteSeriesForPlaylist(playlist.id)
+
         var saved = 0
         list.chunked(CHUNK).forEach { chunk ->
             currentCoroutineContext().ensureActive()
             libraryDao.insertSeries(
                 chunk.map { series ->
                     val (title, year) = splitTitleAndYear(series.name)
+                    val kept = keptSeries[series.seriesId.toString()]
                     SeriesEntity(
                         playlistId = playlist.id,
                         categoryId = series.categoryId?.let(categoryIds::get),
@@ -182,12 +211,14 @@ class XtreamImporter @Inject constructor(
                         title = title,
                         year = year ?: series.releaseDate?.take(4)?.toIntOrNull(),
                         providerId = series.seriesId.toString(),
-                        posterUrl = series.cover,
-                        backdropUrl = series.backdrop,
-                        overview = series.plot,
-                        rating = series.rating,
+                        posterUrl = series.cover ?: kept?.posterUrl,
+                        backdropUrl = series.backdrop ?: kept?.backdropUrl,
+                        overview = series.plot ?: kept?.overview,
+                        rating = series.rating ?: kept?.rating,
                         genres = series.genre,
                         trailerUrl = series.trailer,
+                        metadataId = kept?.metadataId,
+                        matchState = kept?.matchState ?: MatchState.UNMATCHED,
                     )
                 }
             )

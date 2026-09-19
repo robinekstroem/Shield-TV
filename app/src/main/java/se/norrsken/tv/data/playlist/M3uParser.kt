@@ -107,7 +107,9 @@ private fun parseExtInf(line: String): M3uEntry {
 
     // Namnet står efter sista kommat. Sista, inte första: attributvärden
     // innehåller ofta komman ("group-title=Sport, Live").
-    val name = line.substringAfterLast(',').trim()
+    // Saknas kommat helt returnerar substringAfterLast hela raden, och
+    // kanalen hade hetat "#EXTINF:-1 tvg-id=...". Därav kontrollen.
+    val name = if (line.contains(',')) line.substringAfterLast(',').trim() else ""
 
     return M3uEntry(
         name = name.ifEmpty { attrs["tvg-name"] ?: "Namnlös kanal" },

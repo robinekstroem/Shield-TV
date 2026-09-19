@@ -9,8 +9,6 @@ fun SearchScreen(modifier: Modifier = Modifier) {
     EmptyState(
         modifier = modifier,
         title = "Sök i biblioteket",
-        body = "Sökningen går över kanaler, tablå, filmer och serier samtidigt.",
-        actionLabel = "Lägg till spellista",
-        onAction = { /* Fas 2: öppnar importflödet */ },
+        body = "Sökningen går över kanaler, tablå, filmer och serier. Byggs i Fas 8.",
     )
 }

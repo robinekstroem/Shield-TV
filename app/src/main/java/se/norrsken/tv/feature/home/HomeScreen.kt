@@ -9,8 +9,6 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     EmptyState(
         modifier = modifier,
         title = "Inget bibliotek än",
-        body = "Lägg till en spellista så hämtar appen kanaler, filmer och serier.",
-        actionLabel = "Lägg till spellista",
-        onAction = { /* Fas 2: öppnar importflödet */ },
+        body = "Lägg till en M3U-länk eller ett Xtream-konto under Inställningar.",
     )
 }

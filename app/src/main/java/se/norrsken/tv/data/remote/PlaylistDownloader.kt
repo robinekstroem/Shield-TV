@@ -9,9 +9,18 @@ import java.util.zip.GZIPInputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** Fel som går att visa för en användare, till skillnad från en stacktrace. */
-class PlaylistException(message: String, cause: Throwable? = null) :
-    IOException(message, cause)
+/**
+ * Fel som går att visa för en användare, till skillnad från en stacktrace.
+ *
+ * [status] är HTTP-koden när felet kom från servern. Finns för att anropare
+ * ska kunna skilja "fel nyckel" från "nätet hackade" utan att matcha på
+ * felmeddelandets text — den är skriven för människor och kan ändras.
+ */
+class PlaylistException(
+    message: String,
+    val status: Int? = null,
+    cause: Throwable? = null,
+) : IOException(message, cause)
 
 @Singleton
 class PlaylistDownloader @Inject constructor() {
@@ -52,7 +61,7 @@ class PlaylistDownloader @Inject constructor() {
 
             if (code !in 200..299) {
                 connection.disconnect()
-                throw PlaylistException(explain(code))
+                throw PlaylistException(explain(code), status = code)
             }
 
             return connection.inputStream.buffered().use { raw ->
@@ -82,7 +91,7 @@ class PlaylistDownloader @Inject constructor() {
         val connection = try {
             URL(url).openConnection() as HttpURLConnection
         } catch (e: Exception) {
-            throw PlaylistException("Adressen går inte att öppna. Kontrollera länken.", e)
+            throw PlaylistException("Adressen går inte att öppna. Kontrollera länken.", cause = e)
         }
         return connection.apply {
             requestMethod = "GET"
