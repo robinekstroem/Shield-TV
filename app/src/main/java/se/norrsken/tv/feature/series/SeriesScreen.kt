@@ -51,13 +51,15 @@ class SeriesViewModel @Inject constructor(
     private val settings: SettingsRepository,
 ) : ViewModel() {
 
+    // Maste ligga fore categories: en egenskapsinitierare far inte
+    // referera till nagot som deklareras langre ner i klassen.
+    private val preferences = settings.preferences
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AppPreferences())
+
     val categories: StateFlow<List<CategoryEntity>> =
         preferences
             .flatMapLatest { playlistDao.observeCategories(ContentKind.SERIES, it.categorySort.code) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    private val preferences = settings.preferences
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AppPreferences())
 
     val sortLabel: StateFlow<String> = preferences
         .map { it.librarySort.label }
