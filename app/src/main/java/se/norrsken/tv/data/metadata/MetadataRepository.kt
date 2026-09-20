@@ -175,6 +175,7 @@ class MetadataRepository @Inject constructor(
                                 overview = movie.overview ?: c.overview,
                                 rating = movie.rating ?: c.rating,
                                 ratingSource = movie.ratingSource ?: "TMDB",
+                                popularity = c.popularity,
                                 metadataId = c.providerId,
                                 matchState = MatchState.MATCHED,
                             )
@@ -187,6 +188,7 @@ class MetadataRepository @Inject constructor(
                                 backdropUrl = series.backdropUrl ?: c.backdropUrl,
                                 overview = series.overview ?: c.overview,
                                 rating = series.rating ?: c.rating,
+                                popularity = c.popularity,
                                 metadataId = c.providerId,
                                 matchState = MatchState.MATCHED,
                             )

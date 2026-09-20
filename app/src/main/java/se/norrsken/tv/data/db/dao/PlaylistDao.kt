@@ -33,8 +33,16 @@ interface PlaylistDao {
     suspend fun delete(playlist: PlaylistEntity)
 
     /** Alla källors kategorier av ett slag, sammanslagna. */
-    @Query("SELECT * FROM categories WHERE kind = :kind AND hidden = 0 ORDER BY name")
-    fun observeCategories(kind: ContentKind): Flow<List<CategoryEntity>>
+    @Query(
+        """
+        SELECT * FROM categories WHERE kind = :kind AND hidden = 0
+        ORDER BY
+            CASE WHEN :sort = 0 THEN sortOrder END ASC,
+            CASE WHEN :sort = 1 THEN LOWER(name) END ASC,
+            LOWER(name) ASC
+        """
+    )
+    fun observeCategories(kind: ContentKind, sort: Int): Flow<List<CategoryEntity>>
 
     @Query("SELECT * FROM categories WHERE playlistId = :playlistId AND kind = :kind ORDER BY sortOrder, name")
     fun observeCategories(playlistId: Long, kind: ContentKind): Flow<List<CategoryEntity>>

@@ -34,6 +34,8 @@ data class MovieEntity(
     val runtimeMinutes: Int? = null,
     val rating: Double? = null,
     val ratingSource: String? = null,
+    /** TMDB:s globala popularitet. Null tills titeln matchats. */
+    val popularity: Double? = null,
     val genres: String? = null,
     val director: String? = null,
     val cast: String? = null,
@@ -61,6 +63,7 @@ data class SeriesEntity(
     val backdropUrl: String? = null,
     val overview: String? = null,
     val rating: Double? = null,
+    val popularity: Double? = null,
     val genres: String? = null,
     val trailerUrl: String? = null,
 

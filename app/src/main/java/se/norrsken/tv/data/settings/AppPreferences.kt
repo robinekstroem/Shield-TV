@@ -24,6 +24,11 @@ data class AppPreferences(
     // --- Allmant ---
     val confirmExit: Boolean = true,
 
+    // --- Sortering ---
+    val librarySort: LibrarySort = LibrarySort.RECENT,
+    val channelSort: ChannelSort = ChannelSort.PROVIDER,
+    val categorySort: CategorySort = CategorySort.PROVIDER,
+
     // --- Utseende ---
     val textScale: TextScale = TextScale.MEDIUM,
     val accent: AccentChoice = AccentChoice.BLUE,
@@ -72,6 +77,34 @@ enum class TextScale(val label: String, val factor: Float) {
     MEDIUM("Mellan", 1.0f),
     LARGE("Stor", 1.14f),
     HUGE("Mycket stor", 1.3f),
+}
+
+/**
+ * Sortering av filmer och serier.
+ *
+ * [code] ar vardet som skickas till SQL. Ordningen far darfor aldrig kastas
+ * om utan att fragorna andras — enum-namnen lagras, men koderna styr.
+ */
+enum class LibrarySort(val label: String, val code: Int) {
+    RECENT("Senast tillagda", 0),
+    TITLE("A-O", 1),
+    RATING("Betyg", 2),
+    /**
+     * TMDB:s globala popularitet. Betyder "populart i varlden", inte
+     * "populart hos dig" — appen har ingen tittarhistorik an. Titlar som
+     * inte matchats saknar vardet och hamnar sist.
+     */
+    POPULAR("Populara pa TMDB", 3),
+}
+
+enum class ChannelSort(val label: String, val code: Int) {
+    PROVIDER("Leverantorens ordning", 0),
+    NAME("A-O", 1),
+}
+
+enum class CategorySort(val label: String, val code: Int) {
+    PROVIDER("Leverantorens ordning", 0),
+    NAME("A-O", 1),
 }
 
 enum class AccentChoice(val label: String, val rgb: Long) {

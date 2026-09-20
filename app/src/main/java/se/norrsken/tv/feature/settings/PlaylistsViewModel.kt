@@ -15,6 +15,9 @@ import se.norrsken.tv.data.db.entity.PlaylistType
 import se.norrsken.tv.data.playlist.ImportState
 import se.norrsken.tv.data.playlist.SourceImporter
 import se.norrsken.tv.data.settings.AccentChoice
+import se.norrsken.tv.data.settings.CategorySort
+import se.norrsken.tv.data.settings.ChannelSort
+import se.norrsken.tv.data.settings.LibrarySort
 import se.norrsken.tv.data.settings.AppPreferences
 import se.norrsken.tv.data.settings.BufferProfile
 import se.norrsken.tv.data.settings.DecoderMode
@@ -52,6 +55,9 @@ class PlaylistsViewModel @Inject constructor(
     fun setInfoPanelSeconds(value: Int) = edit { settings.setInfoPanelSeconds(value) }
     fun setShowClock(value: Boolean) = edit { settings.setShowClock(value) }
     fun setConfirmExit(value: Boolean) = edit { settings.setConfirmExit(value) }
+    fun setLibrarySort(value: LibrarySort) = edit { settings.setLibrarySort(value) }
+    fun setChannelSort(value: ChannelSort) = edit { settings.setChannelSort(value) }
+    fun setCategorySort(value: CategorySort) = edit { settings.setCategorySort(value) }
     fun setTextScale(value: TextScale) = edit { settings.setTextScale(value) }
     fun setAccent(value: AccentChoice) = edit { settings.setAccent(value) }
     fun setUiOpacity(value: Int) = edit { settings.setUiOpacity(value) }

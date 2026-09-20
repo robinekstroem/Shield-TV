@@ -37,7 +37,7 @@ import se.norrsken.tv.data.db.entity.WatchHistoryEntity
         WatchHistoryEntity::class,
         SettingEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)

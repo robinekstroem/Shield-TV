@@ -6,6 +6,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,6 +40,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -56,6 +58,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.focusable
 import kotlinx.coroutines.delay
+import se.norrsken.tv.core.ui.component.FocusableSurface
 import se.norrsken.tv.core.ui.theme.LocalMetrics
 import se.norrsken.tv.core.ui.theme.LocalPreferences
 import se.norrsken.tv.core.ui.theme.LocalPalette
@@ -77,6 +80,9 @@ fun PlayerScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var attempt by remember { mutableIntStateOf(0) }
     var controlsVisible by remember { mutableStateOf(true) }
+    // Varje tryck raknar upp den har. Utan den startar inte nedraakningen om
+    // nar anvandaren gor nagot, sa panelen kan forsvinna mitt i ett tryck.
+    var interactions by remember { mutableIntStateOf(0) }
     var isPlaying by remember { mutableStateOf(true) }
     var position by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
@@ -162,11 +168,29 @@ fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(controlsVisible, preferences.infoPanelSeconds) {
+    LaunchedEffect(controlsVisible, interactions, preferences.infoPanelSeconds) {
         if (controlsVisible) {
             delay(preferences.infoPanelSeconds * 1000L)
             controlsVisible = false
         }
+    }
+
+    fun touched() {
+        controlsVisible = true
+        interactions++
+    }
+
+    fun togglePlayback() {
+        if (player.isPlaying) player.pause() else player.play()
+        touched()
+    }
+
+    fun seekBy(deltaMs: Long) {
+        if (isLive) return
+        val target = player.currentPosition + deltaMs
+        val end = max(0L, player.duration)
+        player.seekTo(if (end > 0) min(max(0L, target), end) else max(0L, target))
+        touched()
     }
 
     Box(
@@ -179,32 +203,24 @@ fun PlayerScreen(
                 if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
                 when (event.key) {
                     Key.DirectionCenter, Key.Enter, Key.Spacebar -> {
-                        if (controlsVisible) {
-                            if (player.isPlaying) player.pause() else player.play()
-                        }
-                        controlsVisible = true
+                        if (controlsVisible) togglePlayback() else touched()
                         true
                     }
 
                     Key.DirectionLeft -> {
-                        if (!isLive) {
-                            player.seekTo(max(0L, player.currentPosition - SEEK_STEP_MS))
-                        }
-                        controlsVisible = true
+                        seekBy(-SEEK_STEP_MS)
+                        touched()
                         !isLive
                     }
 
                     Key.DirectionRight -> {
-                        if (!isLive) {
-                            val target = player.currentPosition + SEEK_STEP_MS
-                            player.seekTo(min(target, max(0L, player.duration)))
-                        }
-                        controlsVisible = true
+                        seekBy(SEEK_STEP_MS)
+                        touched()
                         !isLive
                     }
 
                     else -> {
-                        controlsVisible = true
+                        touched()
                         false
                     }
                 }
@@ -232,6 +248,33 @@ fun PlayerScreen(
             onRelease = { view -> view.player = null },
         )
 
+        // Egen tryckyta ovanpa videon i stallet for pa rot-Boxen: PlayerView
+        // ar en Android-vy och kan sluka beroringar innan Compose ser dem.
+        // Knapparna nedan ligger senare i Boxen och far darfor tryck forst.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = {
+                            if (controlsVisible) controlsVisible = false else touched()
+                        },
+                        onDoubleTap = { offset ->
+                            // Dubbeltryck vanster/hoger halva spolar, som i de
+                            // flesta spelare. Bara for film — live har ingen
+                            // position att spola i.
+                            if (!isLive) {
+                                if (offset.x < size.width / 2f) {
+                                    seekBy(-SEEK_STEP_MS)
+                                } else {
+                                    seekBy(SEEK_STEP_MS)
+                                }
+                            }
+                        },
+                    )
+                }
+        )
+
         AnimatedVisibility(
             visible = controlsVisible && error == null && !missing,
             enter = fadeIn(),
@@ -245,6 +288,10 @@ fun PlayerScreen(
                 isPlaying = isPlaying,
                 position = position,
                 duration = duration,
+                onPlayPause = { togglePlayback() },
+                onSeekBack = { seekBy(-SEEK_STEP_MS) },
+                onSeekForward = { seekBy(SEEK_STEP_MS) },
+                onBack = onBack,
             )
         }
 
@@ -277,6 +324,10 @@ private fun Controls(
     isPlaying: Boolean,
     position: Long,
     duration: Long,
+    onPlayPause: () -> Unit,
+    onSeekBack: () -> Unit,
+    onSeekForward: () -> Unit,
+    onBack: () -> Unit,
 ) {
     val palette = LocalPalette.current
     val metrics = LocalMetrics.current
@@ -380,6 +431,55 @@ private fun Controls(
                 )
             }
         }
+
+        // Knapparna finns for att panelen tidigare bara hade text. Pa en
+        // telefon fanns det darfor ingen paus alls — och nar panelen tonat
+        // bort ingen vag att fa tillbaka den.
+        Row(
+            modifier = Modifier.padding(top = metrics.spaceMd),
+            horizontalArrangement = Arrangement.spacedBy(metrics.spaceSm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ControlButton(label = "Tillbaka", onClick = onBack)
+            if (!isLive) {
+                ControlButton(label = "−10 s", onClick = onSeekBack)
+            }
+            ControlButton(
+                label = if (isPlaying) "Pausa" else "Spela",
+                onClick = onPlayPause,
+            )
+            if (!isLive) {
+                ControlButton(label = "+10 s", onClick = onSeekForward)
+            }
+        }
+    }
+}
+
+/**
+ * En knapp som bade gar att trycka pa och att na med D-pad.
+ *
+ * Text i stallet for ikoner: Materials karnuppsattning saknar en pausikon,
+ * och en blandning av ikoner och text hade sett ut som ett misstag.
+ */
+@Composable
+private fun ControlButton(label: String, onClick: () -> Unit) {
+    val palette = LocalPalette.current
+    val metrics = LocalMetrics.current
+
+    FocusableSurface(
+        onClick = onClick,
+        focusScale = 1.04f,
+        cornerRadius = metrics.radiusCard,
+    ) { focused ->
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleMedium,
+            color = if (focused) palette.focus else palette.textPrimary,
+            modifier = Modifier.padding(
+                horizontal = metrics.spaceLg,
+                vertical = metrics.spaceSm,
+            ),
+        )
     }
 }
 

@@ -27,6 +27,8 @@ import se.norrsken.tv.core.ui.theme.LocalMetrics
 import se.norrsken.tv.data.db.dao.ChannelDao
 import se.norrsken.tv.data.db.dao.LibraryDao
 import se.norrsken.tv.data.metadata.MetadataRepository
+import se.norrsken.tv.data.settings.ChannelSort
+import se.norrsken.tv.data.settings.LibrarySort
 import javax.inject.Inject
 
 data class HomeState(
@@ -52,9 +54,21 @@ class HomeViewModel @Inject constructor(
      * pasta det vore att hitta pa data at anvandaren.
      */
     val state: StateFlow<HomeState> = combine(
-        libraryDao.observeMovies(categoryId = null, limit = 20),
-        libraryDao.observeSeries(categoryId = null, limit = 20),
-        channelDao.observeChannels(categoryId = null, limit = 20),
+        libraryDao.observeMovies(
+            categoryId = null,
+            sort = LibrarySort.RECENT.code,
+            limit = 20,
+        ),
+        libraryDao.observeSeries(
+            categoryId = null,
+            sort = LibrarySort.RECENT.code,
+            limit = 20,
+        ),
+        channelDao.observeChannels(
+            categoryId = null,
+            sort = ChannelSort.PROVIDER.code,
+            limit = 20,
+        ),
     ) { movies, series, channels ->
         val hero = movies.firstOrNull { it.backdropUrl != null }
             ?.let { movie ->

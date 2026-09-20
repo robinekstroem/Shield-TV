@@ -41,6 +41,8 @@ fun LiveTvScreen(
     val channels by viewModel.channels.collectAsStateWithLifecycle()
     val categories by viewModel.categories.collectAsStateWithLifecycle()
     val selected by viewModel.selected.collectAsStateWithLifecycle()
+    val sortLabel by viewModel.channelSortLabel.collectAsStateWithLifecycle()
+    val categorySortLabel by viewModel.categorySortLabel.collectAsStateWithLifecycle()
     val profile = LocalDeviceProfile.current
     val metrics = LocalMetrics.current
 
@@ -63,6 +65,10 @@ fun LiveTvScreen(
                 selected = selected,
                 onSelect = viewModel::select,
                 allLabel = "Alla kanaler",
+                sortLabel = sortLabel,
+                onCycleSort = viewModel::cycleChannelSort,
+                categorySortLabel = categorySortLabel,
+                onCycleCategorySort = viewModel::cycleCategorySort,
                 modifier = Modifier.width(240.dp),
             )
             ChannelList(
@@ -78,6 +84,8 @@ fun LiveTvScreen(
                 selected = selected,
                 onSelect = viewModel::select,
                 allLabel = "Alla",
+                sortLabel = sortLabel,
+                onCycleSort = viewModel::cycleChannelSort,
             )
             ChannelList(
                 channels = channels,

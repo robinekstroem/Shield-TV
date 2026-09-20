@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -35,6 +36,10 @@ import se.norrsken.tv.data.db.dao.PlaylistDao
 import se.norrsken.tv.data.db.entity.CategoryEntity
 import se.norrsken.tv.data.db.entity.ContentKind
 import se.norrsken.tv.data.metadata.MetadataRepository
+import se.norrsken.tv.data.settings.AppPreferences
+import se.norrsken.tv.data.settings.CategorySort
+import se.norrsken.tv.data.settings.LibrarySort
+import se.norrsken.tv.data.settings.SettingsRepository
 import javax.inject.Inject
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -43,18 +48,44 @@ class MoviesViewModel @Inject constructor(
     private val libraryDao: LibraryDao,
     playlistDao: PlaylistDao,
     private val metadata: MetadataRepository,
+    private val settings: SettingsRepository,
 ) : ViewModel() {
 
     val categories: StateFlow<List<CategoryEntity>> =
-        playlistDao.observeCategories(ContentKind.MOVIE)
+        preferences
+            .flatMapLatest { playlistDao.observeCategories(ContentKind.MOVIE, it.categorySort.code) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private val preferences = settings.preferences
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AppPreferences())
+
+    val sortLabel: StateFlow<String> = preferences
+        .map { it.librarySort.label }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
+
+    val categorySortLabel: StateFlow<String> = preferences
+        .map { it.categorySort.label }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
+
+    fun cycleSort() {
+        val order = LibrarySort.entries
+        val next = order[(order.indexOf(preferences.value.librarySort) + 1) % order.size]
+        viewModelScope.launch { settings.setLibrarySort(next) }
+    }
+
+    fun cycleCategorySort() {
+        val order = CategorySort.entries
+        val next = order[(order.indexOf(preferences.value.categorySort) + 1) % order.size]
+        viewModelScope.launch { settings.setCategorySort(next) }
+    }
 
     private val _selected = MutableStateFlow<Long?>(null)
     val selected: StateFlow<Long?> = _selected.asStateFlow()
 
-    val movies: StateFlow<List<PosterItem>> = _selected
-        .flatMapLatest { categoryId ->
-            libraryDao.observeMovies(categoryId = categoryId, limit = 300)
+    val movies: StateFlow<List<PosterItem>> =
+        combine(_selected, preferences) { id, prefs -> id to prefs.librarySort }
+        .flatMapLatest { (categoryId, sort) ->
+            libraryDao.observeMovies(categoryId = categoryId, sort = sort.code, limit = 300)
         }
         .map { list ->
             list.map { movie ->
@@ -86,6 +117,8 @@ fun MoviesScreen(
     val movies by viewModel.movies.collectAsStateWithLifecycle()
     val categories by viewModel.categories.collectAsStateWithLifecycle()
     val selected by viewModel.selected.collectAsStateWithLifecycle()
+    val sortLabel by viewModel.sortLabel.collectAsStateWithLifecycle()
+    val categorySortLabel by viewModel.categorySortLabel.collectAsStateWithLifecycle()
     val profile = LocalDeviceProfile.current
     val metrics = LocalMetrics.current
 
@@ -115,6 +148,10 @@ fun MoviesScreen(
                 selected = selected,
                 onSelect = viewModel::select,
                 allLabel = "Alla filmer",
+                sortLabel = sortLabel,
+                onCycleSort = viewModel::cycleSort,
+                categorySortLabel = categorySortLabel,
+                onCycleCategorySort = viewModel::cycleCategorySort,
                 modifier = Modifier.width(240.dp),
             )
             grid(Modifier)
@@ -126,6 +163,8 @@ fun MoviesScreen(
                 selected = selected,
                 onSelect = viewModel::select,
                 allLabel = "Alla",
+                sortLabel = sortLabel,
+                onCycleSort = viewModel::cycleSort,
                 modifier = Modifier.padding(horizontal = metrics.screenEdge),
             )
             grid(Modifier)

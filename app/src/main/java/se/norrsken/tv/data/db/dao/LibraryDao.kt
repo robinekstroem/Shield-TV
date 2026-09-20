@@ -16,23 +16,43 @@ interface LibraryDao {
     @Query("SELECT * FROM movies WHERE (:categoryId IS NULL OR categoryId = :categoryId) ORDER BY addedUtc DESC LIMIT :limit OFFSET :offset")
     suspend fun movies(categoryId: Long?, limit: Int, offset: Int): List<MovieEntity>
 
+    /**
+     * Sorteringen sker i SQL, inte i minnet. Med tak pa 300 spelar det
+     * roll: sorterar man efteat far man de 300 senast tillagda sorterade
+     * efter betyg — inte de 300 hogst betygsatta.
+     *
+     * COALESCE behovs for att NULL annars sorteras forst i SQLite, sa
+     * omatchade titlar hade hamnat overst under "Betyg".
+     */
     @Query(
         """
         SELECT * FROM movies
         WHERE (:categoryId IS NULL OR categoryId = :categoryId)
-        ORDER BY addedUtc DESC, title LIMIT :limit
+        ORDER BY
+            CASE WHEN :sort = 0 THEN addedUtc END DESC,
+            CASE WHEN :sort = 1 THEN LOWER(title) END ASC,
+            CASE WHEN :sort = 2 THEN COALESCE(rating, -1) END DESC,
+            CASE WHEN :sort = 3 THEN COALESCE(popularity, -1) END DESC,
+            LOWER(title) ASC
+        LIMIT :limit
         """
     )
-    fun observeMovies(categoryId: Long?, limit: Int): Flow<List<MovieEntity>>
+    fun observeMovies(categoryId: Long?, sort: Int, limit: Int): Flow<List<MovieEntity>>
 
     @Query(
         """
         SELECT * FROM series
         WHERE (:categoryId IS NULL OR categoryId = :categoryId)
-        ORDER BY title LIMIT :limit
+        ORDER BY
+            CASE WHEN :sort = 0 THEN addedUtc END DESC,
+            CASE WHEN :sort = 1 THEN LOWER(title) END ASC,
+            CASE WHEN :sort = 2 THEN COALESCE(rating, -1) END DESC,
+            CASE WHEN :sort = 3 THEN COALESCE(popularity, -1) END DESC,
+            LOWER(title) ASC
+        LIMIT :limit
         """
     )
-    fun observeSeries(categoryId: Long?, limit: Int): Flow<List<SeriesEntity>>
+    fun observeSeries(categoryId: Long?, sort: Int, limit: Int): Flow<List<SeriesEntity>>
 
     @Query("SELECT COUNT(*) FROM movies")
     fun observeMovieCount(): Flow<Int>

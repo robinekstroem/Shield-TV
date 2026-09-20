@@ -46,6 +46,9 @@ class SettingsRepository @Inject constructor(
             infoPanelSeconds = map[INFO_PANEL]?.toIntOrNull()?.coerceIn(2, 15) ?: 4,
             showClock = map[CLOCK]?.toBooleanStrictOrNull() ?: true,
             confirmExit = map[CONFIRM_EXIT]?.toBooleanStrictOrNull() ?: true,
+            librarySort = map[LIBRARY_SORT].toEnum(LibrarySort.RECENT),
+            channelSort = map[CHANNEL_SORT].toEnum(ChannelSort.PROVIDER),
+            categorySort = map[CATEGORY_SORT].toEnum(CategorySort.PROVIDER),
             textScale = map[TEXT_SCALE].toEnum(TextScale.MEDIUM),
             accent = map[ACCENT].toEnum(AccentChoice.BLUE),
             uiOpacity = map[UI_OPACITY]?.toIntOrNull()?.coerceIn(60, 100) ?: 100,
@@ -62,6 +65,9 @@ class SettingsRepository @Inject constructor(
     suspend fun setInfoPanelSeconds(value: Int) = put(INFO_PANEL, value.toString())
     suspend fun setShowClock(value: Boolean) = put(CLOCK, value.toString())
     suspend fun setConfirmExit(value: Boolean) = put(CONFIRM_EXIT, value.toString())
+    suspend fun setLibrarySort(value: LibrarySort) = put(LIBRARY_SORT, value.name)
+    suspend fun setChannelSort(value: ChannelSort) = put(CHANNEL_SORT, value.name)
+    suspend fun setCategorySort(value: CategorySort) = put(CATEGORY_SORT, value.name)
     suspend fun setTextScale(value: TextScale) = put(TEXT_SCALE, value.name)
     suspend fun setAccent(value: AccentChoice) = put(ACCENT, value.name)
     suspend fun setUiOpacity(value: Int) = put(UI_OPACITY, value.coerceIn(60, 100).toString())
@@ -86,6 +92,9 @@ class SettingsRepository @Inject constructor(
         const val INFO_PANEL = "player.info_panel_seconds"
         const val CLOCK = "player.show_clock"
         const val CONFIRM_EXIT = "general.confirm_exit"
+        const val LIBRARY_SORT = "sort.library"
+        const val CHANNEL_SORT = "sort.channels"
+        const val CATEGORY_SORT = "sort.categories"
         const val TEXT_SCALE = "appearance.text_scale"
         const val ACCENT = "appearance.accent"
         const val UI_OPACITY = "appearance.ui_opacity"

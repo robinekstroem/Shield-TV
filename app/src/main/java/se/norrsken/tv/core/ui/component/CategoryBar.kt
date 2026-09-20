@@ -1,6 +1,7 @@
 package se.norrsken.tv.core.ui.component
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -29,12 +30,22 @@ fun CategoryColumn(
     onSelect: (Long?) -> Unit,
     allLabel: String,
     modifier: Modifier = Modifier,
+    sortLabel: String? = null,
+    onCycleSort: (() -> Unit)? = null,
+    categorySortLabel: String? = null,
+    onCycleCategorySort: (() -> Unit)? = null,
 ) {
     val metrics = LocalMetrics.current
     LazyColumn(
         modifier = modifier.fillMaxHeight(),
         verticalArrangement = Arrangement.spacedBy(metrics.spaceXs),
     ) {
+        if (sortLabel != null && onCycleSort != null) {
+            item { SortChip("Sortering", sortLabel, onCycleSort) }
+        }
+        if (categorySortLabel != null && onCycleCategorySort != null) {
+            item { SortChip("Kategorier", categorySortLabel, onCycleCategorySort) }
+        }
         item { CategoryChip(allLabel, selected == null) { onSelect(null) } }
         items(categories, key = { it.id }) { category ->
             CategoryChip(category.name, selected == category.id) { onSelect(category.id) }
@@ -49,15 +60,56 @@ fun CategoryRow(
     onSelect: (Long?) -> Unit,
     allLabel: String,
     modifier: Modifier = Modifier,
+    sortLabel: String? = null,
+    onCycleSort: (() -> Unit)? = null,
 ) {
     val metrics = LocalMetrics.current
     LazyRow(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(metrics.spaceSm),
     ) {
+        if (sortLabel != null && onCycleSort != null) {
+            item { SortChip("Sortering", sortLabel, onCycleSort) }
+        }
         item { CategoryChip(allLabel, selected == null) { onSelect(null) } }
         items(categories, key = { it.id }) { category ->
             CategoryChip(category.name, selected == category.id) { onSelect(category.id) }
+        }
+    }
+}
+
+/**
+ * Sortering som en rad i samma lista som kategorierna.
+ *
+ * Skalet: pa en fjarrkontroll ar det ett stalle att navigera till i stallet
+ * for tva. Tryck stegar till nasta ordning — ingen meny som ska oppnas,
+ * valjas i och stangas.
+ */
+@Composable
+private fun SortChip(prefix: String, value: String, onClick: () -> Unit) {
+    val palette = LocalPalette.current
+    val metrics = LocalMetrics.current
+
+    FocusableSurface(onClick = onClick, focusScale = 1f) { focused ->
+        Column(
+            modifier = Modifier.padding(
+                horizontal = metrics.spaceMd,
+                vertical = metrics.spaceSm,
+            ),
+        ) {
+            Text(
+                text = prefix,
+                style = MaterialTheme.typography.labelMedium,
+                color = palette.textTertiary,
+                maxLines = 1,
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.titleMedium,
+                color = if (focused) palette.focus else palette.signal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

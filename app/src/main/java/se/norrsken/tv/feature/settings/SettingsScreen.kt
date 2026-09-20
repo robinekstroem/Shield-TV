@@ -36,6 +36,9 @@ import se.norrsken.tv.data.playlist.ImportState
 import se.norrsken.tv.data.remote.PlaylistDownloader
 import se.norrsken.tv.data.security.sanitizeUrl
 import se.norrsken.tv.data.settings.AccentChoice
+import se.norrsken.tv.data.settings.CategorySort
+import se.norrsken.tv.data.settings.ChannelSort
+import se.norrsken.tv.data.settings.LibrarySort
 import se.norrsken.tv.data.settings.BufferProfile
 import se.norrsken.tv.data.settings.DecoderMode
 import se.norrsken.tv.data.settings.TextScale
@@ -295,6 +298,38 @@ fun SettingsScreen(
                 description = null,
                 checked = prefs.showClock,
                 onChange = viewModel::setShowClock,
+            )
+        }
+
+        item { SettingsHeader("Sortering") }
+        item {
+            OptionRow(
+                title = "Filmer och serier",
+                description = "Populara pa TMDB kraver att titeln matchats. Omatchade hamnar sist.",
+                options = LibrarySort.entries,
+                selected = prefs.librarySort,
+                label = { it.label },
+                onSelect = viewModel::setLibrarySort,
+            )
+        }
+        item {
+            OptionRow(
+                title = "Kanaler",
+                description = null,
+                options = ChannelSort.entries,
+                selected = prefs.channelSort,
+                label = { it.label },
+                onSelect = viewModel::setChannelSort,
+            )
+        }
+        item {
+            OptionRow(
+                title = "Kategorier",
+                description = null,
+                options = CategorySort.entries,
+                selected = prefs.categorySort,
+                label = { it.label },
+                onSelect = viewModel::setCategorySort,
             )
         }
 
