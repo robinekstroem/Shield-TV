@@ -1,34 +1,43 @@
 package se.norrsken.tv.ui.shell
 
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import se.norrsken.tv.R
 import se.norrsken.tv.core.ui.component.FocusableSurface
 import se.norrsken.tv.core.ui.theme.LocalMetrics
 import se.norrsken.tv.core.ui.theme.LocalMotion
@@ -36,17 +45,18 @@ import se.norrsken.tv.core.ui.theme.LocalPalette
 import se.norrsken.tv.navigation.Destination
 
 /**
- * TV-menyn. Ihopdragen till ikoner medan användaren är ute i innehållet,
- * utfälld med etiketter så fort fokus kommer in i den.
+ * TV-menyn. Ihopdragen till ikoner medan anvandaren ar ute i innehallet,
+ * utfalld med etikett och underrubrik sa fort fokus kommer in i den.
  *
- * Skälet: på en TV är horisontellt utrymme det dyraste du har. En permanent
- * utfälld meny äter 200 dp av varje rad med posters, hela tiden, för
- * information användaren bara behöver i det ögonblick den navigerar.
+ * Horisontellt utrymme ar det dyraste pa en TV. En permanent utfalld meny
+ * ater 250 dp av varje rad med omslag, hela tiden, for information
+ * anvandaren bara behover i navigeringsogonblicket.
  */
 @Composable
 fun NavigationRail(
     current: Destination,
     onSelect: (Destination) -> Unit,
+    counts: LibraryCounts,
     modifier: Modifier = Modifier,
 ) {
     val palette = LocalPalette.current
@@ -55,16 +65,12 @@ fun NavigationRail(
 
     var expanded by remember { mutableStateOf(false) }
 
-    // Utan det här har ingenting fokus när appen startar på en TV, och
-    // fjärrkontrollen gör bokstavligen ingenting förrän användaren råkar
-    // trycka på rätt riktning. Menyn tar fokus först; höger går in i
-    // innehållet.
+    // Utan det har har ingenting fokus nar appen startar pa en TV, och
+    // fjarrkontrollen gor ingenting forran anvandaren racker ratt riktning.
+    // withFrameNanos forst: LaunchedEffect startar innan layouten ar klar
+    // och requestFocus mot en omonterad nod kastar.
     val initialFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) {
-        // withFrameNanos först: LaunchedEffect startar innan layouten är
-        // klar, och requestFocus mot en omonterad nod kastar. Med
-        // runCatching runt sig hade det felet inte synts — menyn hade bara
-        // aldrig fått fokus, och fjärrkontrollen varit död vid start.
         withFrameNanos { }
         runCatching { initialFocus.requestFocus() }
     }
@@ -72,57 +78,166 @@ fun NavigationRail(
     Column(
         modifier = modifier
             .fillMaxHeight()
-            .background(palette.background)
+            .width(if (expanded) metrics.railExpanded else metrics.railCollapsed)
+            .background(
+                Brush.horizontalGradient(listOf(palette.ambient, palette.background))
+            )
             .onFocusChanged { expanded = it.hasFocus }
             .focusGroup()
             .animateContentSize(tween(motion.scale(motion.transitionMs)))
-            .padding(vertical = metrics.spaceLg, horizontal = metrics.spaceMd),
-        verticalArrangement = Arrangement.spacedBy(metrics.spaceXs, Alignment.CenterVertically),
+            .padding(vertical = metrics.spaceLg),
+        verticalArrangement = Arrangement.spacedBy(metrics.spaceXs),
     ) {
+        Brand(expanded = expanded)
+
         Destination.entries.forEach { destination ->
-            val selected = destination == current
-            FocusableSurface(
+            RailItem(
+                destination = destination,
+                selected = destination == current,
+                expanded = expanded,
+                count = destination.countFrom(counts),
                 onClick = { onSelect(destination) },
-                background = false,
-                focusScale = 1f,
-                modifier = if (selected) {
+                modifier = if (destination == current) {
                     Modifier.focusRequester(initialFocus)
                 } else {
                     Modifier
                 },
-            ) { focused ->
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(metrics.spaceMd),
-                    modifier = Modifier.padding(
-                        horizontal = metrics.spaceMd,
-                        vertical = metrics.spaceSm,
-                    ),
-                ) {
-                    Icon(
-                        imageVector = destination.icon,
-                        contentDescription = null,
-                        tint = when {
-                            focused -> palette.focus
-                            selected -> palette.textPrimary
-                            else -> palette.textTertiary
-                        },
-                        modifier = Modifier.size(24.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun Brand(expanded: Boolean) {
+    val palette = LocalPalette.current
+    val metrics = LocalMetrics.current
+
+    Column(
+        modifier = Modifier.padding(
+            start = metrics.spaceLg,
+            bottom = metrics.spaceXl,
+        ),
+    ) {
+        Text(
+            text = "NORRSKEN",
+            style = MaterialTheme.typography.titleMedium,
+            color = palette.textPrimary,
+            maxLines = 1,
+        )
+        AnimatedVisibility(visible = expanded) {
+            Text(
+                text = stringResource(R.string.brand_tagline),
+                style = MaterialTheme.typography.labelMedium,
+                color = palette.textTertiary,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RailItem(
+    destination: Destination,
+    selected: Boolean,
+    expanded: Boolean,
+    count: Int?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val palette = LocalPalette.current
+    val metrics = LocalMetrics.current
+    val motion = LocalMotion.current
+
+    FocusableSurface(
+        onClick = onClick,
+        background = false,
+        focusScale = 1f,
+        cornerRadius = metrics.radiusCard,
+        modifier = modifier.padding(horizontal = metrics.spaceSm),
+    ) { focused ->
+        val surface by animateColorAsState(
+            targetValue = when {
+                focused -> palette.surfaceRaised
+                selected -> palette.surface
+                else -> Color.Transparent
+            },
+            animationSpec = tween(motion.scale(motion.focusMs)),
+            label = "railSurface",
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(surface, RoundedCornerShape(metrics.radiusCard))
+                .padding(horizontal = metrics.spaceMd, vertical = metrics.spaceSm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(metrics.spaceMd),
+        ) {
+            // Lodrat streck till vanster om vald post, som i mockupen.
+            Box(
+                Modifier
+                    .width(3.dp)
+                    .height(28.dp)
+                    .background(
+                        if (selected) palette.signal else Color.Transparent,
+                        RoundedCornerShape(2.dp),
                     )
-                    AnimatedVisibility(visible = expanded) {
-                        Text(
-                            text = stringResource(destination.label),
-                            style = MaterialTheme.typography.titleMedium,
-                            color = if (focused || selected) {
-                                palette.textPrimary
-                            } else {
-                                palette.textSecondary
-                            },
-                            modifier = Modifier.width(136.dp),
-                        )
-                    }
+            )
+
+            Icon(
+                imageVector = destination.icon,
+                contentDescription = null,
+                tint = when {
+                    focused || selected -> palette.textPrimary
+                    else -> palette.textTertiary
+                },
+                modifier = Modifier.size(24.dp),
+            )
+
+            AnimatedVisibility(visible = expanded) {
+                Column {
+                    Text(
+                        text = stringResource(destination.label),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = if (focused || selected) {
+                            palette.textPrimary
+                        } else {
+                            palette.textSecondary
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        // Riktig siffra nar det finns en, annars beskrivningen.
+                        // Aldrig en pahittad mangd.
+                        text = count?.let { destination.countLabel(it) }
+                            ?: stringResource(destination.sublabel),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = palette.textTertiary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
         }
     }
+}
+
+private fun Destination.countLabel(count: Int): String {
+    val noun = when (this) {
+        Destination.LiveTv -> "kanaler"
+        Destination.Movies -> "filmer"
+        Destination.Series -> "serier"
+        else -> "objekt"
+    }
+    // Tusentalsavgransare: "12 480 kanaler" gar att lasa pa tre meters hall,
+    // "12480" gor det inte.
+    return "${"%,d".format(count).replace(',', ' ')} $noun"
+}
+
+private fun Destination.countFrom(counts: LibraryCounts): Int? = when (this) {
+    Destination.LiveTv -> counts.channels.takeIf { it > 0 }
+    Destination.Movies -> counts.movies.takeIf { it > 0 }
+    Destination.Series -> counts.series.takeIf { it > 0 }
+    else -> null
 }

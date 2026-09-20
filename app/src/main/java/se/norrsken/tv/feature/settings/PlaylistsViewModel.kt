@@ -14,11 +14,16 @@ import se.norrsken.tv.data.db.entity.PlaylistEntity
 import se.norrsken.tv.data.db.entity.PlaylistType
 import se.norrsken.tv.data.playlist.ImportState
 import se.norrsken.tv.data.playlist.SourceImporter
+import se.norrsken.tv.data.settings.AccentChoice
+import se.norrsken.tv.data.settings.AppPreferences
+import se.norrsken.tv.data.settings.BufferProfile
+import se.norrsken.tv.data.settings.DecoderMode
+import se.norrsken.tv.data.settings.TextScale
 import se.norrsken.tv.data.playlist.extractXtreamCredentials
 import se.norrsken.tv.data.playlist.normalizeBaseUrl
 import se.norrsken.tv.data.metadata.MetadataRepository
 import se.norrsken.tv.data.repository.PlaylistRepository
-import se.norrsken.tv.data.settings.AppSettings
+import se.norrsken.tv.data.settings.SettingsRepository
 import javax.inject.Inject
 
 /** Meddelande att visa direkt i formuläret, utan att starta något. */
@@ -28,13 +33,32 @@ data class SourceHint(val message: String)
 class PlaylistsViewModel @Inject constructor(
     private val repository: PlaylistRepository,
     private val importer: SourceImporter,
-    private val settings: AppSettings,
+    private val settings: SettingsRepository,
     private val metadata: MetadataRepository,
 ) : ViewModel() {
 
-    val tmdbKey: StateFlow<String> = settings.tmdbKey()
-        .map { it.orEmpty() }
+    val preferences: StateFlow<AppPreferences> = settings.preferences
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AppPreferences())
+
+    val tmdbKey: StateFlow<String> = settings.preferences
+        .map { it.tmdbKey.orEmpty() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
+
+    fun setUserAgent(value: String) = edit { settings.setUserAgent(value) }
+    fun setBuffer(value: BufferProfile) = edit { settings.setBuffer(value) }
+    fun setDecoder(value: DecoderMode) = edit { settings.setDecoder(value) }
+    fun setMatchFrameRate(value: Boolean) = edit { settings.setMatchFrameRate(value) }
+    fun setPreferSurround(value: Boolean) = edit { settings.setPreferSurround(value) }
+    fun setInfoPanelSeconds(value: Int) = edit { settings.setInfoPanelSeconds(value) }
+    fun setShowClock(value: Boolean) = edit { settings.setShowClock(value) }
+    fun setConfirmExit(value: Boolean) = edit { settings.setConfirmExit(value) }
+    fun setTextScale(value: TextScale) = edit { settings.setTextScale(value) }
+    fun setAccent(value: AccentChoice) = edit { settings.setAccent(value) }
+    fun setUiOpacity(value: Int) = edit { settings.setUiOpacity(value) }
+
+    private fun edit(block: suspend () -> Unit) {
+        viewModelScope.launch { block() }
+    }
 
     /** Ett meddelande om metadatahämtningen, inte ett per titel. */
     val metadataProblem: StateFlow<String?> = metadata.problem
@@ -42,9 +66,9 @@ class PlaylistsViewModel @Inject constructor(
     fun saveTmdbKey(value: String) {
         viewModelScope.launch {
             settings.setTmdbKey(value)
-            // Nyckeln kan ha bytts ut efter att den avvisats — släpp spärren
-            // så appen börjar fråga igen.
-            metadata.clearProblem()
+            // Slapper sparren OCH nollstaller titlar som markerats som
+            // "hittade inget" medan nyckeln saknades.
+            metadata.retryUnmatched()
         }
     }
 

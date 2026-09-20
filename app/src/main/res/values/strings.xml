@@ -14,4 +14,14 @@
     <string name="empty_library_title">Inget bibliotek än</string>
     <string name="empty_library_body">Lägg till en spellista så hämtar appen kanaler, filmer och serier.</string>
     <string name="empty_library_action">Lägg till spellista</string>
+
+    <string name="sub_home">För dig</string>
+    <string name="sub_live">Direktsändning</string>
+    <string name="sub_guide">TV-tablå &amp; EPG</string>
+    <string name="sub_movies">Filmbiblioteket</string>
+    <string name="sub_series">Säsonger &amp; avsnitt</string>
+    <string name="sub_favorites">Din lista</string>
+    <string name="sub_search">Hela biblioteket</string>
+    <string name="sub_settings">Källor &amp; uppspelning</string>
+    <string name="brand_tagline">WATCH MORE</string>
 </resources>

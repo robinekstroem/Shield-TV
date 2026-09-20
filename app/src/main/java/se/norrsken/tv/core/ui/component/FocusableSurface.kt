@@ -14,6 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.unit.Dp
@@ -59,9 +60,12 @@ fun FocusableSurface(
             .then(
                 if (background) Modifier.background(palette.surface, shape) else Modifier
             )
+            // Bara fokusringen ritas. En hairline i vilolage ger varje
+            // poster och varje menypost en ram, vilket gor rutnatet rutigt
+            // och drar blicken dit ingenting hander.
             .border(
-                width = if (focused) metrics.focusRingWidth else 1.dp,
-                color = if (focused) palette.focus else palette.hairline,
+                width = if (focused) metrics.focusRingWidth else 0.dp,
+                color = if (focused) palette.focus else Color.Transparent,
                 shape = shape,
             )
             .onFocusChanged { focused = it.isFocused }

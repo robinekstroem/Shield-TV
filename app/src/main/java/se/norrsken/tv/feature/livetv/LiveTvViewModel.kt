@@ -44,7 +44,10 @@ class LiveTvViewModel @Inject constructor(
      */
     val channels: StateFlow<List<ChannelEntity>> = _selected
         .flatMapLatest { categoryId ->
-            channelDao.observeChannels(categoryId = categoryId, limit = 500)
+            channelDao.observeChannels(
+                categoryId = categoryId,
+                limit = se.norrsken.tv.feature.livetv.CHANNEL_PAGE,
+            )
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 

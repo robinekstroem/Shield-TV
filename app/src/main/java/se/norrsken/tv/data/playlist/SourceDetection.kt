@@ -1,6 +1,6 @@
 package se.norrsken.tv.data.playlist
 
-import android.net.Uri
+import java.net.URI
 
 /**
  * Xtream-uppgifter utlästa ur en adress.
@@ -10,6 +10,12 @@ data class XtreamCredentials(
     val baseUrl: String,
     val username: String,
     val password: String,
+    /**
+     * Vilken User-Agent anrop mot den har leverantoren ska skicka. Ligger
+     * pa uppgifterna och inte som en global konstant, eftersom paneler
+     * filtrerar olika — en som svarar 403 pa en strang slapper igenom en annan.
+     */
+    val userAgent: String = se.norrsken.tv.data.remote.PlaylistDownloader.DEFAULT_USER_AGENT,
 )
 
 /**
@@ -25,15 +31,16 @@ data class XtreamCredentials(
  * get.php-länk, i stället för att be dem skriva in allt en gång till.
  */
 fun extractXtreamCredentials(url: String): XtreamCredentials? {
-    val uri = runCatching { Uri.parse(url.trim()) }.getOrNull() ?: return null
+    val uri = runCatching { URI(url.trim()) }.getOrNull() ?: return null
     val scheme = uri.scheme?.lowercase() ?: return null
     if (scheme != "http" && scheme != "https") return null
 
     val path = uri.path.orEmpty().lowercase()
     if (!path.endsWith("get.php") && !path.endsWith("player_api.php")) return null
 
-    val username = uri.getQueryParameter("username")?.takeIf { it.isNotBlank() } ?: return null
-    val password = uri.getQueryParameter("password")?.takeIf { it.isNotBlank() } ?: return null
+    val query = parseQuery(uri.rawQuery)
+    val username = query["username"]?.takeIf { it.isNotBlank() } ?: return null
+    val password = query["password"]?.takeIf { it.isNotBlank() } ?: return null
 
     val host = uri.host ?: return null
     val port = if (uri.port > 0) ":${uri.port}" else ""
@@ -44,6 +51,22 @@ fun extractXtreamCredentials(url: String): XtreamCredentials? {
         password = password,
     )
 }
+
+/**
+ * Egen query-tolkning i stallet for android.net.Uri: funktionen blir da ren
+ * Kotlin och gar att enhetstesta utan emulator.
+ */
+private fun parseQuery(raw: String?): Map<String, String> =
+    raw.orEmpty()
+        .split('&')
+        .filter { it.isNotEmpty() }
+        .associate { pair ->
+            val key = pair.substringBefore('=')
+            val value = pair.substringAfter('=', "")
+            key to runCatching {
+                java.net.URLDecoder.decode(value, "UTF-8")
+            }.getOrDefault(value)
+        }
 
 /** Normaliserar det användaren skrivit i serverfältet till en bas-URL. */
 fun normalizeBaseUrl(input: String): String {

@@ -33,13 +33,30 @@ data class Palette(
 
     /** Fokusring och markerat läge. Ljus, inte kulör. */
     val focus: Color = Color(0xFFF2F6FA),
-    /** Pågående sändning, progress, "live nu". Enda kuloraccenten i chrome. */
-    val signal: Color = Color(0xFF5FC9B8),
+    /**
+     * Pagaende sandning, progress, "live nu". Enda kuloraccenten i chrome.
+     * Kall bla, inte teal: den ligger nara bakgrundens blaton och konkurrerar
+     * darfor inte med omslagens varma farger.
+     */
+    val signal: Color = Color(0xFF4C8DFF),
     /** Fel och avbrott. Dämpad — aldrig larmröd i en mörk mediaapp. */
     val alert: Color = Color(0xFFD97C72),
 
     /** Gradient som backdropen tonas ned mot så text förblir läsbar. */
     val scrim: Color = Color(0xE60A0C10),
+    /** Helt genomskinlig variant av botten — gradientens ljusa ande. */
+    val scrimClear: Color = Color(0x000A0C10),
+    /**
+     * Svagt ljus bakom sidomenyn. Skillnaden mot bakgrunden ar knappt
+     * markbar, och det ar meningen: den ger djup utan att bli en ruta.
+     */
+    val ambient: Color = Color(0xFF111826),
+    /** Vit knapp for den primara handlingen, som i mockupen. */
+    val onAccent: Color = Color(0xFF0A0C10),
 )
 
 val LocalPalette = staticCompositionLocalOf { Palette() }
+
+/** Anvandarens val, tillgangliga i hela tradet utan att skickas ned. */
+val LocalPreferences =
+    staticCompositionLocalOf { se.norrsken.tv.data.settings.AppPreferences() }

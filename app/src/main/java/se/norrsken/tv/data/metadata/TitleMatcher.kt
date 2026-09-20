@@ -19,6 +19,10 @@ private const val ACCEPT_THRESHOLD = 80
 
 fun normalizeTitle(value: String): String = value
     .lowercase()
+    // Apostrofer tas bort helt, inte ersatts med mellanslag: annars blir
+    // "marvel s daredevil" och "marvels daredevil" olika strangar.
+    .replace("'", "")
+    .replace("\u2019", "")
     .replace('&', ' ')
     .replace(Regex("\\b(the|a|an|den|det|en|ett)\\b"), " ")
     .replace(Regex("[^a-z0-9åäöéèüñ ]"), " ")

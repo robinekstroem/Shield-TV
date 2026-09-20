@@ -147,14 +147,14 @@ class XtreamClient @Inject constructor(
         action: String?,
         vararg extra: Pair<String, String>,
     ): JSONObject {
-        val text = downloader.readText(endpoint(c, action, *extra))
+        val text = downloader.readText(endpoint(c, action, *extra), c.userAgent)
         return runCatching { JSONObject(text) }.getOrElse {
             throw PlaylistException("Servern svarade med något som inte är giltig JSON.")
         }
     }
 
     private fun array(c: XtreamCredentials, action: String): JSONArray {
-        val text = downloader.readText(endpoint(c, action))
+        val text = downloader.readText(endpoint(c, action), c.userAgent)
         return runCatching { JSONArray(text) }.getOrElse {
             // Paneler svarar ibland med {"user_info":...} eller ren text när
             // en sektion saknas i abonnemanget. Tom lista, inte krasch.

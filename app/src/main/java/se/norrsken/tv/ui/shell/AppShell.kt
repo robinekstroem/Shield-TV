@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.movableContentOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -20,12 +22,16 @@ import se.norrsken.tv.core.device.LocalDeviceProfile
 import se.norrsken.tv.core.ui.theme.LocalPalette
 import se.norrsken.tv.feature.favorites.FavoritesScreen
 import se.norrsken.tv.feature.guide.GuideScreen
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import se.norrsken.tv.feature.home.HomeScreen
 import se.norrsken.tv.feature.livetv.LiveTvScreen
 import se.norrsken.tv.feature.movies.MoviesScreen
 import se.norrsken.tv.feature.player.PlayerScreen
 import se.norrsken.tv.feature.search.SearchScreen
 import se.norrsken.tv.feature.series.SeriesScreen
+import se.norrsken.tv.feature.seriesdetail.SeriesDetailScreen
+import se.norrsken.tv.feature.player.PlayableKind
 import se.norrsken.tv.feature.settings.SettingsScreen
 import se.norrsken.tv.navigation.Destination
 
@@ -34,27 +40,39 @@ import se.norrsken.tv.navigation.Destination
  * byter form. Affärslogik och skärmar delas rakt av.
  */
 @Composable
-fun AppShell(modifier: Modifier = Modifier) {
+fun AppShell(
+    modifier: Modifier = Modifier,
+    shellViewModel: ShellViewModel = hiltViewModel(),
+) {
     val profile = LocalDeviceProfile.current
     val palette = LocalPalette.current
     val navController = rememberNavController()
     val current = currentDestination(navController)
+    val counts by shellViewModel.counts.collectAsStateWithLifecycle()
 
+    // Ingen jamforelse mot current: star man pa en underrutt ar current
+    // huvudavdelningen, och ett likhetstest hade da gjort menyvalet dott.
     val select: (Destination) -> Unit = { destination ->
-        if (destination != current) {
-            navController.navigate(destination.route) {
-                popUpTo(Destination.Home.route) { saveState = true }
-                launchSingleTop = true
-                restoreState = true
-            }
+        navController.navigate(destination.route) {
+            popUpTo(Destination.Home.route) { saveState = true }
+            launchSingleTop = true
+            restoreState = true
         }
+    }
+
+    // movableContentOf: utan den raknas de tva AppNavHost-anropen nedan som
+    // skilda anropsplatser, och Compose river och bygger om hela
+    // navigationsgrafen varje gang spelaren oppnas eller stangs. Med den
+    // flyttas samma instans mellan platserna och backstacken overlever.
+    val navHost = remember(navController) {
+        movableContentOf { AppNavHost(navController) }
     }
 
     // Spelaren tar hela skarmen. En meny bredvid en TV-sandning ar inte
     // helskarm, och pa en TV ar det direkt fel.
     if (onPlayerRoute(navController)) {
         Box(modifier = modifier.fillMaxSize().background(palette.background)) {
-            AppNavHost(navController)
+            navHost()
         }
         return
     }
@@ -62,8 +80,8 @@ fun AppShell(modifier: Modifier = Modifier) {
     Box(modifier = modifier.fillMaxSize().background(palette.background)) {
         if (profile.isTv) {
             Row(Modifier.fillMaxSize()) {
-                NavigationRail(current = current, onSelect = select)
-                Box(Modifier.weight(1f)) { AppNavHost(navController) }
+                NavigationRail(current = current, onSelect = select, counts = counts)
+                Box(Modifier.weight(1f)) { navHost() }
             }
         } else {
             Column(Modifier.fillMaxSize()) {
@@ -75,7 +93,7 @@ fun AppShell(modifier: Modifier = Modifier) {
                         .statusBarsPadding()
                 ) {
                     TopBar(current = current, onSelect = select)
-                    Box(Modifier.weight(1f)) { AppNavHost(navController) }
+                    Box(Modifier.weight(1f)) { navHost() }
                 }
                 BottomBar(current = current, onSelect = select)
             }
@@ -93,7 +111,13 @@ private fun onPlayerRoute(navController: NavHostController): Boolean {
 private fun currentDestination(navController: NavHostController): Destination {
     val entry by navController.currentBackStackEntryAsState()
     val route = entry?.destination?.route
-    return Destination.entries.firstOrNull { it.route == route } ?: Destination.Home
+    return Destination.entries.firstOrNull { it.route == route }
+        // Underrutter hor till sin huvudavdelning. Utan det markerade menyn
+        // "Hem" nar man stod pa en seriesida.
+        ?: when {
+            route?.startsWith(SERIES_ROUTE) == true -> Destination.Series
+            else -> Destination.Home
+        }
 }
 
 @Composable
@@ -102,26 +126,57 @@ private fun AppNavHost(navController: NavHostController) {
         navController = navController,
         startDestination = Destination.Home.route,
     ) {
-        composable(Destination.Home.route) { HomeScreen() }
+        composable(Destination.Home.route) {
+            HomeScreen(
+                onOpenMovie = { id -> navController.play(PlayableKind.MOVIE, id) },
+                onOpenSeries = { id -> navController.navigate(SERIES_ROUTE + id) },
+                onOpenChannel = { id -> navController.play(PlayableKind.CHANNEL, id) },
+            )
+        }
         composable(Destination.LiveTv.route) {
             LiveTvScreen(
-                onOpenChannel = { id -> navController.navigate(PLAYER_ROUTE + id) },
+                onOpenChannel = { id -> navController.play(PlayableKind.CHANNEL, id) },
             )
         }
         composable(Destination.Guide.route) { GuideScreen() }
-        composable(Destination.Movies.route) { MoviesScreen() }
-        composable(Destination.Series.route) { SeriesScreen() }
+        composable(Destination.Movies.route) {
+            MoviesScreen(
+                onOpenMovie = { id -> navController.play(PlayableKind.MOVIE, id) },
+            )
+        }
+        composable(Destination.Series.route) {
+            SeriesScreen(
+                onOpenSeries = { id -> navController.navigate(SERIES_ROUTE + id) },
+            )
+        }
         composable(Destination.Favorites.route) { FavoritesScreen() }
         composable(Destination.Search.route) { SearchScreen() }
         composable(Destination.Settings.route) { SettingsScreen() }
 
         composable(
-            route = PLAYER_ROUTE + "{channelId}",
-            arguments = listOf(navArgument("channelId") { type = NavType.StringType }),
+            route = SERIES_ROUTE + "{seriesId}",
+            arguments = listOf(navArgument("seriesId") { type = NavType.StringType }),
+        ) {
+            SeriesDetailScreen(
+                onPlayEpisode = { id -> navController.play(PlayableKind.EPISODE, id) },
+            )
+        }
+
+        composable(
+            route = PLAYER_ROUTE + "{kind}/{id}",
+            arguments = listOf(
+                navArgument("kind") { type = NavType.StringType },
+                navArgument("id") { type = NavType.StringType },
+            ),
         ) {
             PlayerScreen(onBack = { navController.popBackStack() })
         }
     }
 }
 
+private fun NavHostController.play(kind: PlayableKind, id: Long) {
+    navigate(PLAYER_ROUTE + kind.name + "/" + id)
+}
+
 private const val PLAYER_ROUTE = "player/"
+private const val SERIES_ROUTE = "series-detail/"

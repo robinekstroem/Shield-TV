@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.sp
 private val appFontFamily = FontFamily.Default
 
 private fun scale(
+    factor: Float = 1f,
     display: Int,
     headline: Int,
     title: Int,
@@ -31,40 +32,41 @@ private fun scale(
     displayLarge = TextStyle(
         fontFamily = appFontFamily,
         fontWeight = FontWeight.SemiBold,
-        fontSize = display.sp,
-        lineHeight = (display * 1.15f).sp,
+        fontSize = (display * factor).sp,
+        lineHeight = (display * factor * 1.15f).sp,
         letterSpacing = displayTracking.sp,
     ),
     headlineMedium = TextStyle(
         fontFamily = appFontFamily,
         fontWeight = FontWeight.SemiBold,
-        fontSize = headline.sp,
-        lineHeight = (headline * 1.25f).sp,
+        fontSize = (headline * factor).sp,
+        lineHeight = (headline * factor * 1.25f).sp,
         letterSpacing = (displayTracking / 2).sp,
     ),
     titleMedium = TextStyle(
         fontFamily = appFontFamily,
         fontWeight = FontWeight.Medium,
-        fontSize = title.sp,
-        lineHeight = (title * 1.3f).sp,
+        fontSize = (title * factor).sp,
+        lineHeight = (title * factor * 1.3f).sp,
     ),
     bodyLarge = TextStyle(
         fontFamily = appFontFamily,
         fontWeight = FontWeight.Normal,
-        fontSize = body.sp,
-        lineHeight = (body * 1.5f).sp,
+        fontSize = (body * factor).sp,
+        lineHeight = (body * factor * 1.5f).sp,
         letterSpacing = bodyTracking.sp,
     ),
     labelMedium = TextStyle(
         fontFamily = appFontFamily,
         fontWeight = FontWeight.Medium,
-        fontSize = label.sp,
-        lineHeight = (label * 1.4f).sp,
+        fontSize = (label * factor).sp,
+        lineHeight = (label * factor * 1.4f).sp,
         letterSpacing = 0.2.sp,
     ),
 )
 
-val TvTypography: Typography = scale(
+fun tvTypography(factor: Float): Typography = scale(
+    factor = factor,
     display = 40,
     headline = 28,
     title = 20,
@@ -74,7 +76,8 @@ val TvTypography: Typography = scale(
     bodyTracking = 0.1f,
 )
 
-val HandheldTypography: Typography = scale(
+fun handheldTypography(factor: Float): Typography = scale(
+    factor = factor,
     display = 30,
     headline = 22,
     title = 17,

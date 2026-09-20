@@ -18,7 +18,6 @@ import se.norrsken.tv.data.db.entity.MovieEntity
 import se.norrsken.tv.data.db.entity.PlaylistEntity
 import se.norrsken.tv.data.db.entity.SeriesEntity
 import se.norrsken.tv.data.playlist.ImportState
-import se.norrsken.tv.data.playlist.XtreamCredentials
 import se.norrsken.tv.data.playlist.normalizeChannelName
 import se.norrsken.tv.data.remote.PlaylistException
 import se.norrsken.tv.di.IoDispatcher
@@ -31,15 +30,12 @@ class XtreamImporter @Inject constructor(
     private val playlistDao: PlaylistDao,
     private val channelDao: ChannelDao,
     private val libraryDao: LibraryDao,
+    private val credentialsFactory: XtreamCredentialsFactory,
     @IoDispatcher private val io: CoroutineDispatcher,
 ) {
 
     fun import(playlist: PlaylistEntity): Flow<ImportState> = channelFlow {
-        val credentials = XtreamCredentials(
-            baseUrl = playlist.url,
-            username = playlist.username.orEmpty(),
-            password = playlist.secret.orEmpty(),
-        )
+        val credentials = credentialsFactory.forPlaylist(playlist)
 
         try {
             send(ImportState.Fetching("kontouppgifter"))

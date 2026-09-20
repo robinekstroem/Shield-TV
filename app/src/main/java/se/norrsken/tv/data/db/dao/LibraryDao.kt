@@ -16,11 +16,29 @@ interface LibraryDao {
     @Query("SELECT * FROM movies WHERE (:categoryId IS NULL OR categoryId = :categoryId) ORDER BY addedUtc DESC LIMIT :limit OFFSET :offset")
     suspend fun movies(categoryId: Long?, limit: Int, offset: Int): List<MovieEntity>
 
-    @Query("SELECT * FROM movies ORDER BY addedUtc DESC, title LIMIT :limit")
-    fun observeMovies(limit: Int): Flow<List<MovieEntity>>
+    @Query(
+        """
+        SELECT * FROM movies
+        WHERE (:categoryId IS NULL OR categoryId = :categoryId)
+        ORDER BY addedUtc DESC, title LIMIT :limit
+        """
+    )
+    fun observeMovies(categoryId: Long?, limit: Int): Flow<List<MovieEntity>>
 
-    @Query("SELECT * FROM series ORDER BY title LIMIT :limit")
-    fun observeSeries(limit: Int): Flow<List<SeriesEntity>>
+    @Query(
+        """
+        SELECT * FROM series
+        WHERE (:categoryId IS NULL OR categoryId = :categoryId)
+        ORDER BY title LIMIT :limit
+        """
+    )
+    fun observeSeries(categoryId: Long?, limit: Int): Flow<List<SeriesEntity>>
+
+    @Query("SELECT COUNT(*) FROM movies")
+    fun observeMovieCount(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM series")
+    fun observeSeriesCount(): Flow<Int>
 
     @Query("SELECT * FROM movies WHERE id = :id")
     suspend fun movie(id: Long): MovieEntity?
@@ -33,6 +51,12 @@ interface LibraryDao {
 
     @Query("SELECT * FROM series WHERE id = :id")
     suspend fun seriesById(id: Long): SeriesEntity?
+
+    @Query("SELECT * FROM episodes WHERE id = :id")
+    suspend fun episode(id: Long): EpisodeEntity?
+
+    @Query("SELECT COUNT(*) FROM episodes WHERE seriesId = :seriesId")
+    suspend fun episodeCount(seriesId: Long): Int
 
     @Query("SELECT * FROM episodes WHERE seriesId = :seriesId ORDER BY season, episode")
     fun observeEpisodes(seriesId: Long): Flow<List<EpisodeEntity>>
@@ -55,6 +79,17 @@ interface LibraryDao {
 
     @Query("DELETE FROM series WHERE playlistId = :playlistId")
     suspend fun deleteSeriesForPlaylist(playlistId: Long)
+
+    /**
+     * Nollstaller "forsokt men hittade inget" sa titlarna provas igen.
+     * Kors nar TMDB-nyckeln andras: utan den forblir allt som scrollats
+     * forbi innan nyckeln fanns permanent utan omslag.
+     */
+    @Query("UPDATE movies SET matchState = 'UNMATCHED' WHERE matchState = 'AMBIGUOUS'")
+    suspend fun resetAmbiguousMovies()
+
+    @Query("UPDATE series SET matchState = 'UNMATCHED' WHERE matchState = 'AMBIGUOUS'")
+    suspend fun resetAmbiguousSeries()
 
     @Update
     suspend fun updateMovie(movie: MovieEntity)

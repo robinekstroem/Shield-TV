@@ -9,7 +9,8 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import se.norrsken.tv.data.db.dao.LibraryDao
 import se.norrsken.tv.data.db.entity.MatchState
-import se.norrsken.tv.data.settings.AppSettings
+import se.norrsken.tv.data.settings.AppPreferences
+import se.norrsken.tv.data.settings.SettingsRepository
 import se.norrsken.tv.di.IoDispatcher
 import java.util.Collections
 import javax.inject.Inject
@@ -27,7 +28,7 @@ import javax.inject.Singleton
 class MetadataRepository @Inject constructor(
     private val client: TmdbClient,
     private val libraryDao: LibraryDao,
-    private val settings: AppSettings,
+    private val settings: SettingsRepository,
     @IoDispatcher private val io: CoroutineDispatcher,
 ) {
 
@@ -48,10 +49,28 @@ class MetadataRepository @Inject constructor(
      */
     @Volatile private var keyMissing = false
 
+    /**
+     * Installningarna last en gang i stallet for en gang per kort. Utan den
+     * gjorde ett rutnat med fyrtio saknade omslag fyrtio fragor mot
+     * databasen bara for att lasa API-nyckeln.
+     */
+    @Volatile private var cachedPreferences: AppPreferences? = null
+
     fun clearProblem() {
         _problem.value = null
         keyRejected = false
         keyMissing = false
+        // Nyckeln kan just ha andrats — las om.
+        cachedPreferences = null
+    }
+
+    /** Anropas nar nyckeln andras — se resetAmbiguousMovies i LibraryDao. */
+    suspend fun retryUnmatched() {
+        clearProblem()
+        withContext(io) {
+            libraryDao.resetAmbiguousMovies()
+            libraryDao.resetAmbiguousSeries()
+        }
     }
 
     suspend fun resolveMovie(id: Long) = resolve(MetadataKind.MOVIE, id)
@@ -66,7 +85,9 @@ class MetadataRepository @Inject constructor(
 
         try {
             withContext(io) {
-                val apiKey = settings.tmdbKeyNow()
+                val prefs = cachedPreferences
+                    ?: settings.current().also { cachedPreferences = it }
+                val apiKey = prefs.tmdbKey
                 if (apiKey == null) {
                     keyMissing = true
                     _problem.value = "Lägg in en TMDB-nyckel under Inställningar " +
@@ -74,7 +95,7 @@ class MetadataRepository @Inject constructor(
                     return@withContext
                 }
 
-                val language = settings.metadataLanguageNow()
+                val language = prefs.metadataLanguage
 
                 // Hämta aktuell rad igen: den kan ha fyllts i medan kortet
                 // väntade i kön.

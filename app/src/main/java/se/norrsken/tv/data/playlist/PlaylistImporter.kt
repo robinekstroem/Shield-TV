@@ -14,6 +14,7 @@ import se.norrsken.tv.data.db.entity.ContentKind
 import se.norrsken.tv.data.db.entity.PlaylistEntity
 import se.norrsken.tv.data.remote.PlaylistDownloader
 import se.norrsken.tv.data.remote.PlaylistException
+import se.norrsken.tv.data.settings.SettingsRepository
 import se.norrsken.tv.di.IoDispatcher
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -23,6 +24,7 @@ class PlaylistImporter @Inject constructor(
     private val downloader: PlaylistDownloader,
     private val playlistDao: PlaylistDao,
     private val channelDao: ChannelDao,
+    private val settings: SettingsRepository,
     @IoDispatcher private val io: CoroutineDispatcher,
 ) {
 
@@ -30,7 +32,7 @@ class PlaylistImporter @Inject constructor(
         send(ImportState.Fetching("spellistan"))
 
         val parsed = try {
-            downloader.open(playlist.url) { reader ->
+            downloader.open(playlist.url, settings.current().userAgent) { reader ->
                 // channelFlow i stället för flow: trySend går att anropa
                 // från parserns vanliga lambda, så räknaren tickar upp medan
                 // filen läses i stället för att hoppa från 0 till allt.

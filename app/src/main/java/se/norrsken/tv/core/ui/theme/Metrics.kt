@@ -30,6 +30,13 @@ data class Metrics(
 
     val posterWidth: Dp,
     val railSpacing: Dp,
+    /** Hojden pa hero-sektionen. Tillrackligt for att bilden ska baras. */
+    val heroHeight: Dp,
+    /** Bredden pa ett liggande kort i en rad (16:9-format). */
+    val wideCardWidth: Dp,
+    /** Sidomenyns bredd i ihopdraget respektive utfallt lage. */
+    val railCollapsed: Dp,
+    val railExpanded: Dp,
 ) {
     companion object {
         val Tv = Metrics(
@@ -47,6 +54,10 @@ data class Metrics(
             focusRingWidth = 3.dp,
             posterWidth = 168.dp,
             railSpacing = 20.dp,
+            heroHeight = 420.dp,
+            wideCardWidth = 260.dp,
+            railCollapsed = 88.dp,
+            railExpanded = 256.dp,
         )
 
         val Handheld = Metrics(
@@ -65,6 +76,10 @@ data class Metrics(
             focusRingWidth = 2.dp,
             posterWidth = 116.dp,
             railSpacing = 12.dp,
+            heroHeight = 280.dp,
+            wideCardWidth = 200.dp,
+            railCollapsed = 0.dp,
+            railExpanded = 0.dp,
         )
     }
 }

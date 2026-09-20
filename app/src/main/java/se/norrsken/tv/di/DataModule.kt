@@ -11,6 +11,7 @@ import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import se.norrsken.tv.data.db.NorrskenDatabase
+import se.norrsken.tv.data.db.NorrskenMigrations
 import se.norrsken.tv.data.db.dao.ChannelDao
 import se.norrsken.tv.data.db.dao.EpgDao
 import se.norrsken.tv.data.db.dao.LibraryDao
@@ -36,13 +37,14 @@ object DataModule {
             // WAL låter läsningar fortsätta medan det pågår, så listan slutar
             // inte svara mitt under en synk.
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
-            // Schemat ändras fortfarande i varje fas. Tills version 1.0 är
-            // spikad kastas databasen i stället för att migreras — annars
-            // måste du avinstallera appen efter varje ändring.
+            // Ingen destruktiv migration. Anvandarens favoriter, historik,
+            // spellistor och EPG-kopplingar ska overleva en uppdatering.
             //
-            // MÅSTE bort innan release. Då är det riktiga migrationer som
-            // gäller, annars tappar användare favoriter och historik.
-            .fallbackToDestructiveMigration(dropAllTables = true)
+            // Version 1 ar nu fryst. Varje andring av en entitet kraver
+            // hadanefter en ny version OCH en Migration i NorrskenMigrations
+            // — annars vagrar Room starta, vilket ar ratt beteende: ett
+            // kraschande bygge ar battre an tyst dataforlust.
+            .addMigrations(*NorrskenMigrations.ALL)
             .build()
 
     @Provides fun playlistDao(db: NorrskenDatabase): PlaylistDao = db.playlistDao()

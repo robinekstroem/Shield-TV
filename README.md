@@ -79,6 +79,27 @@ avstangda som standard i ExoPlayer:
 Fel oversatts till lasbar text. "Servern nekade stroemmen" betyder oftast att
 max antal samtidiga anslutningar ar natt, inte att kanalen ar trasig.
 
+## Spelarens kontroller
+
+Egna, inte PlayerViews standardpanel. Skalet ar konkret: standardpanelen
+ritar en scrub-bar aven for live, dar den inte betyder nagot. Ra TS-strommar
+har ingen kand langd, sa faltet hoppar eller star tomt.
+
+- **Live:** kanalnamn, en LIVE-markor, ingen tidslinje alls. Ingen tom rand
+  i stallet — det vore ren losning.
+- **Film och avsnitt:** titel, position, langd och en progressrad.
+  Vanster/hoger spolar tio sekunder.
+- OK pausar och startar. Panelen tonar bort efter fyra sekunder.
+
+Uppspelningen pausas nar appen gar i bakgrunden. Utan det fortsatte ljudet
+spelas efter att anvandaren lamnat appen.
+
+## Serier
+
+Avsnitten hamtas forst nar du oppnar serien, inte vid import. Ett
+`get_series_info`-anrop per serie ganger 3000 serier tar halvtimmar och far
+paneler att strypa kontot. De sparas efter forsta hamtningen.
+
 ## Kategorier
 
 Grupperna ur spellistan visas nu bredvid kanallistan — pa TV som en egen

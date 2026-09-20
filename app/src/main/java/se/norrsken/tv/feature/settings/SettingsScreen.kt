@@ -33,6 +33,20 @@ import se.norrsken.tv.core.ui.theme.LocalPalette
 import se.norrsken.tv.data.db.entity.PlaylistEntity
 import se.norrsken.tv.data.db.entity.PlaylistType
 import se.norrsken.tv.data.playlist.ImportState
+import se.norrsken.tv.data.remote.PlaylistDownloader
+import se.norrsken.tv.data.security.sanitizeUrl
+import se.norrsken.tv.data.settings.AccentChoice
+import se.norrsken.tv.data.settings.BufferProfile
+import se.norrsken.tv.data.settings.DecoderMode
+import se.norrsken.tv.data.settings.TextScale
+
+/** Strangarna leverantorer faktiskt filtrerar pa. */
+private val USER_AGENTS = listOf(
+    PlaylistDownloader.DEFAULT_USER_AGENT,
+    "Lavf/60.16.100",
+    "Mozilla/5.0 (SmartHub; SMART-TV)",
+    "okhttp/4.12.0",
+)
 
 private enum class SourceForm(val label: String) {
     M3u("M3U-länk"),
@@ -49,6 +63,7 @@ fun SettingsScreen(
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     val importState by viewModel.importState.collectAsStateWithLifecycle()
     val hint by viewModel.hint.collectAsStateWithLifecycle()
+    val prefs by viewModel.preferences.collectAsStateWithLifecycle()
 
     val storedKey by viewModel.tmdbKey.collectAsStateWithLifecycle()
     val metadataProblem by viewModel.metadataProblem.collectAsStateWithLifecycle()
@@ -206,6 +221,129 @@ fun SettingsScreen(
                 storedKey = storedKey,
                 problem = metadataProblem,
                 onSave = viewModel::saveTmdbKey,
+            )
+        }
+
+        item { SettingsHeader("Uppspelning") }
+        item {
+            OptionRow(
+                title = "Buffert",
+                description = "Stor buffert ger stabilare bild, langsammare kanalbyte.",
+                options = BufferProfile.entries,
+                selected = prefs.buffer,
+                label = { it.label },
+                onSelect = viewModel::setBuffer,
+            )
+        }
+        item {
+            OptionRow(
+                title = "Videoavkodare",
+                description = "Automatisk faller tillbaka till mjukvara nar hardvaran sager nej.",
+                options = DecoderMode.entries,
+                selected = prefs.decoder,
+                label = { it.label },
+                onSelect = viewModel::setDecoder,
+            )
+        }
+        item {
+            ToggleRow(
+                title = "Matcha bildfrekvens",
+                description = "Byter skarmens frekvens nar det gar somlost. 25 fps pa 60 Hz ger annars ryck.",
+                checked = prefs.matchFrameRate,
+                onChange = viewModel::setMatchFrameRate,
+            )
+        }
+        item {
+            ToggleRow(
+                title = "Foredra surroundljud",
+                description = "Valjer flerkanalsspar nar det finns. Enheten avgor om den klarar formatet.",
+                checked = prefs.preferSurround,
+                onChange = viewModel::setPreferSurround,
+            )
+        }
+        item {
+            OptionRow(
+                title = "User-Agent",
+                description = "Manga leverantorer svarar 403 om anropet inte ser ut som en spelare.",
+                // Ar det sparade vardet inte i listan laggs det till, i
+                // stallet for att raden visar nagon annans varde.
+                options = if (prefs.userAgent in USER_AGENTS) {
+                    USER_AGENTS
+                } else {
+                    USER_AGENTS + prefs.userAgent
+                },
+                selected = prefs.userAgent,
+                label = { it.substringBefore('/') },
+                onSelect = viewModel::setUserAgent,
+            )
+        }
+
+        item { SettingsHeader("Spelaren") }
+        item {
+            OptionRow(
+                title = "Infopanelens tid",
+                description = "Hur lange panelen visas innan den tonar bort.",
+                options = listOf(2, 4, 6, 10),
+                selected = prefs.infoPanelSeconds,
+                label = { "$it s" },
+                onSelect = viewModel::setInfoPanelSeconds,
+            )
+        }
+        item {
+            ToggleRow(
+                title = "Klocka i spelaren",
+                description = null,
+                checked = prefs.showClock,
+                onChange = viewModel::setShowClock,
+            )
+        }
+
+        item { SettingsHeader("Utseende") }
+        item {
+            OptionRow(
+                title = "Textstorlek",
+                description = "Slar igenom i hela granssnittet direkt.",
+                options = TextScale.entries,
+                selected = prefs.textScale,
+                label = { it.label },
+                onSelect = viewModel::setTextScale,
+            )
+        }
+        item {
+            OptionRow(
+                title = "Accentfarg",
+                description = "Progress, live-markor och markerat lage.",
+                options = AccentChoice.entries,
+                selected = prefs.accent,
+                label = { it.label },
+                onSelect = viewModel::setAccent,
+            )
+        }
+        item {
+            OptionRow(
+                title = "Ytornas genomskinlighet",
+                description = "Galler paneler och kort, aldrig texten.",
+                options = listOf(100, 90, 80, 70),
+                selected = prefs.uiOpacity,
+                label = { "$it %" },
+                onSelect = viewModel::setUiOpacity,
+            )
+        }
+
+        item { SettingsHeader("Allmant") }
+        item {
+            ToggleRow(
+                title = "Bekrafta avslut",
+                description = "Tva tryck pa Back kravs. Back ar den knapp som trycks av misstag oftast.",
+                checked = prefs.confirmExit,
+                onChange = viewModel::setConfirmExit,
+            )
+        }
+        item {
+            UnavailableRow(
+                title = "TV-tabla, grupper, logotypkallor, sprak",
+                reason = "Byggs nar funktionerna bakom dem finns. Ett reglage " +
+                    "utan funktion ar samre an ingen rad alls.",
             )
         }
     }
@@ -375,9 +513,11 @@ private fun PlaylistRow(
             Text(
                 // Lösenordet står i URL:en på en get.php-länk. Visas aldrig,
                 // loggas aldrig — samma regel som i diagnostikläget.
+                // substringBefore('?') dolde bara uppgifter i query-delen.
+                // Xtream lagger dem i sokvagen, dar de ser ut som mappnamn.
                 text = when (playlist.type) {
-                    PlaylistType.XTREAM -> "Xtream · ${playlist.url}"
-                    PlaylistType.M3U -> "M3U · ${playlist.url.substringBefore('?')}"
+                    PlaylistType.XTREAM -> "Xtream · ${sanitizeUrl(playlist.url)}"
+                    PlaylistType.M3U -> "M3U · ${sanitizeUrl(playlist.url)}"
                 },
                 style = MaterialTheme.typography.labelMedium,
                 color = palette.textTertiary,

@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import se.norrsken.tv.data.db.dao.PlaylistDao
 import se.norrsken.tv.data.db.entity.PlaylistEntity
+import se.norrsken.tv.data.security.CredentialStore
 import se.norrsken.tv.di.IoDispatcher
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -23,13 +24,17 @@ interface PlaylistRepository {
 @Singleton
 class RoomPlaylistRepository @Inject constructor(
     private val dao: PlaylistDao,
+    private val credentials: CredentialStore,
     @IoDispatcher private val io: CoroutineDispatcher,
 ) : PlaylistRepository {
 
     override fun observePlaylists(): Flow<List<PlaylistEntity>> = dao.observeAll()
 
-    override suspend fun add(playlist: PlaylistEntity): Long =
-        withContext(io) { dao.insert(playlist) }
+    override suspend fun add(playlist: PlaylistEntity): Long = withContext(io) {
+        // Losenordet krypteras har, inte i UI:t. Allt som gar genom
+        // repositoryt ar darmed skyddat oavsett vem som anropar.
+        dao.insert(playlist.copy(secret = playlist.secret?.let(credentials::encrypt)))
+    }
 
     override suspend fun setEnabled(playlist: PlaylistEntity, enabled: Boolean) =
         withContext(io) { dao.update(playlist.copy(enabled = enabled)) }
