@@ -18,6 +18,7 @@ import se.norrsken.tv.data.db.entity.MovieEntity
 import se.norrsken.tv.data.db.entity.PlaylistEntity
 import se.norrsken.tv.data.db.entity.SeriesEntity
 import se.norrsken.tv.data.playlist.ImportState
+import se.norrsken.tv.data.playlist.XtreamCredentials
 import se.norrsken.tv.data.playlist.normalizeChannelName
 import se.norrsken.tv.data.remote.PlaylistException
 import se.norrsken.tv.di.IoDispatcher

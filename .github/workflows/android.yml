@@ -27,37 +27,55 @@ jobs:
         with:
           gradle-version: current
 
-      # continue-on-error här är avsiktligt: utan det avbryts jobbet direkt
-      # och nästa steg, som plockar fram felet, körs aldrig.
+      # Steget far aldrig falla sjalvt: da skulle bade det och
+      # sammanfattningssteget nedan annoteras, och ett enda byggfel sag ut
+      # som tva. Utfallet bars i stallet vidare som en output.
       - name: Build debug APK
         id: build
-        continue-on-error: true
         run: |
           set -o pipefail
+          status=0
           if [ -f ./gradlew ]; then
             # Committad från Windows saknar gradlew ofta körbiten.
             chmod +x ./gradlew
-            ./gradlew assembleDebug --stacktrace 2>&1 | tee build.log
+            ./gradlew assembleDebug --stacktrace 2>&1 | tee build.log || status=$?
           else
             echo "::notice::Ingen Gradle wrapper i repot - bygger med installerad Gradle."
-            gradle assembleDebug --stacktrace 2>&1 | tee build.log
+            gradle assembleDebug --stacktrace 2>&1 | tee build.log || status=$?
           fi
+          echo "status=$status" >> "$GITHUB_OUTPUT"
 
       # Lyfter upp felet till sammanfattningssidan, så det går att läsa och
       # skärmdumpa på en telefon i stället för att scrolla i råloggen.
       - name: Visa felet i sammanfattningen
-        if: steps.build.outcome == 'failure'
+        if: steps.build.outputs.status != '0'
         run: |
-          ERR=$(sed -n '/FAILURE: Build failed/,$p' build.log)
-          if [ -z "$ERR" ]; then
-            ERR=$(tail -n 80 build.log)
-          fi
+          # Kotlins kompileringsfel skrivs med prefixet "e:" LANGT FORE
+          # FAILURE-blocket. Tog man bara FAILURE och framat fick man
+          # stacktracen fran Gradle, som inte sager vilken rad som ar fel.
+          KOTLIN=$(grep -E '^e: ' build.log | head -n 40)
+          WHAT=$(sed -n '/\* What went wrong:/,/\* Try:/p' build.log | head -n 25)
           {
             echo '## Byggfel'
             echo ''
-            echo '```'
-            printf '%s\n' "$ERR" | head -n 80
-            echo '```'
+            if [ -n "$KOTLIN" ]; then
+              echo '### Kompileringsfel'
+              echo '```'
+              printf '%s\n' "$KOTLIN"
+              echo '```'
+            fi
+            if [ -n "$WHAT" ]; then
+              echo '### Gradle'
+              echo '```'
+              printf '%s\n' "$WHAT"
+              echo '```'
+            fi
+            if [ -z "$KOTLIN$WHAT" ]; then
+              echo 'Inga e:-rader och inget What-went-wrong-block. Sista raderna:'
+              echo '```'
+              tail -n 80 build.log
+              echo '```'
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
           exit 1
 
