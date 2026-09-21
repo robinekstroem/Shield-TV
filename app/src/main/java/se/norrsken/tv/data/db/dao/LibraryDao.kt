@@ -75,8 +75,28 @@ interface LibraryDao {
     @Query("SELECT * FROM movies WHERE id = :id")
     suspend fun movie(id: Long): MovieEntity?
 
-    @Query("SELECT * FROM movies WHERE title LIKE '%' || :query || '%' ORDER BY title LIMIT :limit")
-    suspend fun searchMovies(query: String, limit: Int): List<MovieEntity>
+    /** [pattern] kommer från likePattern(), inte direkt från användaren. */
+    @Query(
+        """
+        SELECT * FROM movies
+        WHERE (title LIKE :pattern ESCAPE '\' OR rawTitle LIKE :pattern ESCAPE '\')
+          AND (categoryId IS NULL OR categoryId NOT IN (:hiddenIds))
+        ORDER BY LOWER(title)
+        LIMIT :limit
+        """
+    )
+    suspend fun searchMovies(pattern: String, hiddenIds: List<Long>, limit: Int): List<MovieEntity>
+
+    @Query(
+        """
+        SELECT * FROM series
+        WHERE (title LIKE :pattern ESCAPE '\' OR rawTitle LIKE :pattern ESCAPE '\')
+          AND (categoryId IS NULL OR categoryId NOT IN (:hiddenIds))
+        ORDER BY LOWER(title)
+        LIMIT :limit
+        """
+    )
+    suspend fun searchSeries(pattern: String, hiddenIds: List<Long>, limit: Int): List<SeriesEntity>
 
     @Query("SELECT * FROM series WHERE (:categoryId IS NULL OR categoryId = :categoryId) ORDER BY addedUtc DESC LIMIT :limit OFFSET :offset")
     suspend fun series(categoryId: Long?, limit: Int, offset: Int): List<SeriesEntity>

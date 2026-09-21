@@ -143,6 +143,7 @@ fun HomeScreen(
     onOpenMovie: (Long) -> Unit,
     onOpenSeries: (Long) -> Unit,
     onOpenChannel: (Long) -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
@@ -150,10 +151,14 @@ fun HomeScreen(
     val metrics = LocalMetrics.current
 
     if (state.isEmpty) {
+        // Knappen gor forsta starten till tva tryck pa en TV: hoger, OK.
+        // Utan den maste man hitta Installningar i menyn pa egen hand.
         EmptyState(
             modifier = modifier,
             title = "Inget bibliotek än",
             body = "Lägg till en M3U-länk eller ett Xtream-konto under Inställningar.",
+            actionLabel = "Öppna Inställningar",
+            onAction = onOpenSettings,
         )
         return
     }

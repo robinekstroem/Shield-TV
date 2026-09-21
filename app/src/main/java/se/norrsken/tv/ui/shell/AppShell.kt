@@ -139,6 +139,11 @@ private fun AppNavHost(navController: NavHostController) {
                 onOpenMovie = { id -> navController.play(PlayableKind.MOVIE, id) },
                 onOpenSeries = { id -> navController.navigate(SERIES_ROUTE + id) },
                 onOpenChannel = { id -> navController.play(PlayableKind.CHANNEL, id) },
+                onOpenSettings = {
+                    navController.navigate(Destination.Settings.route) {
+                        launchSingleTop = true
+                    }
+                },
             )
         }
         composable(Destination.LiveTv.route) {
@@ -161,7 +166,13 @@ private fun AppNavHost(navController: NavHostController) {
             )
         }
         composable(Destination.Favorites.route) { FavoritesScreen() }
-        composable(Destination.Search.route) { SearchScreen() }
+        composable(Destination.Search.route) {
+            SearchScreen(
+                onOpenChannel = { id -> navController.play(PlayableKind.CHANNEL, id) },
+                onOpenMovie = { id -> navController.play(PlayableKind.MOVIE, id) },
+                onOpenSeries = { id -> navController.navigate(SERIES_ROUTE + id) },
+            )
+        }
         composable(Destination.Settings.route) {
             SettingsScreen(
                 onManageCategories = { kind -> navController.navigate(CATEGORIES_ROUTE + kind) },

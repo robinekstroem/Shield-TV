@@ -6,6 +6,8 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -75,6 +77,15 @@ fun NavigationRail(
         runCatching { initialFocus.requestFocus() }
     }
 
+    // Menyn maste kunna rullas. En TV-skarm ar bara runt 540 dp hog, och
+    // atta val med tva rader text vardera plus logotypen blir hogre an sa.
+    // Utan rullning hamnade Installningar nedanfor kanten, dit fokus aldrig
+    // nadde — och da gick det inte att lagga in en spellista alls. Med
+    // storre textstorlek hade fler val forsvunnit.
+    //
+    // verticalScroll rullar automatiskt fram det val som far fokus.
+    val scroll = rememberScrollState()
+
     Column(
         modifier = modifier
             .fillMaxHeight()
@@ -85,7 +96,8 @@ fun NavigationRail(
             .onFocusChanged { expanded = it.hasFocus }
             .focusGroup()
             .animateContentSize(tween(motion.scale(motion.transitionMs)))
-            .padding(vertical = metrics.spaceLg),
+            .verticalScroll(scroll)
+            .padding(vertical = metrics.spaceMd),
         verticalArrangement = Arrangement.spacedBy(metrics.spaceXs),
     ) {
         Brand(expanded = expanded)
@@ -115,7 +127,7 @@ private fun Brand(expanded: Boolean) {
     Column(
         modifier = Modifier.padding(
             start = metrics.spaceLg,
-            bottom = metrics.spaceXl,
+            bottom = metrics.spaceLg,
         ),
     ) {
         Text(

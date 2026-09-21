@@ -45,8 +45,18 @@ interface ChannelDao {
         limit: Int,
     ): Flow<List<ChannelEntity>>
 
-    @Query("SELECT * FROM channels WHERE hidden = 0 AND name LIKE '%' || :query || '%' ORDER BY name LIMIT :limit")
-    suspend fun search(query: String, limit: Int): List<ChannelEntity>
+    /** [pattern] kommer från likePattern(), inte direkt från användaren. */
+    @Query(
+        """
+        SELECT * FROM channels
+        WHERE hidden = 0
+          AND name LIKE :pattern ESCAPE '\'
+          AND (categoryId IS NULL OR categoryId NOT IN (:hiddenIds))
+        ORDER BY LOWER(name)
+        LIMIT :limit
+        """
+    )
+    suspend fun search(pattern: String, hiddenIds: List<Long>, limit: Int): List<ChannelEntity>
 
     /**
      * Importen kan komma med tiotusen rader. En @Insert som tar en lista
