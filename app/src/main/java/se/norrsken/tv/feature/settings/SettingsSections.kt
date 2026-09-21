@@ -104,6 +104,45 @@ fun <T> OptionRow(
     }
 }
 
+/** En rad som leder vidare till en egen skärm. */
+@Composable
+fun LinkRow(
+    title: String,
+    description: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val palette = LocalPalette.current
+    val metrics = LocalMetrics.current
+
+    FocusableSurface(onClick = onClick, modifier = modifier.fillMaxWidth()) { focused ->
+        Row(
+            modifier = Modifier.padding(metrics.spaceMd),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = palette.textPrimary,
+                )
+                if (description != null) {
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = palette.textTertiary,
+                    )
+                }
+            }
+            Text(
+                text = "Öppna",
+                style = MaterialTheme.typography.titleMedium,
+                color = if (focused) palette.focus else palette.signal,
+            )
+        }
+    }
+}
+
 @Composable
 fun ToggleRow(
     title: String,
@@ -117,7 +156,7 @@ fun ToggleRow(
         description = description,
         options = listOf(true, false),
         selected = checked,
-        label = { if (it) "Pa" else "Av" },
+        label = { if (it) "På" else "Av" },
         onSelect = onChange,
         modifier = modifier,
     )

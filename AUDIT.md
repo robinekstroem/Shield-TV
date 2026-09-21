@@ -10,6 +10,16 @@ Status per denna checkpoint. Skriven ur koden, inte ur minnet.
 - Inställningar med elva verkligt kopplade val
 - Tema, navigation, TV- och mobillayout
 
+## Senast tillagt, overifierat på enhet
+
+- Tre teman: Norrsken, Titan, Midnatt. Tema styr palett, fokusglöd,
+  rubrikstil och typografins tyngd — inte bara accentfärgen.
+- Dolda kategorier: enskilt eller med ordfilter. Innehållet döljs även under
+  "Alla" och på hemskärmen. Överlever uppdatering av spellistan.
+- Spelaren: helskärm, liggande på telefon, ljud- och undertextval,
+  bildformat, undertextstil.
+- Titelrensning av hakparentestaggar, med ny matchning mot TMDB.
+
 ## Fungerar men är overifierat på enhet
 
 - Film- och serieuppspelning
@@ -71,6 +81,18 @@ med `./gradlew test` utan emulator.
 Testet av metadatamatchningen hittade direkt ett riktigt fel: apostrofer
 normaliserades till mellanslag, så "Marvel's Daredevil" och "Marvels
 Daredevil" matchade inte varandra.
+
+## Kända brister i utseendet
+
+- **Typsnittet.** Systemets Roboto. Ett riktigt display-typsnitt är den
+  enskilt största förbättringen kvar för Titan-känslan.
+- **Ikonerna i menyn.** Filmer är en stjärna och Serier en lista, eftersom
+  Materials kärnuppsättning inte har bättre. Stjärna betyder favorit för de
+  flesta.
+- **Fortsätt titta.** Tabellen finns, inget skriver till den. Film som
+  öppnas igen börjar från början.
+- **Ljudfördröjning.** Media3 har inget enkelt API för det. Kräver egen
+  AudioSink.
 
 ## Nästa checkpoint
 

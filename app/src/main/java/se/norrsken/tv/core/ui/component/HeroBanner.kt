@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import se.norrsken.tv.core.ui.theme.LocalMetrics
 import se.norrsken.tv.core.ui.theme.LocalPalette
+import se.norrsken.tv.core.ui.theme.LocalThemeStyle
 
 /**
  * Titeln som bar hemskarmen.
@@ -92,7 +93,11 @@ fun HeroBanner(
             verticalArrangement = Arrangement.spacedBy(metrics.spaceSm),
         ) {
             Text(
-                text = content.title,
+                text = if (LocalThemeStyle.current.uppercaseHeadings) {
+                    content.title.uppercase()
+                } else {
+                    content.title
+                },
                 style = MaterialTheme.typography.displayLarge,
                 color = palette.textPrimary,
                 maxLines = 2,

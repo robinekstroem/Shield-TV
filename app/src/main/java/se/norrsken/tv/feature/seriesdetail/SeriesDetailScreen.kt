@@ -100,7 +100,7 @@ fun SeriesDetailScreen(
                     horizontalArrangement = Arrangement.spacedBy(metrics.spaceMd),
                 ) {
                     CircularProgressIndicator()
-                    Text("Hamtar avsnitt...", color = palette.textSecondary)
+                    Text("Hämtar avsnitt …", color = palette.textSecondary)
                 }
             }
         }
@@ -126,7 +126,7 @@ fun SeriesDetailScreen(
             Column {
                 if (startsSeason) {
                     Text(
-                        text = "Sasong ${episode.season}",
+                        text = "Säsong ${episode.season}",
                         style = MaterialTheme.typography.titleMedium,
                         color = palette.textSecondary,
                         modifier = Modifier.padding(

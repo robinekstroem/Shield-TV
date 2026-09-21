@@ -11,6 +11,8 @@ import kotlinx.coroutines.launch
 import se.norrsken.tv.data.db.dao.ChannelDao
 import se.norrsken.tv.data.db.dao.LibraryDao
 import se.norrsken.tv.data.player.PlayerFactory
+import se.norrsken.tv.data.settings.SettingsRepository
+import se.norrsken.tv.data.settings.VideoScale
 import javax.inject.Inject
 
 enum class PlayableKind { CHANNEL, MOVIE, EPISODE }
@@ -33,7 +35,15 @@ class PlayerViewModel @Inject constructor(
     private val channelDao: ChannelDao,
     private val libraryDao: LibraryDao,
     val playerFactory: PlayerFactory,
+    private val settings: SettingsRepository,
 ) : ViewModel() {
+
+    /** Bildformatet sparas, sa nasta film oppnas som den forra. */
+    fun cycleVideoScale(current: VideoScale) {
+        val order = VideoScale.entries
+        val next = order[(order.indexOf(current) + 1) % order.size]
+        viewModelScope.launch { settings.setVideoScale(next) }
+    }
 
     private val _playable = MutableStateFlow<Playable?>(null)
     val playable: StateFlow<Playable?> = _playable.asStateFlow()

@@ -16,6 +16,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -38,6 +39,11 @@ fun FocusableSurface(
     focusScale: Float = LocalMetrics.current.focusScaleWide,
     cornerRadius: Dp = LocalMetrics.current.radiusCard,
     background: Boolean = true,
+    /**
+     * Farglagd glod runt det som har fokus. Bara for innehall — omslag och
+     * kort. Pa menyrader och knappar blir det brus.
+     */
+    glow: Boolean = false,
     content: @Composable (focused: Boolean) -> Unit,
 ) {
     val palette = LocalPalette.current
@@ -57,6 +63,21 @@ fun FocusableSurface(
     Box(
         modifier = modifier
             .scale(scale)
+            .then(
+                if (glow && focused) {
+                    // clip = false: skuggan far inte beskara innehallet, da
+                    // hade omslagets horn andrat form bara vid fokus.
+                    Modifier.shadow(
+                        elevation = 24.dp,
+                        shape = shape,
+                        clip = false,
+                        ambientColor = palette.signal,
+                        spotColor = palette.signal,
+                    )
+                } else {
+                    Modifier
+                }
+            )
             .then(
                 if (background) Modifier.background(palette.surface, shape) else Modifier
             )

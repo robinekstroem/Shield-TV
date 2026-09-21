@@ -18,7 +18,6 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
@@ -36,6 +35,8 @@ import se.norrsken.tv.data.db.dao.PlaylistDao
 import se.norrsken.tv.data.db.entity.CategoryEntity
 import se.norrsken.tv.data.db.entity.ContentKind
 import se.norrsken.tv.data.metadata.MetadataRepository
+import se.norrsken.tv.data.repository.CategoryVisibility
+import se.norrsken.tv.data.repository.isCategoryHidden
 import se.norrsken.tv.data.settings.AppPreferences
 import se.norrsken.tv.data.settings.CategorySort
 import se.norrsken.tv.data.settings.LibrarySort
@@ -49,6 +50,7 @@ class MoviesViewModel @Inject constructor(
     playlistDao: PlaylistDao,
     private val metadata: MetadataRepository,
     private val settings: SettingsRepository,
+    visibility: CategoryVisibility,
 ) : ViewModel() {
 
     // Maste ligga fore categories: en egenskapsinitierare far inte
@@ -56,9 +58,16 @@ class MoviesViewModel @Inject constructor(
     private val preferences = settings.preferences
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AppPreferences())
 
+    /** Dolda kategoriers id:n. Deras innehall uteslut aven under "Alla". */
+    private val hiddenIds = visibility.hiddenIds(ContentKind.MOVIE)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val categories: StateFlow<List<CategoryEntity>> =
         preferences
-            .flatMapLatest { playlistDao.observeCategories(ContentKind.MOVIE, it.categorySort.code) }
+            .flatMapLatest { prefs ->
+                playlistDao.observeCategories(ContentKind.MOVIE, prefs.categorySort.code)
+                    .map { list -> list.filterNot { isCategoryHidden(it, prefs) } }
+            }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val sortLabel: StateFlow<String> = preferences
@@ -82,12 +91,26 @@ class MoviesViewModel @Inject constructor(
     }
 
     private val _selected = MutableStateFlow<Long?>(null)
-    val selected: StateFlow<Long?> = _selected.asStateFlow()
+
+    /**
+     * Doljs kategorin man star i blir valet "Alla" i stallet for en tom lista
+     * utan forklaring.
+     */
+    val selected: StateFlow<Long?> =
+        combine(_selected, hiddenIds) { id, hidden -> id?.takeIf { it !in hidden } }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val movies: StateFlow<List<PosterItem>> =
-        combine(_selected, preferences) { id, prefs -> id to prefs.librarySort }
-        .flatMapLatest { (categoryId, sort) ->
-            libraryDao.observeMovies(categoryId = categoryId, sort = sort.code, limit = 300)
+        combine(_selected, preferences, hiddenIds) { id, prefs, hidden ->
+            Triple(id?.takeIf { it !in hidden }, prefs.librarySort, hidden)
+        }
+        .flatMapLatest { (categoryId, sort, hidden) ->
+            libraryDao.observeMovies(
+                categoryId = categoryId,
+                sort = sort.code,
+                hiddenIds = hidden,
+                limit = 300,
+            )
         }
         .map { list ->
             list.map { movie ->
@@ -113,6 +136,7 @@ class MoviesViewModel @Inject constructor(
 @Composable
 fun MoviesScreen(
     onOpenMovie: (Long) -> Unit,
+    onManageCategories: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: MoviesViewModel = hiltViewModel(),
 ) {
@@ -128,8 +152,8 @@ fun MoviesScreen(
         EmptyState(
             modifier = modifier,
             title = "Inga filmer",
-            body = "Filmer kommer fran ett Xtream-konto. En vanlig M3U-fil " +
-                "innehaller sallan nagon filmdel.",
+            body = "Filmer kommer från ett Xtream-konto. En vanlig M3U-fil " +
+                "innehåller sällan någon filmdel.",
         )
         return
     }
@@ -154,6 +178,7 @@ fun MoviesScreen(
                 onCycleSort = viewModel::cycleSort,
                 categorySortLabel = categorySortLabel,
                 onCycleCategorySort = viewModel::cycleCategorySort,
+                onManage = onManageCategories,
                 modifier = Modifier.width(240.dp),
             )
             grid(Modifier)
@@ -167,6 +192,7 @@ fun MoviesScreen(
                 allLabel = "Alla",
                 sortLabel = sortLabel,
                 onCycleSort = viewModel::cycleSort,
+                onManage = onManageCategories,
                 modifier = Modifier.padding(horizontal = metrics.screenEdge),
             )
             grid(Modifier)

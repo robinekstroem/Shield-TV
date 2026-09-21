@@ -164,7 +164,7 @@ class XtreamImporter @Inject constructor(
                             else -> kept?.ratingSource
                         },
                         metadataId = kept?.metadataId,
-                        matchState = kept?.matchState ?: MatchState.UNMATCHED,
+                        matchState = keptMatchState(kept?.matchState, kept?.title, title),
                         addedUtc = stream.addedUtc,
                     )
                 }
@@ -215,7 +215,7 @@ class XtreamImporter @Inject constructor(
                         genres = series.genre,
                         trailerUrl = series.trailer,
                         metadataId = kept?.metadataId,
-                        matchState = kept?.matchState ?: MatchState.UNMATCHED,
+                        matchState = keptMatchState(kept?.matchState, kept?.title, title),
                     )
                 }
             )
@@ -254,6 +254,21 @@ class XtreamImporter @Inject constructor(
 }
 
 /**
+ * Vilken matchningsstatus en titel ska ha efter en synk.
+ *
+ * Har rensningen gett en annan titel an forra gangen gjordes forra
+ * matchningen pa fel strang — da ska den goras om. Ett manuellt val ar
+ * anvandarens beslut och ror vi aldrig.
+ */
+internal fun keptMatchState(previous: MatchState?, previousTitle: String?, title: String): MatchState =
+    when {
+        previous == null -> MatchState.UNMATCHED
+        previous == MatchState.MANUAL -> MatchState.MANUAL
+        previousTitle != title -> MatchState.UNMATCHED
+        else -> previous
+    }
+
+/**
  * "Gladiator (2000) 4K" → "Gladiator" + 2000.
  *
  * Årtalet är det som gör metadatamatchningen i Fas 6 säker: utan det blir
@@ -268,7 +283,13 @@ internal fun splitTitleAndYear(raw: String): Pair<String, Int?> {
 
     val cleaned = raw
         .replace(Regex("""[(\[]?(?:19|20)\d{2}[)\]]?"""), " ")
+        // Hakparenteser i IPTV-titlar ar nastan alltid taggar: [HD-Sub],
+        // [SE-AUDIO], [4K]. Att ta bort orden inuti och lamna skalen gav
+        // "Moana [ -Sub] [ -AUDIO] [ ]" — och den titeln matchar aldrig
+        // nagot hos TMDB, sa filmen fick heller aldrig nagot omslag.
+        .replace(Regex("""\[[^\]]*\]"""), " ")
         .replace(Regex("""(?i)\b(4k|uhd|fhd|hd|sd|hevc|h265|x265|multi|vf|vostfr)\b"""), " ")
+        .replace(Regex("""\(\s*\)"""), " ")
         .replace(Regex("""[._]+"""), " ")
         .replace(Regex(""" +"""), " ")
         .trim()

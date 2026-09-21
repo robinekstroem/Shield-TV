@@ -49,8 +49,14 @@ class SettingsRepository @Inject constructor(
             librarySort = map[LIBRARY_SORT].toEnum(LibrarySort.RECENT),
             channelSort = map[CHANNEL_SORT].toEnum(ChannelSort.PROVIDER),
             categorySort = map[CATEGORY_SORT].toEnum(CategorySort.PROVIDER),
+            theme = map[THEME].toEnum(ThemeChoice.NORRSKEN),
             textScale = map[TEXT_SCALE].toEnum(TextScale.MEDIUM),
-            accent = map[ACCENT].toEnum(AccentChoice.BLUE),
+            accent = map[ACCENT].toEnum(AccentChoice.THEME),
+            videoScale = map[VIDEO_SCALE].toEnum(VideoScale.FIT),
+            subtitleSize = map[SUBTITLE_SIZE].toEnum(SubtitleSize.NORMAL),
+            subtitleBackground = map[SUBTITLE_BG].toEnum(SubtitleBackground.SHADOW),
+            hiddenCategories = map[HIDDEN_CATEGORIES].toLines().toSet(),
+            hiddenKeywords = map[HIDDEN_KEYWORDS].toLines(),
             uiOpacity = map[UI_OPACITY]?.toIntOrNull()?.coerceIn(60, 100) ?: 100,
             tmdbKey = map[TMDB_KEY]?.takeIf { it.isNotBlank() },
             metadataLanguage = map[METADATA_LANGUAGE] ?: "sv-SE",
@@ -68,6 +74,36 @@ class SettingsRepository @Inject constructor(
     suspend fun setLibrarySort(value: LibrarySort) = put(LIBRARY_SORT, value.name)
     suspend fun setChannelSort(value: ChannelSort) = put(CHANNEL_SORT, value.name)
     suspend fun setCategorySort(value: CategorySort) = put(CATEGORY_SORT, value.name)
+    suspend fun setTheme(value: ThemeChoice) = put(THEME, value.name)
+    suspend fun setVideoScale(value: VideoScale) = put(VIDEO_SCALE, value.name)
+    suspend fun setSubtitleSize(value: SubtitleSize) = put(SUBTITLE_SIZE, value.name)
+    suspend fun setSubtitleBackground(value: SubtitleBackground) = put(SUBTITLE_BG, value.name)
+
+    suspend fun setCategoryHidden(key: String, hidden: Boolean) {
+        val current = current().hiddenCategories
+        val next = if (hidden) current + key else current - key
+        put(HIDDEN_CATEGORIES, next.joinToString(LINE))
+    }
+
+    /** Visar alla enskilt dolda kategorier med ett visst prefix (kalla + typ). */
+    suspend fun unhideCategoriesWithPrefix(prefix: String) {
+        val next = current().hiddenCategories.filterNot { it.startsWith(prefix) }
+        put(HIDDEN_CATEGORIES, next.joinToString(LINE))
+    }
+
+    suspend fun addHiddenKeyword(value: String) {
+        val word = value.trim()
+        if (word.isEmpty()) return
+        val current = current().hiddenKeywords
+        if (current.any { it.equals(word, ignoreCase = true) }) return
+        put(HIDDEN_KEYWORDS, (current + word).joinToString(LINE))
+    }
+
+    suspend fun removeHiddenKeyword(value: String) {
+        val next = current().hiddenKeywords.filterNot { it.equals(value, ignoreCase = true) }
+        put(HIDDEN_KEYWORDS, next.joinToString(LINE))
+    }
+
     suspend fun setTextScale(value: TextScale) = put(TEXT_SCALE, value.name)
     suspend fun setAccent(value: AccentChoice) = put(ACCENT, value.name)
     suspend fun setUiOpacity(value: Int) = put(UI_OPACITY, value.coerceIn(60, 100).toString())
@@ -95,6 +131,13 @@ class SettingsRepository @Inject constructor(
         const val LIBRARY_SORT = "sort.library"
         const val CHANNEL_SORT = "sort.channels"
         const val CATEGORY_SORT = "sort.categories"
+        const val THEME = "appearance.theme"
+        const val VIDEO_SCALE = "player.video_scale"
+        const val SUBTITLE_SIZE = "subtitles.size"
+        const val SUBTITLE_BG = "subtitles.background"
+        const val HIDDEN_CATEGORIES = "categories.hidden"
+        const val HIDDEN_KEYWORDS = "categories.hidden_keywords"
+        const val LINE = "\n"
         const val TEXT_SCALE = "appearance.text_scale"
         const val ACCENT = "appearance.accent"
         const val UI_OPACITY = "appearance.ui_opacity"
@@ -102,6 +145,9 @@ class SettingsRepository @Inject constructor(
         const val METADATA_LANGUAGE = "metadata.language"
     }
 }
+
+private fun String?.toLines(): List<String> =
+    this.orEmpty().split('\n').map { it.trim() }.filter { it.isNotEmpty() }
 
 private inline fun <reified T : Enum<T>> String?.toEnum(fallback: T): T =
     this?.let { runCatching { enumValueOf<T>(it) }.getOrNull() } ?: fallback

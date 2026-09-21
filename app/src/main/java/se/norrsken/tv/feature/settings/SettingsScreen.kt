@@ -41,7 +41,11 @@ import se.norrsken.tv.data.settings.ChannelSort
 import se.norrsken.tv.data.settings.LibrarySort
 import se.norrsken.tv.data.settings.BufferProfile
 import se.norrsken.tv.data.settings.DecoderMode
+import se.norrsken.tv.data.settings.SubtitleBackground
+import se.norrsken.tv.data.settings.SubtitleSize
 import se.norrsken.tv.data.settings.TextScale
+import se.norrsken.tv.data.settings.ThemeChoice
+import se.norrsken.tv.data.settings.VideoScale
 
 /** Strangarna leverantorer faktiskt filtrerar pa. */
 private val USER_AGENTS = listOf(
@@ -58,6 +62,7 @@ private enum class SourceForm(val label: String) {
 
 @Composable
 fun SettingsScreen(
+    onManageCategories: (String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: PlaylistsViewModel = hiltViewModel(),
 ) {
@@ -231,7 +236,7 @@ fun SettingsScreen(
         item {
             OptionRow(
                 title = "Buffert",
-                description = "Stor buffert ger stabilare bild, langsammare kanalbyte.",
+                description = "Stor buffert ger stabilare bild, långsammare kanalbyte.",
                 options = BufferProfile.entries,
                 selected = prefs.buffer,
                 label = { it.label },
@@ -241,7 +246,7 @@ fun SettingsScreen(
         item {
             OptionRow(
                 title = "Videoavkodare",
-                description = "Automatisk faller tillbaka till mjukvara nar hardvaran sager nej.",
+                description = "Automatisk faller tillbaka till mjukvara när hårdvaran säger nej.",
                 options = DecoderMode.entries,
                 selected = prefs.decoder,
                 label = { it.label },
@@ -251,15 +256,15 @@ fun SettingsScreen(
         item {
             ToggleRow(
                 title = "Matcha bildfrekvens",
-                description = "Byter skarmens frekvens nar det gar somlost. 25 fps pa 60 Hz ger annars ryck.",
+                description = "Byter skärmens frekvens när det går sömlöst. 25 fps på 60 Hz ger annars ryck.",
                 checked = prefs.matchFrameRate,
                 onChange = viewModel::setMatchFrameRate,
             )
         }
         item {
             ToggleRow(
-                title = "Foredra surroundljud",
-                description = "Valjer flerkanalsspar nar det finns. Enheten avgor om den klarar formatet.",
+                title = "Föredra surroundljud",
+                description = "Väljer flerkanalsspår när det finns. Enheten avgör om den klarar formatet.",
                 checked = prefs.preferSurround,
                 onChange = viewModel::setPreferSurround,
             )
@@ -267,7 +272,7 @@ fun SettingsScreen(
         item {
             OptionRow(
                 title = "User-Agent",
-                description = "Manga leverantorer svarar 403 om anropet inte ser ut som en spelare.",
+                description = "Många leverantörer svarar 403 om anropet inte ser ut som en spelare.",
                 // Ar det sparade vardet inte i listan laggs det till, i
                 // stallet for att raden visar nagon annans varde.
                 options = if (prefs.userAgent in USER_AGENTS) {
@@ -281,11 +286,54 @@ fun SettingsScreen(
             )
         }
 
+        item { SettingsHeader("Bild och undertext") }
+        item {
+            OptionRow(
+                title = "Bildformat",
+                description = "Zooma fyller skärmen och beskär kanterna. Byts även i spelaren.",
+                options = VideoScale.entries,
+                selected = prefs.videoScale,
+                label = { it.label },
+                onSelect = viewModel::setVideoScale,
+            )
+        }
+        item {
+            OptionRow(
+                title = "Undertextstorlek",
+                description = null,
+                options = SubtitleSize.entries,
+                selected = prefs.subtitleSize,
+                label = { it.label },
+                onSelect = viewModel::setSubtitleSize,
+            )
+        }
+        item {
+            OptionRow(
+                title = "Undertextstil",
+                description = "Kontur och skugga syns på alla bakgrunder. Ruta är tydligast men täcker mest.",
+                options = SubtitleBackground.entries,
+                selected = prefs.subtitleBackground,
+                label = { it.label },
+                onSelect = viewModel::setSubtitleBackground,
+            )
+        }
+
+        item { SettingsHeader("Kategorier") }
+        item {
+            LinkRow(
+                title = "Kanalkategorier",
+                description = "Dölj enskilda kategorier eller allt som innehåller ett ord.",
+                onClick = { onManageCategories("LIVE") },
+            )
+        }
+        item { LinkRow(title = "Filmkategorier", description = null, onClick = { onManageCategories("MOVIE") }) }
+        item { LinkRow(title = "Seriekategorier", description = null, onClick = { onManageCategories("SERIES") }) }
+
         item { SettingsHeader("Spelaren") }
         item {
             OptionRow(
                 title = "Infopanelens tid",
-                description = "Hur lange panelen visas innan den tonar bort.",
+                description = "Hur länge panelen visas innan den tonar bort.",
                 options = listOf(2, 4, 6, 10),
                 selected = prefs.infoPanelSeconds,
                 label = { "$it s" },
@@ -305,7 +353,7 @@ fun SettingsScreen(
         item {
             OptionRow(
                 title = "Filmer och serier",
-                description = "Populara pa TMDB kraver att titeln matchats. Omatchade hamnar sist.",
+                description = "Populära på TMDB kräver att titeln matchats. Omatchade hamnar sist.",
                 options = LibrarySort.entries,
                 selected = prefs.librarySort,
                 label = { it.label },
@@ -336,8 +384,18 @@ fun SettingsScreen(
         item { SettingsHeader("Utseende") }
         item {
             OptionRow(
+                title = "Tema",
+                description = "Ändrar bakgrund, ytor, accent, fokusglöd och rubrikstil.",
+                options = ThemeChoice.entries,
+                selected = prefs.theme,
+                label = { it.label },
+                onSelect = viewModel::setTheme,
+            )
+        }
+        item {
+            OptionRow(
                 title = "Textstorlek",
-                description = "Slar igenom i hela granssnittet direkt.",
+                description = "Slår igenom i hela gränssnittet direkt.",
                 options = TextScale.entries,
                 selected = prefs.textScale,
                 label = { it.label },
@@ -346,8 +404,8 @@ fun SettingsScreen(
         }
         item {
             OptionRow(
-                title = "Accentfarg",
-                description = "Progress, live-markor och markerat lage.",
+                title = "Accentfärg",
+                description = "Progress, live-markör och markerat läge.",
                 options = AccentChoice.entries,
                 selected = prefs.accent,
                 label = { it.label },
@@ -357,7 +415,7 @@ fun SettingsScreen(
         item {
             OptionRow(
                 title = "Ytornas genomskinlighet",
-                description = "Galler paneler och kort, aldrig texten.",
+                description = "Gäller paneler och kort, aldrig texten.",
                 options = listOf(100, 90, 80, 70),
                 selected = prefs.uiOpacity,
                 label = { "$it %" },
@@ -365,20 +423,20 @@ fun SettingsScreen(
             )
         }
 
-        item { SettingsHeader("Allmant") }
+        item { SettingsHeader("Allmänt") }
         item {
             ToggleRow(
-                title = "Bekrafta avslut",
-                description = "Tva tryck pa Back kravs. Back ar den knapp som trycks av misstag oftast.",
+                title = "Bekräfta avslut",
+                description = "Två tryck på Back krävs. Back är den knapp som trycks av misstag oftast.",
                 checked = prefs.confirmExit,
                 onChange = viewModel::setConfirmExit,
             )
         }
         item {
             UnavailableRow(
-                title = "TV-tabla, grupper, logotypkallor, sprak",
-                reason = "Byggs nar funktionerna bakom dem finns. Ett reglage " +
-                    "utan funktion ar samre an ingen rad alls.",
+                title = "TV-tablå, grupper, logotypkällor, språk",
+                reason = "Byggs när funktionerna bakom dem finns. Ett reglage " +
+                    "utan funktion är sämre än ingen rad alls.",
             )
         }
     }

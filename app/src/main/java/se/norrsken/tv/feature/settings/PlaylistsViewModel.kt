@@ -21,7 +21,11 @@ import se.norrsken.tv.data.settings.LibrarySort
 import se.norrsken.tv.data.settings.AppPreferences
 import se.norrsken.tv.data.settings.BufferProfile
 import se.norrsken.tv.data.settings.DecoderMode
+import se.norrsken.tv.data.settings.SubtitleBackground
+import se.norrsken.tv.data.settings.SubtitleSize
 import se.norrsken.tv.data.settings.TextScale
+import se.norrsken.tv.data.settings.ThemeChoice
+import se.norrsken.tv.data.settings.VideoScale
 import se.norrsken.tv.data.playlist.extractXtreamCredentials
 import se.norrsken.tv.data.playlist.normalizeBaseUrl
 import se.norrsken.tv.data.metadata.MetadataRepository
@@ -58,6 +62,10 @@ class PlaylistsViewModel @Inject constructor(
     fun setLibrarySort(value: LibrarySort) = edit { settings.setLibrarySort(value) }
     fun setChannelSort(value: ChannelSort) = edit { settings.setChannelSort(value) }
     fun setCategorySort(value: CategorySort) = edit { settings.setCategorySort(value) }
+    fun setTheme(value: ThemeChoice) = edit { settings.setTheme(value) }
+    fun setVideoScale(value: VideoScale) = edit { settings.setVideoScale(value) }
+    fun setSubtitleSize(value: SubtitleSize) = edit { settings.setSubtitleSize(value) }
+    fun setSubtitleBackground(value: SubtitleBackground) = edit { settings.setSubtitleBackground(value) }
     fun setTextScale(value: TextScale) = edit { settings.setTextScale(value) }
     fun setAccent(value: AccentChoice) = edit { settings.setAccent(value) }
     fun setUiOpacity(value: Int) = edit { settings.setUiOpacity(value) }

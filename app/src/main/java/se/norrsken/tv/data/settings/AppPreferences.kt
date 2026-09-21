@@ -30,9 +30,25 @@ data class AppPreferences(
     val categorySort: CategorySort = CategorySort.PROVIDER,
 
     // --- Utseende ---
+    val theme: ThemeChoice = ThemeChoice.NORRSKEN,
     val textScale: TextScale = TextScale.MEDIUM,
-    val accent: AccentChoice = AccentChoice.BLUE,
+    val accent: AccentChoice = AccentChoice.THEME,
     val uiOpacity: Int = 100,
+
+    // --- Bild och undertext ---
+    val videoScale: VideoScale = VideoScale.FIT,
+    val subtitleSize: SubtitleSize = SubtitleSize.NORMAL,
+    val subtitleBackground: SubtitleBackground = SubtitleBackground.SHADOW,
+
+    // --- Dolda kategorier ---
+    /**
+     * Enskilt dolda kategorier, nycklade pa kalla + typ + namn. Namn i
+     * stallet for databas-id: id:t byts vid varje uppdatering av
+     * spellistan, namnet gor det inte. Dolt forblir alltsa dolt.
+     */
+    val hiddenCategories: Set<String> = emptySet(),
+    /** Ord som doljer varje kategori vars namn innehaller dem. */
+    val hiddenKeywords: List<String> = emptyList(),
 
     // --- Metadata ---
     val tmdbKey: String? = null,
@@ -69,7 +85,7 @@ enum class BufferProfile(
  */
 enum class DecoderMode(val label: String, val allowFallback: Boolean) {
     AUTO("Automatisk", true),
-    HARDWARE_ONLY("Endast hardvara", false),
+    HARDWARE_ONLY("Endast hårdvara", false),
 }
 
 enum class TextScale(val label: String, val factor: Float) {
@@ -87,29 +103,59 @@ enum class TextScale(val label: String, val factor: Float) {
  */
 enum class LibrarySort(val label: String, val code: Int) {
     RECENT("Senast tillagda", 0),
-    TITLE("A-O", 1),
+    TITLE("A–Ö", 1),
     RATING("Betyg", 2),
     /**
      * TMDB:s globala popularitet. Betyder "populart i varlden", inte
      * "populart hos dig" — appen har ingen tittarhistorik an. Titlar som
      * inte matchats saknar vardet och hamnar sist.
      */
-    POPULAR("Populara pa TMDB", 3),
+    POPULAR("Populära på TMDB", 3),
 }
 
 enum class ChannelSort(val label: String, val code: Int) {
-    PROVIDER("Leverantorens ordning", 0),
-    NAME("A-O", 1),
+    PROVIDER("Leverantörens ordning", 0),
+    NAME("A–Ö", 1),
 }
 
 enum class CategorySort(val label: String, val code: Int) {
-    PROVIDER("Leverantorens ordning", 0),
-    NAME("A-O", 1),
+    PROVIDER("Leverantörens ordning", 0),
+    NAME("A–Ö", 1),
 }
 
+enum class ThemeChoice(val label: String) {
+    NORRSKEN("Norrsken"),
+    TITAN("Titan"),
+    MIDNIGHT("Midnatt"),
+}
+
+/**
+ * Hur bilden fyller skarmen. Ingen "Stracka": den forvranger bilden, och
+ * det finns ingen situation dar ett tillplattat ansikte ar ratt svar.
+ */
+enum class VideoScale(val label: String) {
+    FIT("Anpassa"),
+    ZOOM("Zooma"),
+}
+
+enum class SubtitleSize(val label: String, val factor: Float) {
+    SMALL("Liten", 0.8f),
+    NORMAL("Normal", 1.0f),
+    LARGE("Stor", 1.25f),
+    HUGE("Mycket stor", 1.5f),
+}
+
+enum class SubtitleBackground(val label: String) {
+    NONE("Kontur"),
+    SHADOW("Skugga"),
+    BOX("Ruta"),
+}
+
+/** [rgb] 0 betyder "anvand temats egen accent". */
 enum class AccentChoice(val label: String, val rgb: Long) {
-    BLUE("Isbla", 0xFF4C8DFF),
-    TEAL("Glaciar", 0xFF5FC9B8),
-    AMBER("Rav", 0xFFE0A34A),
+    THEME("Temats egen", 0L),
+    BLUE("Isblå", 0xFF4C8DFF),
+    TEAL("Glaciär", 0xFF5FC9B8),
+    AMBER("Bärnsten", 0xFFE0A34A),
     VIOLET("Norrsken", 0xFF9B7CFF),
 }

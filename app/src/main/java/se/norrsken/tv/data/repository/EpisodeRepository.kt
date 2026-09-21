@@ -35,12 +35,12 @@ class EpisodeRepository @Inject constructor(
         val series = libraryDao.seriesById(seriesId)
             ?: return@withContext "Serien finns inte kvar i biblioteket."
         val providerId = series.providerId?.toIntOrNull()
-            ?: return@withContext "Serien saknar id hos leverantoren."
+            ?: return@withContext "Serien saknar id hos leverantören."
 
         val playlist = playlistDao.byId(series.playlistId)
             ?: return@withContext "Kallan till serien ar borttagen."
         if (playlist.type != PlaylistType.XTREAM) {
-            return@withContext "Avsnitt kan bara hamtas fran ett Xtream-konto."
+            return@withContext "Avsnitt kan bara hämtas från ett Xtream-konto."
         }
 
         val credentials = credentialsFactory.forPlaylist(playlist)

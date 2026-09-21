@@ -8,7 +8,6 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
@@ -18,6 +17,8 @@ import se.norrsken.tv.data.db.dao.PlaylistDao
 import se.norrsken.tv.data.db.entity.CategoryEntity
 import se.norrsken.tv.data.db.entity.ChannelEntity
 import se.norrsken.tv.data.db.entity.ContentKind
+import se.norrsken.tv.data.repository.CategoryVisibility
+import se.norrsken.tv.data.repository.isCategoryHidden
 import se.norrsken.tv.data.settings.AppPreferences
 import se.norrsken.tv.data.settings.CategorySort
 import se.norrsken.tv.data.settings.ChannelSort
@@ -30,10 +31,14 @@ class LiveTvViewModel @Inject constructor(
     private val channelDao: ChannelDao,
     private val playlistDao: PlaylistDao,
     private val settings: SettingsRepository,
+    visibility: CategoryVisibility,
 ) : ViewModel() {
 
     private val preferences = settings.preferences
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AppPreferences())
+
+    private val hiddenIds = visibility.hiddenIds(ContentKind.LIVE)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun cycleChannelSort() {
         val order = ChannelSort.entries
@@ -62,12 +67,17 @@ class LiveTvViewModel @Inject constructor(
      */
     val categories: StateFlow<List<CategoryEntity>> =
         preferences
-            .flatMapLatest { playlistDao.observeCategories(ContentKind.LIVE, it.categorySort.code) }
+            .flatMapLatest { prefs ->
+                playlistDao.observeCategories(ContentKind.LIVE, prefs.categorySort.code)
+                    .map { list -> list.filterNot { isCategoryHidden(it, prefs) } }
+            }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _selected = MutableStateFlow<Long?>(null)
-    /** null = alla kanaler. */
-    val selected: StateFlow<Long?> = _selected.asStateFlow()
+    /** null = alla kanaler. En dold kategori blir "Alla", inte en tom lista. */
+    val selected: StateFlow<Long?> =
+        combine(_selected, hiddenIds) { id, hidden -> id?.takeIf { it !in hidden } }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /**
      * Taket på 500 gäller per kategori. Det är därför kategorierna spelar
@@ -75,11 +85,14 @@ class LiveTvViewModel @Inject constructor(
      * hålla i minnet på en TV-box. Paging kommer i Fas 8.
      */
     val channels: StateFlow<List<ChannelEntity>> =
-        combine(_selected, preferences) { categoryId, prefs -> categoryId to prefs.channelSort }
-            .flatMapLatest { (categoryId, sort) ->
+        combine(_selected, preferences, hiddenIds) { categoryId, prefs, hidden ->
+            Triple(categoryId?.takeIf { it !in hidden }, prefs.channelSort, hidden)
+        }
+            .flatMapLatest { (categoryId, sort, hidden) ->
                 channelDao.observeChannels(
                     categoryId = categoryId,
                     sort = sort.code,
+                    hiddenIds = hidden,
                     limit = CHANNEL_PAGE,
                 )
             }

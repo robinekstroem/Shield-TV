@@ -57,10 +57,8 @@ fun ContentRail(
     val metrics = LocalMetrics.current
 
     Column(modifier = modifier) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            color = palette.textPrimary,
+        SectionHeading(
+            title = title,
             modifier = Modifier.padding(
                 start = metrics.screenEdge,
                 bottom = metrics.spaceSm,
@@ -100,6 +98,7 @@ private fun RailCard(
             onClick = { onOpen(item) },
             focusScale = metrics.focusScalePoster,
             cornerRadius = metrics.radiusPoster,
+            glow = true,
             modifier = Modifier.fillMaxWidth().aspectRatio(ratio),
         ) { _ ->
             Box(Modifier.fillMaxSize()) {

@@ -34,6 +34,7 @@ fun CategoryColumn(
     onCycleSort: (() -> Unit)? = null,
     categorySortLabel: String? = null,
     onCycleCategorySort: (() -> Unit)? = null,
+    onManage: (() -> Unit)? = null,
 ) {
     val metrics = LocalMetrics.current
     LazyColumn(
@@ -45,6 +46,9 @@ fun CategoryColumn(
         }
         if (categorySortLabel != null && onCycleCategorySort != null) {
             item { SortChip("Kategorier", categorySortLabel, onCycleCategorySort) }
+        }
+        if (onManage != null) {
+            item { SortChip("Visa och dölj", "Hantera", onManage) }
         }
         item { CategoryChip(allLabel, selected == null) { onSelect(null) } }
         items(categories, key = { it.id }) { category ->
@@ -62,6 +66,7 @@ fun CategoryRow(
     modifier: Modifier = Modifier,
     sortLabel: String? = null,
     onCycleSort: (() -> Unit)? = null,
+    onManage: (() -> Unit)? = null,
 ) {
     val metrics = LocalMetrics.current
     LazyRow(
@@ -70,6 +75,9 @@ fun CategoryRow(
     ) {
         if (sortLabel != null && onCycleSort != null) {
             item { SortChip("Sortering", sortLabel, onCycleSort) }
+        }
+        if (onManage != null) {
+            item { SortChip("Visa och dölj", "Hantera", onManage) }
         }
         item { CategoryChip(allLabel, selected == null) { onSelect(null) } }
         items(categories, key = { it.id }) { category ->

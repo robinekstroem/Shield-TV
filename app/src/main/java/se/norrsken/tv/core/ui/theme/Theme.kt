@@ -10,6 +10,7 @@ import androidx.compose.ui.platform.LocalContext
 import se.norrsken.tv.core.device.DeviceProfile
 import se.norrsken.tv.core.device.LocalDeviceProfile
 import se.norrsken.tv.core.device.detectDeviceProfile
+import se.norrsken.tv.data.settings.AccentChoice
 import se.norrsken.tv.data.settings.AppPreferences
 
 /**
@@ -30,8 +31,16 @@ fun NorrskenTheme(
     val context = LocalContext.current
     val resolved = profile ?: remember(context) { detectDeviceProfile(context) }
 
-    val palette = remember(preferences.accent, preferences.uiOpacity) {
-        val base = Palette(signal = Color(preferences.accent.rgb))
+    val style = remember(preferences.theme) { styleFor(preferences.theme) }
+
+    val palette = remember(preferences.theme, preferences.accent, preferences.uiOpacity) {
+        val themed = paletteFor(preferences.theme)
+        // "Temats egen" behaller temats accent. Ett eget val skriver over den.
+        val base = if (preferences.accent == AccentChoice.THEME) {
+            themed
+        } else {
+            themed.copy(signal = Color(preferences.accent.rgb))
+        }
         if (preferences.uiOpacity >= 100) {
             base
         } else {
@@ -50,11 +59,11 @@ fun NorrskenTheme(
     val metrics = if (resolved.isTv) Metrics.Tv else Metrics.Handheld
     val motion = remember(reducedMotion) { Motion(reduced = reducedMotion) }
 
-    val typography = remember(resolved.isTv, preferences.textScale) {
+    val typography = remember(resolved.isTv, preferences.textScale, style) {
         if (resolved.isTv) {
-            tvTypography(preferences.textScale.factor)
+            tvTypography(preferences.textScale.factor, style.displayWeight, style.displayTrackingDelta)
         } else {
-            handheldTypography(preferences.textScale.factor)
+            handheldTypography(preferences.textScale.factor, style.displayWeight, style.displayTrackingDelta)
         }
     }
 
@@ -80,6 +89,7 @@ fun NorrskenTheme(
         LocalMotion provides motion,
         LocalDeviceProfile provides resolved,
         LocalPreferences provides preferences,
+        LocalThemeStyle provides style,
     ) {
         MaterialTheme(
             colorScheme = colorScheme,

@@ -30,6 +30,7 @@ interface ChannelDao {
         """
         SELECT * FROM channels
         WHERE hidden = 0 AND (:categoryId IS NULL OR categoryId = :categoryId)
+          AND (categoryId IS NULL OR categoryId NOT IN (:hiddenIds))
         ORDER BY
             CASE WHEN :sort = 0 THEN sortOrder END ASC,
             CASE WHEN :sort = 1 THEN LOWER(name) END ASC,
@@ -37,7 +38,12 @@ interface ChannelDao {
         LIMIT :limit
         """
     )
-    fun observeChannels(categoryId: Long?, sort: Int, limit: Int): Flow<List<ChannelEntity>>
+    fun observeChannels(
+        categoryId: Long?,
+        sort: Int,
+        hiddenIds: List<Long>,
+        limit: Int,
+    ): Flow<List<ChannelEntity>>
 
     @Query("SELECT * FROM channels WHERE hidden = 0 AND name LIKE '%' || :query || '%' ORDER BY name LIMIT :limit")
     suspend fun search(query: String, limit: Int): List<ChannelEntity>

@@ -28,6 +28,7 @@ interface LibraryDao {
         """
         SELECT * FROM movies
         WHERE (:categoryId IS NULL OR categoryId = :categoryId)
+          AND (categoryId IS NULL OR categoryId NOT IN (:hiddenIds))
         ORDER BY
             CASE WHEN :sort = 0 THEN addedUtc END DESC,
             CASE WHEN :sort = 1 THEN LOWER(title) END ASC,
@@ -37,12 +38,18 @@ interface LibraryDao {
         LIMIT :limit
         """
     )
-    fun observeMovies(categoryId: Long?, sort: Int, limit: Int): Flow<List<MovieEntity>>
+    fun observeMovies(
+        categoryId: Long?,
+        sort: Int,
+        hiddenIds: List<Long>,
+        limit: Int,
+    ): Flow<List<MovieEntity>>
 
     @Query(
         """
         SELECT * FROM series
         WHERE (:categoryId IS NULL OR categoryId = :categoryId)
+          AND (categoryId IS NULL OR categoryId NOT IN (:hiddenIds))
         ORDER BY
             CASE WHEN :sort = 0 THEN addedUtc END DESC,
             CASE WHEN :sort = 1 THEN LOWER(title) END ASC,
@@ -52,7 +59,12 @@ interface LibraryDao {
         LIMIT :limit
         """
     )
-    fun observeSeries(categoryId: Long?, sort: Int, limit: Int): Flow<List<SeriesEntity>>
+    fun observeSeries(
+        categoryId: Long?,
+        sort: Int,
+        hiddenIds: List<Long>,
+        limit: Int,
+    ): Flow<List<SeriesEntity>>
 
     @Query("SELECT COUNT(*) FROM movies")
     fun observeMovieCount(): Flow<Int>

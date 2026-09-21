@@ -1,25 +1,32 @@
 package se.norrsken.tv.feature.player
 
+import android.content.pm.ActivityInfo
 import android.view.ViewGroup
+import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -30,10 +37,13 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -41,31 +51,44 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.foundation.focusable
+import androidx.media3.ui.SubtitleView
 import kotlinx.coroutines.delay
+import se.norrsken.tv.core.device.LocalDeviceProfile
 import se.norrsken.tv.core.ui.component.FocusableSurface
 import se.norrsken.tv.core.ui.theme.LocalMetrics
-import se.norrsken.tv.core.ui.theme.LocalPreferences
 import se.norrsken.tv.core.ui.theme.LocalPalette
+import se.norrsken.tv.core.ui.theme.LocalPreferences
+import se.norrsken.tv.core.util.findActivity
+import se.norrsken.tv.data.settings.SubtitleBackground
+import se.norrsken.tv.data.settings.VideoScale
 import kotlin.math.max
 import kotlin.math.min
 
 private const val SEEK_STEP_MS = 10_000L
+
+private enum class Panel { NONE, AUDIO, SUBTITLES }
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -76,24 +99,30 @@ fun PlayerScreen(
 ) {
     val playable by viewModel.playable.collectAsStateWithLifecycle()
     val missing by viewModel.missing.collectAsStateWithLifecycle()
+    val preferences = LocalPreferences.current
+    val profile = LocalDeviceProfile.current
+    val context = LocalContext.current
+    val view = LocalView.current
 
     var error by remember { mutableStateOf<String?>(null) }
     var attempt by remember { mutableIntStateOf(0) }
     var controlsVisible by remember { mutableStateOf(true) }
-    // Varje tryck raknar upp den har. Utan den startar inte nedraakningen om
-    // nar anvandaren gor nagot, sa panelen kan forsvinna mitt i ett tryck.
+    // Varje handling raknar upp den har, sa nedrakningen borjar om.
     var interactions by remember { mutableIntStateOf(0) }
-    var isPlaying by remember { mutableStateOf(true) }
+    // playWhenReady, inte isPlaying: under buffring ar isPlaying falskt,
+    // och da visade knappen "Spela" och startade om i stallet for att pausa.
+    var playing by remember { mutableStateOf(true) }
     var position by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
+    var tracks by remember { mutableStateOf(Tracks.EMPTY) }
+    var panel by remember { mutableStateOf(Panel.NONE) }
 
-    val focusRequester = remember { FocusRequester() }
+    val rootFocus = remember { FocusRequester() }
+    val playFocus = remember { FocusRequester() }
+    val panelFocus = remember { FocusRequester() }
 
-    val preferences = LocalPreferences.current
-
-    // Nycklad pa de varden som kraver en ny spelare. Andrar anvandaren
-    // buffert eller avkodare byggs spelaren om — men bara da, sa ett byte av
-    // accentfarg inte avbryter sandningen.
+    // Byggs om bara nar ett val som styr sjalva motorn andras. Byte av
+    // accentfarg ska inte avbryta sandningen.
     val player = remember(
         preferences.buffer,
         preferences.decoder,
@@ -114,32 +143,59 @@ fun PlayerScreen(
                 if (state == Player.STATE_READY) error = null
             }
 
-            override fun onIsPlayingChanged(playing: Boolean) {
-                isPlaying = playing
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                playing = playWhenReady
+            }
+
+            override fun onTracksChanged(newTracks: Tracks) {
+                tracks = newTracks
             }
         }
         player.addListener(listener)
+        playing = player.playWhenReady
         onDispose {
             player.removeListener(listener)
             player.release()
         }
     }
 
-    // Utan det har fortsatter ljudet spelas nar anvandaren lamnar appen.
+    // Pausa nar appen hamnar i bakgrunden, annars fortsatter ljudet.
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, player) {
         val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_STOP -> player.pause()
-                else -> Unit
-            }
+            if (event == Lifecycle.Event.ON_STOP) player.pause()
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // player maste vara nyckel: andras en uppspelningsinstallning byggs
-    // spelaren om, och den nya har inget medium forran det har koret om.
+    // Helskarm. Utan den ritade Android sitt navigeringsfalt rakt ovanpa
+    // knapparna — Pausa lag under Hem-knappen, sa ett tryck pa Pausa var ett
+    // tryck pa Hem.
+    DisposableEffect(view) {
+        val window = context.findActivity()?.window
+        val controller = window?.let { WindowCompat.getInsetsController(it, view) }
+        controller?.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        controller?.hide(WindowInsetsCompat.Type.systemBars())
+        onDispose { controller?.show(WindowInsetsCompat.Type.systemBars()) }
+    }
+
+    // Liggande pa telefon. En film i portratt tar en tredjedel av skarmen.
+    // Pa TV finns ingen orientering att byta.
+    DisposableEffect(profile.isTv) {
+        val activity = context.findActivity()
+        val previous = activity?.requestedOrientation
+        if (!profile.isTv) {
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
+        onDispose {
+            if (!profile.isTv && activity != null && previous != null) {
+                activity.requestedOrientation = previous
+            }
+        }
+    }
+
     LaunchedEffect(player, playable?.url, attempt) {
         val url = playable?.url ?: return@LaunchedEffect
         error = null
@@ -147,17 +203,6 @@ fun PlayerScreen(
         player.prepare()
     }
 
-    LaunchedEffect(Unit) {
-        // Samma falla som i sidomenyn: LaunchedEffect startar fore layouten,
-        // och requestFocus mot en omonterad nod kastar. Har hade det blivit
-        // en krasch i stallet for bara utebliven fokus.
-        withFrameNanos { }
-        runCatching { focusRequester.requestFocus() }
-    }
-
-    // Positionen pollas bara for film och avsnitt. For live finns ingen
-    // position att visa, och att fraga efter den varje halvsekund vore
-    // arbete for ingenting.
     val isLive = playable?.isLive != false
     LaunchedEffect(player, isLive, playable?.url) {
         if (isLive) return@LaunchedEffect
@@ -168,12 +213,29 @@ fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(controlsVisible, interactions, preferences.infoPanelSeconds) {
-        if (controlsVisible) {
+    // Panelen tonar bort — men inte medan ett sparval ar oppet.
+    LaunchedEffect(controlsVisible, interactions, panel, preferences.infoPanelSeconds) {
+        if (controlsVisible && panel == Panel.NONE) {
             delay(preferences.infoPanelSeconds * 1000L)
             controlsVisible = false
         }
     }
+
+    // Fokus maste alltid ha ett hem. Nar panelen doljs forsvinner knappen som
+    // hade fokus, och utan att ta tillbaka det gar fjarrkontrollen dod.
+    LaunchedEffect(controlsVisible, panel) {
+        withFrameNanos { }
+        runCatching {
+            when {
+                panel != Panel.NONE -> panelFocus.requestFocus()
+                controlsVisible && profile.isTv -> playFocus.requestFocus()
+                !controlsVisible -> rootFocus.requestFocus()
+            }
+        }
+    }
+
+    // Back stanger ett oppet sparval innan det lamnar spelaren.
+    BackHandler(enabled = panel != Panel.NONE) { panel = Panel.NONE }
 
     fun touched() {
         controlsVisible = true
@@ -181,48 +243,49 @@ fun PlayerScreen(
     }
 
     fun togglePlayback() {
-        if (player.isPlaying) player.pause() else player.play()
+        if (player.playWhenReady) player.pause() else player.play()
         touched()
     }
 
     fun seekBy(deltaMs: Long) {
         if (isLive) return
-        val target = player.currentPosition + deltaMs
         val end = max(0L, player.duration)
-        player.seekTo(if (end > 0) min(max(0L, target), end) else max(0L, target))
+        val target = max(0L, player.currentPosition + deltaMs)
+        player.seekTo(if (end > 0) min(target, end) else target)
         touched()
     }
+
+    val audio = audioOptions(tracks)
+    val subtitles = subtitleOptions(tracks)
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
-            .focusRequester(focusRequester)
+            .focusRequester(rootFocus)
             .focusable()
             .onKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                // Mediaknappar pa fjarren fungerar alltid, oavsett panel.
                 when (event.key) {
-                    Key.DirectionCenter, Key.Enter, Key.Spacebar -> {
-                        if (controlsVisible) togglePlayback() else touched()
-                        true
+                    Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> {
+                        togglePlayback(); return@onKeyEvent true
                     }
-
-                    Key.DirectionLeft -> {
-                        seekBy(-SEEK_STEP_MS)
-                        touched()
-                        !isLive
-                    }
-
-                    Key.DirectionRight -> {
-                        seekBy(SEEK_STEP_MS)
-                        touched()
-                        !isLive
-                    }
-
-                    else -> {
-                        touched()
-                        false
-                    }
+                    Key.MediaFastForward -> { seekBy(SEEK_STEP_MS); return@onKeyEvent true }
+                    Key.MediaRewind -> { seekBy(-SEEK_STEP_MS); return@onKeyEvent true }
+                }
+                // Med panelen synlig styr D-paden knapparna, inte spolningen.
+                // Annars gick det inte att flytta fokus mellan knapparna —
+                // vanster och hoger spolade i stallet.
+                if (panel != Panel.NONE) return@onKeyEvent false
+                if (controlsVisible) {
+                    touched()
+                    return@onKeyEvent false
+                }
+                when (event.key) {
+                    Key.DirectionLeft -> { seekBy(-SEEK_STEP_MS); true }
+                    Key.DirectionRight -> { seekBy(SEEK_STEP_MS); true }
+                    else -> { touched(); true }
                 }
             },
     ) {
@@ -230,9 +293,6 @@ fun PlayerScreen(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 PlayerView(ctx).apply {
-                    // Egna kontroller. PlayerViews standardpanel ritar en
-                    // scrub-bar aven for live, dar den inte betyder nagot —
-                    // ra TS-strommar har ingen kand langd, sa faltet hoppar.
                     useController = false
                     keepScreenOn = true
                     layoutParams = ViewGroup.LayoutParams(
@@ -241,38 +301,57 @@ fun PlayerScreen(
                     )
                 }
             },
-            // factory kors bara en gang. Utan update-blocket pekade vyn kvar
-            // pa den gamla spelaren efter varje installningsandring — alltsa
-            // pa en instans som redan slappts.
-            update = { view -> view.player = player },
-            onRelease = { view -> view.player = null },
+            // factory kors bara en gang. Utan update pekade vyn kvar pa den
+            // slappta spelaren efter ett installningsbyte.
+            update = { view ->
+                view.player = player
+                view.resizeMode = if (preferences.videoScale == VideoScale.ZOOM) {
+                    AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                } else {
+                    AspectRatioFrameLayout.RESIZE_MODE_FIT
+                }
+                view.subtitleView?.apply {
+                    // Var stil vinner over strommens egen. Annars kan en fil
+                    // med inbaddad gul text i Comic Sans kora over valet.
+                    setApplyEmbeddedStyles(false)
+                    setApplyEmbeddedFontSizes(false)
+                    setFractionalTextSize(
+                        SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * preferences.subtitleSize.factor
+                    )
+                    setStyle(captionStyle(preferences.subtitleBackground))
+                    // Undertexten lyfts nar kontrollerna syns, annars hamnar
+                    // repliken bakom knapparna.
+                    setBottomPaddingFraction(
+                        if (controlsVisible) 0.30f else SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION
+                    )
+                }
+            },
+            onRelease = { it.player = null },
         )
 
-        // Egen tryckyta ovanpa videon i stallet for pa rot-Boxen: PlayerView
-        // ar en Android-vy och kan sluka beroringar innan Compose ser dem.
-        // Knapparna nedan ligger senare i Boxen och far darfor tryck forst.
+        // Tryckyta ovanpa videon. PlayerView ar en Android-vy och kan sluka
+        // beroringar innan Compose ser dem.
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(Unit) {
+                .pointerInput(isLive) {
                     detectTapGestures(
                         onTap = {
-                            if (controlsVisible) controlsVisible = false else touched()
+                            if (panel != Panel.NONE) {
+                                panel = Panel.NONE
+                            } else if (controlsVisible) {
+                                controlsVisible = false
+                            } else {
+                                touched()
+                            }
                         },
                         onDoubleTap = { offset ->
-                            // Dubbeltryck vanster/hoger halva spolar, som i de
-                            // flesta spelare. Bara for film — live har ingen
-                            // position att spola i.
                             if (!isLive) {
-                                if (offset.x < size.width / 2f) {
-                                    seekBy(-SEEK_STEP_MS)
-                                } else {
-                                    seekBy(SEEK_STEP_MS)
-                                }
+                                seekBy(if (offset.x < size.width / 2f) -SEEK_STEP_MS else SEEK_STEP_MS)
                             }
                         },
                     )
-                }
+                },
         )
 
         AnimatedVisibility(
@@ -281,24 +360,54 @@ fun PlayerScreen(
             exit = fadeOut(),
         ) {
             Controls(
-                showClock = preferences.showClock,
                 title = playable?.title.orEmpty(),
                 subtitle = playable?.subtitle,
                 isLive = isLive,
-                isPlaying = isPlaying,
+                playing = playing,
                 position = position,
                 duration = duration,
+                showClock = preferences.showClock,
+                hasAudioChoice = audio.size > 1,
+                hasSubtitles = subtitles.size > 1,
+                videoScaleLabel = preferences.videoScale.label,
+                onVideoScale = {
+                    viewModel.cycleVideoScale(preferences.videoScale)
+                    touched()
+                },
+                playFocus = playFocus,
                 onPlayPause = { togglePlayback() },
                 onSeekBack = { seekBy(-SEEK_STEP_MS) },
                 onSeekForward = { seekBy(SEEK_STEP_MS) },
+                onAudio = { panel = Panel.AUDIO; touched() },
+                onSubtitles = { panel = Panel.SUBTITLES; touched() },
                 onBack = onBack,
+            )
+        }
+
+        if (panel != Panel.NONE) {
+            val isAudio = panel == Panel.AUDIO
+            TrackPicker(
+                title = if (isAudio) "Ljud" else "Undertext",
+                options = if (isAudio) audio else subtitles,
+                firstFocus = panelFocus,
+                onPick = { option ->
+                    selectTrack(
+                        player = player,
+                        type = if (isAudio) C.TRACK_TYPE_AUDIO else C.TRACK_TYPE_TEXT,
+                        option = option,
+                    )
+                    panel = Panel.NONE
+                    touched()
+                },
+                onClose = { panel = Panel.NONE },
+                modifier = Modifier.align(Alignment.CenterEnd),
             )
         }
 
         if (missing) {
             PlayerMessage(
                 title = "Hittades inte",
-                message = "Innehallet finns inte kvar i biblioteket. Uppdatera spellistan.",
+                message = "Innehållet finns inte kvar i biblioteket. Uppdatera spellistan.",
                 onRetry = null,
                 onBack = onBack,
             )
@@ -317,159 +426,196 @@ fun PlayerScreen(
 
 @Composable
 private fun Controls(
-    showClock: Boolean,
     title: String,
     subtitle: String?,
     isLive: Boolean,
-    isPlaying: Boolean,
+    playing: Boolean,
     position: Long,
     duration: Long,
+    showClock: Boolean,
+    hasAudioChoice: Boolean,
+    hasSubtitles: Boolean,
+    videoScaleLabel: String,
+    onVideoScale: () -> Unit,
+    playFocus: FocusRequester,
     onPlayPause: () -> Unit,
     onSeekBack: () -> Unit,
     onSeekForward: () -> Unit,
+    onAudio: () -> Unit,
+    onSubtitles: () -> Unit,
     onBack: () -> Unit,
 ) {
     val palette = LocalPalette.current
     val metrics = LocalMetrics.current
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(metrics.screenEdge),
-        verticalArrangement = Arrangement.Bottom,
-    ) {
-        if (showClock) {
-            var now by remember { mutableStateOf(System.currentTimeMillis()) }
-            LaunchedEffect(Unit) {
-                // Panelen kan sta uppe i tio sekunder. En klocka som visar
-                // tiden da den oppnades ar samre an ingen klocka.
-                while (true) {
-                    now = System.currentTimeMillis()
-                    delay(10_000)
-                }
-            }
-            Text(
-                text = remember(now / 60_000) {
-                    java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-                        .format(java.util.Date(now))
-                },
-                style = MaterialTheme.typography.labelMedium,
-                color = palette.textSecondary,
-                modifier = Modifier.padding(bottom = metrics.spaceSm),
-            )
-        }
-
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(metrics.spaceSm),
-        ) {
-            if (isLive) {
-                Box(
-                    Modifier
-                        .size(10.dp)
-                        .background(palette.signal, CircleShape)
-                )
-                Text(
-                    text = "LIVE",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = palette.signal,
-                )
-            } else {
-                Text(
-                    text = if (isPlaying) "Spelar" else "Pausad",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = palette.textSecondary,
-                )
-            }
-        }
-
-        Text(
-            text = title,
-            style = MaterialTheme.typography.headlineMedium,
-            color = palette.textPrimary,
+    Box(Modifier.fillMaxSize()) {
+        // Tva mjuka gradienter i stallet for en gra panel: texten blir
+        // lasbar och resten av bilden syns.
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(140.dp)
+                .align(Alignment.TopCenter)
+                .background(Brush.verticalGradient(listOf(Color(0xB3000000), Color.Transparent)))
         )
-        if (subtitle != null) {
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodyLarge,
-                color = palette.textSecondary,
-            )
-        }
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(260.dp)
+                .align(Alignment.BottomCenter)
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xE6000000))))
+        )
 
-        // Tidslinjen finns bara nar det finns en tid. For live ritas ingen
-        // tom rand i stallet — den vore ren losning.
-        if (!isLive && duration > 0) {
-            Row(
-                modifier = Modifier.padding(top = metrics.spaceMd),
-                horizontalArrangement = Arrangement.spacedBy(metrics.spaceSm),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = formatTime(position),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = palette.textSecondary,
-                )
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .height(4.dp)
-                        .background(palette.hairline, RoundedCornerShape(2.dp))
+        // safeDrawingPadding haller knapparna fria fran systemfalt och
+        // kamerahal — aven de ganger falten tillfalligt dras fram.
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .safeDrawingPadding()
+                .padding(metrics.screenEdge),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ControlButton(label = "Tillbaka", onClick = onBack)
+                Spacer(Modifier.weight(1f))
+                if (showClock) {
+                    Clock(modifier = Modifier.padding(end = metrics.spaceMd))
+                }
+                if (hasAudioChoice) {
+                    ControlButton(label = "Ljud", onClick = onAudio)
+                    Spacer(Modifier.width(metrics.spaceSm))
+                }
+                if (hasSubtitles) {
+                    ControlButton(label = "Undertext", onClick = onSubtitles)
+                    Spacer(Modifier.width(metrics.spaceSm))
+                }
+                ControlButton(label = "Bild: $videoScaleLabel", onClick = onVideoScale)
+            }
+
+            Spacer(Modifier.weight(1f))
+
+            if (isLive) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(metrics.spaceSm),
                 ) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth(
-                                (position.toFloat() / duration).coerceIn(0f, 1f)
-                            )
-                            .height(4.dp)
-                            .background(palette.signal, RoundedCornerShape(2.dp))
+                    Box(Modifier.size(10.dp).background(palette.signal, CircleShape))
+                    Text(
+                        text = "LIVE",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = palette.signal,
                     )
                 }
+            }
+
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineMedium,
+                color = palette.textPrimary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (subtitle != null) {
                 Text(
-                    text = formatTime(duration),
-                    style = MaterialTheme.typography.labelMedium,
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyLarge,
                     color = palette.textSecondary,
                 )
             }
-        }
 
-        // Knapparna finns for att panelen tidigare bara hade text. Pa en
-        // telefon fanns det darfor ingen paus alls — och nar panelen tonat
-        // bort ingen vag att fa tillbaka den.
-        Row(
-            modifier = Modifier.padding(top = metrics.spaceMd),
-            horizontalArrangement = Arrangement.spacedBy(metrics.spaceSm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ControlButton(label = "Tillbaka", onClick = onBack)
-            if (!isLive) {
-                ControlButton(label = "−10 s", onClick = onSeekBack)
+            // Tidslinjen finns bara nar det finns en tid. Live har ingen.
+            if (!isLive && duration > 0) {
+                Row(
+                    modifier = Modifier.padding(top = metrics.spaceMd),
+                    horizontalArrangement = Arrangement.spacedBy(metrics.spaceSm),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = formatTime(position),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = palette.textSecondary,
+                    )
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .height(4.dp)
+                            .background(palette.hairline, RoundedCornerShape(2.dp))
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth((position.toFloat() / duration).coerceIn(0f, 1f))
+                                .fillMaxHeight()
+                                .background(palette.signal, RoundedCornerShape(2.dp))
+                        )
+                    }
+                    Text(
+                        text = formatTime(duration),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = palette.textSecondary,
+                    )
+                }
             }
-            ControlButton(
-                label = if (isPlaying) "Pausa" else "Spela",
-                onClick = onPlayPause,
-            )
-            if (!isLive) {
-                ControlButton(label = "+10 s", onClick = onSeekForward)
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = metrics.spaceMd),
+                horizontalArrangement = Arrangement.spacedBy(
+                    metrics.spaceMd,
+                    Alignment.CenterHorizontally,
+                ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (!isLive) ControlButton(label = "-10 s", onClick = onSeekBack)
+                ControlButton(
+                    label = if (playing) "Pausa" else "Spela",
+                    onClick = onPlayPause,
+                    modifier = Modifier.focusRequester(playFocus),
+                )
+                if (!isLive) ControlButton(label = "+10 s", onClick = onSeekForward)
             }
         }
     }
 }
 
+@Composable
+private fun Clock(modifier: Modifier = Modifier) {
+    val palette = LocalPalette.current
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = System.currentTimeMillis()
+            delay(10_000)
+        }
+    }
+    val text = remember(now / 60_000) {
+        java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(now))
+    }
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleMedium,
+        color = palette.textSecondary,
+        modifier = modifier,
+    )
+}
+
 /**
- * En knapp som bade gar att trycka pa och att na med D-pad.
- *
- * Text i stallet for ikoner: Materials karnuppsattning saknar en pausikon,
- * och en blandning av ikoner och text hade sett ut som ett misstag.
+ * Samma knapp for finger och fjarrkontroll. Text i stallet for ikoner:
+ * Materials karnuppsattning saknar en pausikon.
  */
 @Composable
-private fun ControlButton(label: String, onClick: () -> Unit) {
+private fun ControlButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val palette = LocalPalette.current
     val metrics = LocalMetrics.current
 
     FocusableSurface(
         onClick = onClick,
-        focusScale = 1.04f,
+        focusScale = 1.06f,
         cornerRadius = metrics.radiusCard,
+        modifier = modifier,
     ) { focused ->
         Text(
             text = label,
@@ -480,6 +626,76 @@ private fun ControlButton(label: String, onClick: () -> Unit) {
                 vertical = metrics.spaceSm,
             ),
         )
+    }
+}
+
+@Composable
+private fun TrackPicker(
+    title: String,
+    options: List<TrackOption>,
+    firstFocus: FocusRequester,
+    onPick: (TrackOption) -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val palette = LocalPalette.current
+    val metrics = LocalMetrics.current
+
+    Column(
+        modifier = modifier
+            .fillMaxHeight()
+            .width(340.dp)
+            .background(Color(0xF20A0C10))
+            .safeDrawingPadding()
+            .padding(metrics.spaceLg),
+        verticalArrangement = Arrangement.spacedBy(metrics.spaceSm),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.headlineMedium,
+            color = palette.textPrimary,
+        )
+
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(metrics.spaceXs),
+        ) {
+            itemsIndexed(options) { index, option ->
+                FocusableSurface(
+                    onClick = { onPick(option) },
+                    focusScale = 1f,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(if (index == 0) Modifier.focusRequester(firstFocus) else Modifier),
+                ) { focused ->
+                    Row(
+                        modifier = Modifier.padding(metrics.spaceMd),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(metrics.spaceMd),
+                    ) {
+                        Box(
+                            Modifier
+                                .size(8.dp)
+                                .background(
+                                    if (option.selected) palette.signal else Color.Transparent,
+                                    CircleShape,
+                                )
+                        )
+                        Text(
+                            text = option.label,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = when {
+                                focused -> palette.focus
+                                option.selected -> palette.textPrimary
+                                else -> palette.textSecondary
+                            },
+                        )
+                    }
+                }
+            }
+        }
+
+        ControlButton(label = "Stäng", onClick = onClose)
     }
 }
 
@@ -500,7 +716,7 @@ private fun PlayerMessage(
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(metrics.spaceMd),
-            modifier = Modifier.padding(metrics.screenEdge),
+            modifier = Modifier.safeDrawingPadding().padding(metrics.screenEdge),
         ) {
             Text(
                 text = title,
@@ -512,23 +728,33 @@ private fun PlayerMessage(
                 style = MaterialTheme.typography.bodyLarge,
                 color = palette.textSecondary,
             )
-            if (onRetry != null) {
-                Button(
-                    onClick = onRetry,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = palette.surfaceRaised,
-                        contentColor = palette.textPrimary,
-                    ),
-                ) { Text("Forsok igen") }
+            Row(horizontalArrangement = Arrangement.spacedBy(metrics.spaceMd)) {
+                if (onRetry != null) ControlButton(label = "Försök igen", onClick = onRetry)
+                ControlButton(label = "Tillbaka", onClick = onBack)
             }
-            Button(
-                onClick = onBack,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = palette.surface,
-                    contentColor = palette.textSecondary,
-                ),
-            ) { Text("Tillbaka") }
         }
+    }
+}
+
+/**
+ * Undertextens utseende. Vit text alltid — den enda farg som syns pa
+ * bade natt och snö. Det som skiljer ar hur texten skiljs fran bilden.
+ */
+@OptIn(UnstableApi::class)
+private fun captionStyle(background: SubtitleBackground): CaptionStyleCompat {
+    val white = 0xFFFFFFFF.toInt()
+    val black = 0xFF000000.toInt()
+    val clear = 0x00000000
+    return when (background) {
+        SubtitleBackground.NONE -> CaptionStyleCompat(
+            white, clear, clear, CaptionStyleCompat.EDGE_TYPE_OUTLINE, black, null,
+        )
+        SubtitleBackground.SHADOW -> CaptionStyleCompat(
+            white, clear, clear, CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW, black, null,
+        )
+        SubtitleBackground.BOX -> CaptionStyleCompat(
+            white, 0xB3000000.toInt(), clear, CaptionStyleCompat.EDGE_TYPE_NONE, clear, null,
+        )
     }
 }
 
@@ -544,31 +770,25 @@ private fun formatTime(ms: Long): String {
     }
 }
 
-/**
- * Ra ExoPlayer-fel sager ingenting for en anvandare.
- */
 @OptIn(UnstableApi::class)
 private fun explain(e: PlaybackException): String = when (e.errorCode) {
     PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
     PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
-    ->
-        "Ingen kontakt med servern. Kontrollera natverket."
+    -> "Ingen kontakt med servern. Kontrollera nätverket."
 
     PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ->
-        "Servern nekade strommen. Abonnemanget kan vara slut, eller sa ar " +
-            "max antal samtidiga anslutningar natt."
+        "Servern nekade strömmen. Abonnemanget kan vara slut, eller så är " +
+            "max antal samtidiga anslutningar nått."
 
     PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE,
     PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
     PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
-    ->
-        "Strommen svarade med nagot som inte gar att spela. Kanalen kan " +
-            "vara nere hos leverantoren."
+    -> "Strömmen svarade med något som inte går att spela. Kanalen kan " +
+        "vara nere hos leverantören."
 
     PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
     PlaybackException.ERROR_CODE_DECODING_FAILED,
-    ->
-        "Enheten klarar inte det har formatet."
+    -> "Enheten klarar inte det här formatet."
 
     else -> "Gick inte att spela (kod ${e.errorCode})."
 }

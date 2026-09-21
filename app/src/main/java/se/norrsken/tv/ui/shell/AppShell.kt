@@ -20,6 +20,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import se.norrsken.tv.core.device.LocalDeviceProfile
 import se.norrsken.tv.core.ui.theme.LocalPalette
+import se.norrsken.tv.feature.categories.CategoryManagerScreen
 import se.norrsken.tv.feature.favorites.FavoritesScreen
 import se.norrsken.tv.feature.guide.GuideScreen
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -116,6 +117,13 @@ private fun currentDestination(navController: NavHostController): Destination {
         // "Hem" nar man stod pa en seriesida.
         ?: when {
             route?.startsWith(SERIES_ROUTE) == true -> Destination.Series
+            // Hanteringsskarmen hor till den avdelning man kom ifran. Rutten
+            // ar monstret, inte vardet, sa typen avgors av argumentet.
+            route?.startsWith(CATEGORIES_ROUTE) == true -> when (entry?.arguments?.getString("kind")) {
+                "LIVE" -> Destination.LiveTv
+                "SERIES" -> Destination.Series
+                else -> Destination.Movies
+            }
             else -> Destination.Home
         }
 }
@@ -136,22 +144,36 @@ private fun AppNavHost(navController: NavHostController) {
         composable(Destination.LiveTv.route) {
             LiveTvScreen(
                 onOpenChannel = { id -> navController.play(PlayableKind.CHANNEL, id) },
+                onManageCategories = { navController.navigate(CATEGORIES_ROUTE + "LIVE") },
             )
         }
         composable(Destination.Guide.route) { GuideScreen() }
         composable(Destination.Movies.route) {
             MoviesScreen(
                 onOpenMovie = { id -> navController.play(PlayableKind.MOVIE, id) },
+                onManageCategories = { navController.navigate(CATEGORIES_ROUTE + "MOVIE") },
             )
         }
         composable(Destination.Series.route) {
             SeriesScreen(
                 onOpenSeries = { id -> navController.navigate(SERIES_ROUTE + id) },
+                onManageCategories = { navController.navigate(CATEGORIES_ROUTE + "SERIES") },
             )
         }
         composable(Destination.Favorites.route) { FavoritesScreen() }
         composable(Destination.Search.route) { SearchScreen() }
-        composable(Destination.Settings.route) { SettingsScreen() }
+        composable(Destination.Settings.route) {
+            SettingsScreen(
+                onManageCategories = { kind -> navController.navigate(CATEGORIES_ROUTE + kind) },
+            )
+        }
+
+        composable(
+            route = CATEGORIES_ROUTE + "{kind}",
+            arguments = listOf(navArgument("kind") { type = NavType.StringType }),
+        ) {
+            CategoryManagerScreen()
+        }
 
         composable(
             route = SERIES_ROUTE + "{seriesId}",
@@ -180,3 +202,4 @@ private fun NavHostController.play(kind: PlayableKind, id: Long) {
 
 private const val PLAYER_ROUTE = "player/"
 private const val SERIES_ROUTE = "series-detail/"
+private const val CATEGORIES_ROUTE = "categories/"

@@ -35,6 +35,7 @@ import se.norrsken.tv.data.db.entity.ChannelEntity
 @Composable
 fun LiveTvScreen(
     onOpenChannel: (Long) -> Unit,
+    onManageCategories: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: LiveTvViewModel = hiltViewModel(),
 ) {
@@ -69,6 +70,7 @@ fun LiveTvScreen(
                 onCycleSort = viewModel::cycleChannelSort,
                 categorySortLabel = categorySortLabel,
                 onCycleCategorySort = viewModel::cycleCategorySort,
+                onManage = onManageCategories,
                 modifier = Modifier.width(240.dp),
             )
             ChannelList(
@@ -86,6 +88,7 @@ fun LiveTvScreen(
                 allLabel = "Alla",
                 sortLabel = sortLabel,
                 onCycleSort = viewModel::cycleChannelSort,
+                onManage = onManageCategories,
             )
             ChannelList(
                 channels = channels,
@@ -126,7 +129,7 @@ private fun ListTruncated() {
     val palette = LocalPalette.current
     val metrics = LocalMetrics.current
     Text(
-        text = "Visar de forsta $CHANNEL_PAGE. Valj en kategori for att se fler.",
+        text = "Visar de första $CHANNEL_PAGE. Välj en kategori för att se fler.",
         style = MaterialTheme.typography.labelMedium,
         color = palette.textTertiary,
         modifier = Modifier.padding(metrics.spaceMd),

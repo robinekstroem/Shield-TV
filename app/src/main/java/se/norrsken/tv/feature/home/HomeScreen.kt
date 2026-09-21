@@ -15,6 +15,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -26,7 +27,9 @@ import se.norrsken.tv.core.ui.component.RailItem
 import se.norrsken.tv.core.ui.theme.LocalMetrics
 import se.norrsken.tv.data.db.dao.ChannelDao
 import se.norrsken.tv.data.db.dao.LibraryDao
+import se.norrsken.tv.data.db.entity.ContentKind
 import se.norrsken.tv.data.metadata.MetadataRepository
+import se.norrsken.tv.data.repository.CategoryVisibility
 import se.norrsken.tv.data.settings.ChannelSort
 import se.norrsken.tv.data.settings.LibrarySort
 import javax.inject.Inject
@@ -41,11 +44,13 @@ data class HomeState(
         get() = movies.isEmpty() && series.isEmpty() && channels.isEmpty()
 }
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     libraryDao: LibraryDao,
     channelDao: ChannelDao,
     private val metadata: MetadataRepository,
+    visibility: CategoryVisibility,
 ) : ViewModel() {
 
     /**
@@ -54,22 +59,35 @@ class HomeViewModel @Inject constructor(
      * pasta det vore att hitta pa data at anvandaren.
      */
     val state: StateFlow<HomeState> = combine(
-        libraryDao.observeMovies(
-            categoryId = null,
-            sort = LibrarySort.RECENT.code,
-            limit = 20,
-        ),
-        libraryDao.observeSeries(
-            categoryId = null,
-            sort = LibrarySort.RECENT.code,
-            limit = 20,
-        ),
-        channelDao.observeChannels(
-            categoryId = null,
-            sort = ChannelSort.PROVIDER.code,
-            limit = 20,
-        ),
-    ) { movies, series, channels ->
+        visibility.hiddenIds(ContentKind.MOVIE),
+        visibility.hiddenIds(ContentKind.SERIES),
+        visibility.hiddenIds(ContentKind.LIVE),
+    ) { movieHidden, seriesHidden, liveHidden ->
+        Triple(movieHidden, seriesHidden, liveHidden)
+    }.flatMapLatest { (movieHidden, seriesHidden, liveHidden) ->
+        // Dolda kategorier galler hemskarmen ocksa. Annars hade det dolda
+        // dykt upp i hero och rader direkt pa startsidan.
+        combine(
+            libraryDao.observeMovies(
+                categoryId = null,
+                sort = LibrarySort.RECENT.code,
+                hiddenIds = movieHidden,
+                limit = 20,
+            ),
+            libraryDao.observeSeries(
+                categoryId = null,
+                sort = LibrarySort.RECENT.code,
+                hiddenIds = seriesHidden,
+                limit = 20,
+            ),
+            channelDao.observeChannels(
+                categoryId = null,
+                sort = ChannelSort.PROVIDER.code,
+                hiddenIds = liveHidden,
+                limit = 20,
+            ),
+        ) { movies, series, channels -> Triple(movies, series, channels) }
+    }.map { (movies, series, channels) ->
         val hero = movies.firstOrNull { it.backdropUrl != null }
             ?.let { movie ->
                 HeroContent(
@@ -134,8 +152,8 @@ fun HomeScreen(
     if (state.isEmpty) {
         EmptyState(
             modifier = modifier,
-            title = "Inget bibliotek an",
-            body = "Lagg till en M3U-lank eller ett Xtream-konto under Installningar.",
+            title = "Inget bibliotek än",
+            body = "Lägg till en M3U-länk eller ett Xtream-konto under Inställningar.",
         )
         return
     }

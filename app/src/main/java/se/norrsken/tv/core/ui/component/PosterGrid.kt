@@ -82,6 +82,7 @@ private fun PosterCard(
             onClick = { onOpen(item) },
             focusScale = metrics.focusScalePoster,
             cornerRadius = metrics.radiusPoster,
+            glow = true,
             modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f),
         ) { _ ->
             if (item.posterUrl != null) {

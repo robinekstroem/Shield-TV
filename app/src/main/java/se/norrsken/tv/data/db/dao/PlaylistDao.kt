@@ -44,6 +44,10 @@ interface PlaylistDao {
     )
     fun observeCategories(kind: ContentKind, sort: Int): Flow<List<CategoryEntity>>
 
+    /** Alla kategorier av en typ, aven dolda — for hanteringsskarmen. */
+    @Query("SELECT * FROM categories WHERE kind = :kind ORDER BY LOWER(name)")
+    fun observeAllCategories(kind: ContentKind): Flow<List<CategoryEntity>>
+
     @Query("SELECT * FROM categories WHERE playlistId = :playlistId AND kind = :kind ORDER BY sortOrder, name")
     fun observeCategories(playlistId: Long, kind: ContentKind): Flow<List<CategoryEntity>>
 

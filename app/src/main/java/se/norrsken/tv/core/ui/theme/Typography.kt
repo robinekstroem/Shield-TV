@@ -21,6 +21,8 @@ private val appFontFamily = FontFamily.Default
 
 private fun scale(
     factor: Float = 1f,
+    displayWeight: FontWeight = FontWeight.SemiBold,
+    trackingDelta: Float = 0f,
     display: Int,
     headline: Int,
     title: Int,
@@ -31,17 +33,17 @@ private fun scale(
 ) = Typography(
     displayLarge = TextStyle(
         fontFamily = appFontFamily,
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = displayWeight,
         fontSize = (display * factor).sp,
         lineHeight = (display * factor * 1.15f).sp,
-        letterSpacing = displayTracking.sp,
+        letterSpacing = (displayTracking + trackingDelta).sp,
     ),
     headlineMedium = TextStyle(
         fontFamily = appFontFamily,
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = displayWeight,
         fontSize = (headline * factor).sp,
         lineHeight = (headline * factor * 1.25f).sp,
-        letterSpacing = (displayTracking / 2).sp,
+        letterSpacing = (displayTracking / 2 + trackingDelta).sp,
     ),
     titleMedium = TextStyle(
         fontFamily = appFontFamily,
@@ -65,8 +67,14 @@ private fun scale(
     ),
 )
 
-fun tvTypography(factor: Float): Typography = scale(
+fun tvTypography(
+    factor: Float,
+    displayWeight: FontWeight = FontWeight.SemiBold,
+    trackingDelta: Float = 0f,
+): Typography = scale(
     factor = factor,
+    displayWeight = displayWeight,
+    trackingDelta = trackingDelta,
     display = 40,
     headline = 28,
     title = 20,
@@ -76,8 +84,14 @@ fun tvTypography(factor: Float): Typography = scale(
     bodyTracking = 0.1f,
 )
 
-fun handheldTypography(factor: Float): Typography = scale(
+fun handheldTypography(
+    factor: Float,
+    displayWeight: FontWeight = FontWeight.SemiBold,
+    trackingDelta: Float = 0f,
+): Typography = scale(
     factor = factor,
+    displayWeight = displayWeight,
+    trackingDelta = trackingDelta,
     display = 30,
     headline = 22,
     title = 17,

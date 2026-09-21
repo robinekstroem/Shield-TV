@@ -47,7 +47,7 @@ class MainActivity : ComponentActivity() {
                 lastBackAt = now
                 Toast.makeText(
                     this@MainActivity,
-                    "Tryck igen for att avsluta",
+                    "Tryck igen för att avsluta",
                     Toast.LENGTH_SHORT,
                 ).show()
             }
