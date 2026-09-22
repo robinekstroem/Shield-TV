@@ -12,6 +12,12 @@ Status per denna checkpoint. Skriven ur koden, inte ur minnet.
 
 ## Senast tillagt, overifierat på enhet
 
+### EPG-omgången
+- XMLTV-motor, TV-guide, nu/nästa i lista och spelare.
+- **Säkerhetsfix:** Xtreams tablåadress sparades i databasen med lösenordet
+  i klartext. Den byggs nu vid varje hämtning och sparas aldrig; gamla rader
+  rensas automatiskt.
+
 ### Cinematic-omgången
 - Spec:ens färgsystem i Norrsken-temat (#03070A, Aurora Cyan #57E6F2 m.fl.)
   med sekundär accent för aurora-gradienter.
@@ -76,11 +82,18 @@ Status per denna checkpoint. Skriven ur koden, inte ur minnet.
 
 `GuideScreen`, `FavoritesScreen`, `SearchScreen` — tomtillstånd utan funktion.
 
-## Saknas helt
+## EPG
 
-EPG-motorn. Ingen XMLTV-hämtning, ingen parser, ingen matchning, ingen tablå.
-Detta blockerar: TV-guide, catch-up, "Nu på TV", påminnelser, programinfo
-och fjorton av inställningspunkterna.
+Byggt: XMLTV-hämtning i ström (även gzip), konservativ kanalmatchning,
+TV-guide med tidslinje och nu-linje, nu/nästa i kanallistan och i spelaren,
+inställningar för dagar, tidsförskjutning och egen tablåadress per källa.
+Uppdateras vid appstart om äldre än tolv timmar och efter varje import.
+
+Återstår inom EPG: manuell koppling kanal → tablåkanal (datamodellen finns,
+MANUAL-kopplingar bevaras redan), catch-up, påminnelser, och periodisk
+uppdatering i bakgrunden via WorkManager.
+
+## Saknas helt
 
 Stalker Portal. Tredje protokoll, inte påbörjat.
 
@@ -130,7 +143,7 @@ Daredevil" matchade inte varandra.
   AudioSink.
 - **Nattläge / dialogförstärkning.** Möjligt med Androids DynamicsProcessing
   men inte byggt. Volymförstärkningen finns, komprimeringen inte.
-- **Tablå och Favoriter** leder fortfarande till platshållarskärmar.
+- **Favoriter** leder fortfarande till en platshållarskärm.
 
 ## Nästa checkpoint
 

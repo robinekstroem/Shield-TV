@@ -24,6 +24,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import se.norrsken.tv.core.device.LocalDeviceProfile
+import se.norrsken.tv.core.ui.component.AuroraProgress
 import se.norrsken.tv.core.ui.component.CategoryColumn
 import se.norrsken.tv.core.ui.component.CategoryRow
 import se.norrsken.tv.core.ui.component.EmptyState
@@ -31,6 +32,7 @@ import se.norrsken.tv.core.ui.component.FocusableSurface
 import se.norrsken.tv.core.ui.theme.LocalMetrics
 import se.norrsken.tv.core.ui.theme.LocalPalette
 import se.norrsken.tv.data.db.entity.ChannelEntity
+import se.norrsken.tv.data.epg.NowNext
 
 @Composable
 fun LiveTvScreen(
@@ -44,6 +46,8 @@ fun LiveTvScreen(
     val selected by viewModel.selected.collectAsStateWithLifecycle()
     val sortLabel by viewModel.channelSortLabel.collectAsStateWithLifecycle()
     val categorySortLabel by viewModel.categorySortLabel.collectAsStateWithLifecycle()
+    val nowNext by viewModel.nowNext.collectAsStateWithLifecycle()
+    val now by viewModel.now.collectAsStateWithLifecycle()
     val profile = LocalDeviceProfile.current
     val metrics = LocalMetrics.current
 
@@ -75,6 +79,8 @@ fun LiveTvScreen(
             )
             ChannelList(
                 channels = channels,
+                nowNext = nowNext,
+                now = now,
                 onOpenChannel = onOpenChannel,
                 modifier = Modifier.padding(start = metrics.spaceLg),
             )
@@ -92,6 +98,8 @@ fun LiveTvScreen(
             )
             ChannelList(
                 channels = channels,
+                nowNext = nowNext,
+                now = now,
                 onOpenChannel = onOpenChannel,
                 modifier = Modifier.padding(top = metrics.spaceMd),
             )
@@ -102,6 +110,8 @@ fun LiveTvScreen(
 @Composable
 private fun ChannelList(
     channels: List<ChannelEntity>,
+    nowNext: Map<Long, NowNext>,
+    now: Long,
     onOpenChannel: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -111,7 +121,12 @@ private fun ChannelList(
         verticalArrangement = Arrangement.spacedBy(metrics.spaceSm),
     ) {
         items(channels, key = { it.id }) { channel ->
-            ChannelRow(channel = channel, onClick = { onOpenChannel(channel.id) })
+            ChannelRow(
+                channel = channel,
+                nowNext = nowNext[channel.id],
+                now = now,
+                onClick = { onOpenChannel(channel.id) },
+            )
         }
 
         // Tyst kapning ar samre an ett kort besked: utan den har raden ser
@@ -137,7 +152,12 @@ private fun ListTruncated() {
 }
 
 @Composable
-private fun ChannelRow(channel: ChannelEntity, onClick: () -> Unit) {
+private fun ChannelRow(
+    channel: ChannelEntity,
+    nowNext: NowNext?,
+    now: Long,
+    onClick: () -> Unit,
+) {
     val palette = LocalPalette.current
     val metrics = LocalMetrics.current
 
@@ -177,7 +197,37 @@ private fun ChannelRow(channel: ChannelEntity, onClick: () -> Unit) {
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (channel.groupTitle != null) {
+                val current = nowNext?.current
+                if (current != null) {
+                    // Med tablå: vad som sänds, hur långt det kommit, vad som
+                    // kommer sedan. Gruppnamnet ger ingenting man inte redan
+                    // ser i kategorilistan.
+                    Text(
+                        text = current.title,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = palette.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    nowNext.progress(now)?.let {
+                        AuroraProgress(
+                            fraction = it,
+                            height = 2.dp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp),
+                        )
+                    }
+                    nowNext.next?.let { next ->
+                        Text(
+                            text = "Sedan: " + next.title,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = palette.textTertiary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                } else if (channel.groupTitle != null) {
                     Text(
                         text = channel.groupTitle,
                         style = MaterialTheme.typography.labelMedium,

@@ -21,6 +21,11 @@ data class ThemeStyle(
     val displayWeight: FontWeight,
     /** Laggs pa rubrikernas tracking. Versaler behover luft, gemener inte. */
     val displayTrackingDelta: Float,
+    /**
+     * Minimalt lage: forklarande text tas bort, dekor dampas. Satts av
+     * anvandarens val, inte av temat — darfor default false har.
+     */
+    val minimal: Boolean = false,
 )
 
 val LocalThemeStyle = staticCompositionLocalOf { styleFor(ThemeChoice.NORRSKEN) }

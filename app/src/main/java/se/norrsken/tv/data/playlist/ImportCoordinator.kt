@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import se.norrsken.tv.data.db.entity.PlaylistEntity
+import se.norrsken.tv.data.epg.EpgCoordinator
 import se.norrsken.tv.data.repository.PlaylistRepository
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -28,6 +29,7 @@ import javax.inject.Singleton
 class ImportCoordinator @Inject constructor(
     private val repository: PlaylistRepository,
     private val importer: SourceImporter,
+    private val epg: EpgCoordinator,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var job: Job? = null
@@ -42,6 +44,7 @@ class ImportCoordinator @Inject constructor(
         job = scope.launch {
             val id = repository.add(playlist)
             importer.import(playlist.copy(id = id)).collect { _state.value = it }
+            afterImport()
         }
     }
 
@@ -49,7 +52,16 @@ class ImportCoordinator @Inject constructor(
         if (busy) return
         job = scope.launch {
             importer.import(playlist).collect { _state.value = it }
+            afterImport()
         }
+    }
+
+    /**
+     * Nya kanaler behöver ny koppling mot tablån — annars visar guiden
+     * gamla kopplingar till kanaler som bytt id vid importen.
+     */
+    private fun afterImport() {
+        if (_state.value is ImportState.Done) epg.updateAll()
     }
 
     /** Fel som upptäcks innan någon import startat, t.ex. en tom länk. */

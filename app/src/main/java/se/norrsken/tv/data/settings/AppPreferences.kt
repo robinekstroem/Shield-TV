@@ -31,6 +31,7 @@ data class AppPreferences(
 
     // --- Utseende ---
     val theme: ThemeChoice = ThemeChoice.NORRSKEN,
+    val interfaceStyle: InterfaceStyle = InterfaceStyle.STANDARD,
     val textScale: TextScale = TextScale.MEDIUM,
     val accent: AccentChoice = AccentChoice.THEME,
     val uiOpacity: Int = 100,
@@ -53,6 +54,16 @@ data class AppPreferences(
 
     // --- Effekter ---
     val effects: EffectLevel = EffectLevel.FULL,
+
+    // --- Tablå ---
+    val epgDays: EpgDays = EpgDays.THREE,
+    /**
+     * Förskjutning i minuter. XMLTV bär sin egen tidszon, så rätt fil
+     * behöver ingen — men leverantörer med fel tidszon i filen finns, och
+     * då ligger hela tablån en jämn timme fel.
+     */
+    val epgOffsetMinutes: Int = 0,
+    val epgLastUpdateUtc: Long? = null,
 
     // --- Dolda kategorier ---
     /**
@@ -137,6 +148,18 @@ enum class CategorySort(val label: String, val code: Int) {
     NAME("A–Ö", 1),
 }
 
+/**
+ * Hur mycket gränssnittet säger.
+ *
+ * Minimal tar bort text som förklarar det uppenbara — underrubriker i menyn,
+ * etiketter ovanför värden, beskrivningar under inställningar — och låter
+ * innehållet stå för sig. Inga funktioner försvinner, bara orden runt dem.
+ */
+enum class InterfaceStyle(val label: String) {
+    STANDARD("Standard"),
+    MINIMAL("Minimal"),
+}
+
 enum class ThemeChoice(val label: String) {
     NORRSKEN("Norrsken"),
     TITAN("Titan"),
@@ -165,6 +188,17 @@ enum class VideoQuality(val label: String) {
     AUTO("Automatisk"),
     HIGHEST("Högsta möjliga"),
     DATA_SAVER("Spara data (720p)"),
+}
+
+/**
+ * Hur långt fram tablån sparas. Fler dagar betyder fler rader i databasen —
+ * med tusentals kanaler blir sju dagar miljontals program, vilket en TV-box
+ * märker.
+ */
+enum class EpgDays(val label: String, val days: Int) {
+    ONE("1 dag", 1),
+    THREE("3 dagar", 3),
+    SEVEN("7 dagar", 7),
 }
 
 /** [code] är ISO 639-1. null betyder "låt strömmen välja". */

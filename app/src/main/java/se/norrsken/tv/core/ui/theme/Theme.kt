@@ -12,6 +12,7 @@ import se.norrsken.tv.core.device.LocalDeviceProfile
 import se.norrsken.tv.core.device.detectDeviceProfile
 import se.norrsken.tv.data.settings.AccentChoice
 import se.norrsken.tv.data.settings.AppPreferences
+import se.norrsken.tv.data.settings.InterfaceStyle
 
 /**
  * Enda temat i appen. TV och mobil delar palett men far olika matt,
@@ -31,7 +32,15 @@ fun NorrskenTheme(
     val context = LocalContext.current
     val resolved = profile ?: remember(context) { detectDeviceProfile(context) }
 
-    val style = remember(preferences.theme) { styleFor(preferences.theme) }
+    val style = remember(preferences.theme, preferences.interfaceStyle) {
+        val base = styleFor(preferences.theme)
+        if (preferences.interfaceStyle == InterfaceStyle.MINIMAL) {
+            // Accentstrecket före rubriker är dekor och försvinner först.
+            base.copy(minimal = true, headingAccentBar = false)
+        } else {
+            base
+        }
+    }
 
     val palette = remember(preferences.theme, preferences.accent, preferences.uiOpacity) {
         val themed = paletteFor(preferences.theme)

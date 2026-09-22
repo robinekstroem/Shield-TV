@@ -15,11 +15,16 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
 import se.norrsken.tv.core.ui.theme.NorrskenTheme
+import se.norrsken.tv.data.epg.EpgCoordinator
 import se.norrsken.tv.data.settings.AppPreferences
 import se.norrsken.tv.data.settings.EffectLevel
 import se.norrsken.tv.data.settings.SettingsRepository
@@ -31,12 +36,31 @@ import javax.inject.Inject
 class MainActivity : ComponentActivity() {
 
     @Inject lateinit var settings: SettingsRepository
+    @Inject lateinit var epg: EpgCoordinator
 
     private var lastBackAt = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+
+        // Tablån hämtas i bakgrunden när den blivit gammal. Appen väntar
+        // aldrig på den — hemskärmen visas direkt med det som redan finns.
+        //
+        // Två tillfällen, för att "vid appstart" inte räcker: på en TV-box
+        // startas appen sällan om. Man går till hemskärmen och kommer
+        // tillbaka, eller lämnar den öppen i dagar.
+        lifecycle.addObserver(
+            LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_START) epg.updateIfStale()
+            }
+        )
+        lifecycleScope.launch {
+            while (true) {
+                epg.updateIfStale()
+                delay(60 * 60 * 1000L)
+            }
+        }
 
         val preferences = settings.preferences
             .stateIn(lifecycleScope, SharingStarted.Eagerly, AppPreferences())

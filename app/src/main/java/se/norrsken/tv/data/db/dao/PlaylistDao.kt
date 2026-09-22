@@ -50,6 +50,10 @@ interface PlaylistDao {
     )
     suspend fun markSynced(id: Long, providerEpgUrl: String?, syncedAt: Long)
 
+    /** Användarens egen tablåadress. null återgår till källans egen. */
+    @Query("UPDATE playlists SET epgUrl = :url WHERE id = :id")
+    suspend fun setEpgUrl(id: Long, url: String?)
+
     @Delete
     suspend fun delete(playlist: PlaylistEntity)
 

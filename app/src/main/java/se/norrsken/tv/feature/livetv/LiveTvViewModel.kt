@@ -8,7 +8,10 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -17,6 +20,9 @@ import se.norrsken.tv.data.db.dao.PlaylistDao
 import se.norrsken.tv.data.db.entity.CategoryEntity
 import se.norrsken.tv.data.db.entity.ChannelEntity
 import se.norrsken.tv.data.db.entity.ContentKind
+import se.norrsken.tv.data.epg.EpgCoordinator
+import se.norrsken.tv.data.epg.NowNext
+import se.norrsken.tv.data.epg.NowPlayingRepository
 import se.norrsken.tv.data.repository.CategoryVisibility
 import se.norrsken.tv.data.repository.isCategoryHidden
 import se.norrsken.tv.data.settings.AppPreferences
@@ -32,6 +38,8 @@ class LiveTvViewModel @Inject constructor(
     private val playlistDao: PlaylistDao,
     private val settings: SettingsRepository,
     visibility: CategoryVisibility,
+    private val nowPlaying: NowPlayingRepository,
+    epg: EpgCoordinator,
 ) : ViewModel() {
 
     private val preferences = settings.preferences
@@ -97,6 +105,23 @@ class LiveTvViewModel @Inject constructor(
                 )
             }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Tickar varje halvminut, så pågående program och progress hålls aktuella. */
+    val now: StateFlow<Long> = flow {
+        while (true) {
+            emit(System.currentTimeMillis())
+            delay(30_000)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), System.currentTimeMillis())
+
+    /**
+     * Nu och nästa för kanalerna i listan. Läses om varje minut och när en
+     * tablåuppdatering blivit klar.
+     */
+    val nowNext: StateFlow<Map<Long, NowNext>> =
+        combine(channels, now, epg.version) { list, time, _ -> list to time }
+            .mapLatest { (list, time) -> nowPlaying.forChannels(list, time) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     fun select(categoryId: Long?) {
         _selected.value = categoryId

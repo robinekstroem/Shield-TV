@@ -44,6 +44,7 @@ import se.norrsken.tv.core.ui.component.FocusableSurface
 import se.norrsken.tv.core.ui.theme.LocalMetrics
 import se.norrsken.tv.core.ui.theme.LocalMotion
 import se.norrsken.tv.core.ui.theme.LocalPalette
+import se.norrsken.tv.core.ui.theme.LocalThemeStyle
 import se.norrsken.tv.navigation.Destination
 
 /**
@@ -143,7 +144,7 @@ private fun Brand(expanded: Boolean) {
             color = palette.textPrimary,
             maxLines = 1,
         )
-        AnimatedVisibility(visible = expanded) {
+        AnimatedVisibility(visible = expanded && !LocalThemeStyle.current.minimal) {
             Text(
                 text = stringResource(R.string.brand_tagline),
                 style = MaterialTheme.typography.labelMedium,
@@ -226,16 +227,20 @@ private fun RailItem(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Text(
-                        // Riktig siffra nar det finns en, annars beskrivningen.
-                        // Aldrig en pahittad mangd.
-                        text = count?.let { destination.countLabel(it) }
-                            ?: stringResource(destination.sublabel),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = palette.textTertiary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    // I minimalt läge står bara namnet. "Live TV /
+                    // Direktsändning" säger samma sak två gånger.
+                    if (!LocalThemeStyle.current.minimal) {
+                        Text(
+                            // Riktig siffra nar det finns en, annars beskrivningen.
+                            // Aldrig en pahittad mangd.
+                            text = count?.let { destination.countLabel(it) }
+                                ?: stringResource(destination.sublabel),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = palette.textTertiary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
         }

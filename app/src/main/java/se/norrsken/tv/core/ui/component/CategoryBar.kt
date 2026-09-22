@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import se.norrsken.tv.core.ui.theme.LocalMetrics
 import se.norrsken.tv.core.ui.theme.LocalPalette
+import se.norrsken.tv.core.ui.theme.LocalThemeStyle
 import se.norrsken.tv.data.db.entity.CategoryEntity
 
 /**
@@ -105,12 +106,17 @@ private fun SortChip(prefix: String, value: String, onClick: () -> Unit) {
                 vertical = metrics.spaceSm,
             ),
         ) {
-            Text(
-                text = prefix,
-                style = MaterialTheme.typography.labelMedium,
-                color = palette.textTertiary,
-                maxLines = 1,
-            )
+            // Etiketten ovanför värdet försvinner i minimalt läge. Att det
+            // står "Senast tillagda" i kategorilistan räcker för att förstå
+            // att det handlar om sortering.
+            if (!LocalThemeStyle.current.minimal) {
+                Text(
+                    text = prefix,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = palette.textTertiary,
+                    maxLines = 1,
+                )
+            }
             Text(
                 text = value,
                 style = MaterialTheme.typography.titleMedium,

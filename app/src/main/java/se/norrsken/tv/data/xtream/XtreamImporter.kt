@@ -49,9 +49,13 @@ class XtreamImporter @Inject constructor(
             val movies = importVod(playlist, credentials)
             val series = importSeries(playlist, credentials)
 
+            // Ingen tablåadress sparas för Xtream. Den innehåller användarnamn
+            // och lösenord i klartext, och hade legat okrypterad i databasen
+            // bredvid det krypterade lösenordet. Tablåhämtningen bygger den i
+            // stället från de dekrypterade uppgifterna varje gång.
             playlistDao.markSynced(
                 id = playlist.id,
-                providerEpgUrl = client.xmltvUrl(credentials),
+                providerEpgUrl = null,
                 syncedAt = System.currentTimeMillis(),
             )
 

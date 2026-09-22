@@ -7,6 +7,9 @@ import androidx.room.Query
 import se.norrsken.tv.data.db.entity.EpgMappingEntity
 import se.norrsken.tv.data.db.entity.EpgProgrammeEntity
 
+/** Högsta antal id:n per fråga. SQLite på äldre Android tillåter 999. */
+const val EPG_CHUNK = 900
+
 @Dao
 interface EpgDao {
 
@@ -50,4 +53,20 @@ interface EpgDao {
 
     @Query("DELETE FROM epg_mappings WHERE channelId = :channelId AND source != 'MANUAL'")
     suspend fun clearAutoMapping(channelId: Long)
+
+    // Massvarianterna nedan tar listor. SQLite på äldre Android klarar högst
+    // 999 parametrar per fråga — anropa dem alltid i omgångar om högst 900
+    // (se EPG_CHUNK), annars kraschar frågan med tusentals kanaler.
+
+    @Query("SELECT * FROM epg_mappings WHERE channelId IN (:channelIds)")
+    suspend fun mappingsFor(channelIds: List<Long>): List<EpgMappingEntity>
+
+    @Query("DELETE FROM epg_mappings WHERE channelId IN (:channelIds) AND source != 'MANUAL'")
+    suspend fun clearAutoMappings(channelIds: List<Long>)
+
+    @Query("DELETE FROM epg_programmes WHERE epgChannelId IN (:epgChannelIds)")
+    suspend fun deleteProgrammesFor(epgChannelIds: List<String>)
+
+    @Query("SELECT COUNT(*) FROM epg_programmes")
+    suspend fun programmeCount(): Int
 }

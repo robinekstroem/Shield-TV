@@ -39,6 +39,7 @@ import se.norrsken.tv.core.ui.theme.LocalPalette
 import se.norrsken.tv.data.db.entity.PlaylistEntity
 import se.norrsken.tv.data.db.entity.PlaylistType
 import se.norrsken.tv.data.device.DeviceCapabilities
+import se.norrsken.tv.data.epg.EpgState
 import se.norrsken.tv.data.playlist.ImportState
 import se.norrsken.tv.data.remote.PlaylistDownloader
 import se.norrsken.tv.data.security.sanitizeUrl
@@ -49,6 +50,8 @@ import se.norrsken.tv.data.settings.CategorySort
 import se.norrsken.tv.data.settings.ChannelSort
 import se.norrsken.tv.data.settings.DecoderMode
 import se.norrsken.tv.data.settings.EffectLevel
+import se.norrsken.tv.data.settings.EpgDays
+import se.norrsken.tv.data.settings.InterfaceStyle
 import se.norrsken.tv.data.settings.LibrarySort
 import se.norrsken.tv.data.settings.MediaLanguage
 import se.norrsken.tv.data.settings.SubtitleBackground
@@ -78,6 +81,7 @@ private enum class SourceForm(val label: String) {
  */
 enum class SettingsSection(val title: String) {
     SOURCES("Källor"),
+    EPG("Tablå"),
     PICTURE("Bild"),
     AUDIO("Ljud"),
     SUBTITLES("Undertext"),
@@ -128,12 +132,16 @@ private fun summaryOf(section: SettingsSection, prefs: AppPreferences, sources: 
             1 -> "1 källa"
             else -> "$sources källor"
         }
+        SettingsSection.EPG -> prefs.epgLastUpdateUtc
+            ?.let { "Uppdaterad " + java.text.SimpleDateFormat("d MMM HH:mm", java.util.Locale.getDefault()).format(java.util.Date(it)) }
+            ?: "Aldrig hämtad"
         SettingsSection.PICTURE -> "${prefs.videoQuality.label} · ${prefs.videoScale.label}"
         SettingsSection.AUDIO -> "${prefs.audioLanguage.label} · Förstärkning ${prefs.volumeBoost.label}"
         SettingsSection.SUBTITLES ->
             if (prefs.autoSubtitles) "${prefs.subtitleLanguage.label} · ${prefs.subtitleSize.label}"
             else "Av · ${prefs.subtitleSize.label}"
-        SettingsSection.APPEARANCE -> "${prefs.theme.label} · Effekter ${prefs.effects.label.lowercase()}"
+        SettingsSection.APPEARANCE ->
+            "${prefs.theme.label} · ${prefs.interfaceStyle.label}"
         SettingsSection.LIBRARY -> prefs.librarySort.label
         SettingsSection.PLAYBACK -> "Buffert ${prefs.buffer.label.lowercase()}"
         SettingsSection.GENERAL -> if (prefs.confirmExit) "Bekräfta avslut på" else "Bekräfta avslut av"
@@ -183,6 +191,8 @@ fun SettingsSectionScreen(
     val context = LocalContext.current
     // Läses en gång per sida. Skärm och ljudkedja byts inte medan man tittar
     // på inställningarna, och frågan mot systemet är inte gratis.
+    val epgState by viewModel.epgState.collectAsStateWithLifecycle()
+    val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     val display = remember { DeviceCapabilities.display(context) }
     val audio = remember { DeviceCapabilities.audio(context) }
 
@@ -197,6 +207,7 @@ fun SettingsSectionScreen(
             )
         }
         when (section) {
+            SettingsSection.EPG -> epgRows(prefs, viewModel, epgState, playlists)
             SettingsSection.PICTURE -> pictureRows(prefs, viewModel, isTv, display)
             SettingsSection.AUDIO -> audioRows(prefs, viewModel, audio)
             SettingsSection.SUBTITLES -> subtitleRows(prefs, viewModel)
@@ -205,6 +216,130 @@ fun SettingsSectionScreen(
             SettingsSection.PLAYBACK -> playbackRows(prefs, viewModel)
             SettingsSection.GENERAL -> generalRows(prefs, viewModel)
             SettingsSection.SOURCES -> Unit
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tablå
+// ---------------------------------------------------------------------------
+
+private fun LazyListScope.epgRows(
+    prefs: AppPreferences,
+    vm: PlaylistsViewModel,
+    state: EpgState,
+    playlists: List<PlaylistEntity>,
+) {
+    item {
+        InfoCard(
+            title = "Status",
+            lines = listOf(
+                when (state) {
+                    is EpgState.Working ->
+                        state.step + (state.programmes?.let { " · $it program" } ?: "") + " …"
+                    is EpgState.Done -> "${state.programmes} program för ${state.channels} kanaler"
+                    is EpgState.Failed -> state.message
+                    EpgState.Idle -> prefs.epgLastUpdateUtc?.let {
+                        "Senast uppdaterad " + java.text.SimpleDateFormat(
+                            "d MMM HH:mm", java.util.Locale.getDefault(),
+                        ).format(java.util.Date(it))
+                    } ?: "Tablån har inte hämtats än"
+                },
+            ),
+            note = "Uppdateras automatiskt när appen startar om den är äldre än tolv " +
+                "timmar, och efter varje uppdatering av en spellista.",
+        )
+    }
+    item {
+        if (state is EpgState.Working) {
+            AuroraLoader(modifier = Modifier.fillMaxWidth())
+        } else {
+            LinkRow(
+                title = "Uppdatera tablån nu",
+                description = null,
+                onClick = vm::updateEpg,
+            )
+        }
+    }
+    item {
+        OptionRow(
+            title = "Spara framåt",
+            description = "Fler dagar tar mer plats. Med tusentals kanaler märks sju dagar på en TV-box.",
+            options = EpgDays.entries,
+            selected = prefs.epgDays,
+            label = { it.label },
+            onSelect = vm::setEpgDays,
+        )
+    }
+    item {
+        OptionRow(
+            title = "Tidsförskjutning",
+            description = "Ligger hela tablån en jämn tid fel har leverantören fel tidszon i filen. " +
+                "Justera här — programmen sparas orörda.",
+            options = listOf(-120, -60, -30, 0, 30, 60, 120),
+            selected = prefs.epgOffsetMinutes,
+            label = { if (it > 0) "+$it min" else "$it min" },
+            onSelect = vm::setEpgOffset,
+        )
+    }
+    items(playlists, key = { "epg:" + it.id }) { playlist ->
+        EpgSourceRow(playlist = playlist, onSave = { vm.setEpgUrl(playlist, it) })
+    }
+}
+
+/**
+ * Tablåadressen för en källa. Fältet fylls inte i med den nuvarande
+ * adressen: den kan innehålla inloggningsuppgifter, och de ska inte stå i
+ * klartext på skärmen. Nuvarande adress visas maskerad ovanför.
+ */
+@Composable
+private fun EpgSourceRow(playlist: PlaylistEntity, onSave: (String?) -> Unit) {
+    val palette = LocalPalette.current
+    val metrics = LocalMetrics.current
+    var text by remember(playlist.id) { mutableStateOf("") }
+    val stored = playlist.epgUrl?.takeIf { it.isNotBlank() }
+
+    Column(
+        modifier = Modifier.padding(top = metrics.spaceMd),
+        verticalArrangement = Arrangement.spacedBy(metrics.spaceXs),
+    ) {
+        Text(
+            text = playlist.name,
+            style = MaterialTheme.typography.titleMedium,
+            color = palette.textPrimary,
+        )
+        Text(
+            text = when {
+                stored != null -> "Adress: " + sanitizeUrl(stored)
+                playlist.type == PlaylistType.XTREAM -> "Hämtas automatiskt från Xtream-kontot"
+                else -> "Ingen tablåadress — spellistan anger ingen. Lägg till en nedan."
+            },
+            style = MaterialTheme.typography.labelMedium,
+            color = palette.textTertiary,
+        )
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            label = { Text("Egen tablåadress (XMLTV)") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(metrics.spaceSm)) {
+            Button(
+                onClick = {
+                    onSave(text)
+                    text = ""
+                },
+                enabled = text.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = palette.surfaceRaised,
+                    contentColor = palette.textPrimary,
+                ),
+            ) { Text("Spara och hämta") }
+            if (stored != null) {
+                TextButton(onClick = { onSave(null) }) { Text("Återställ") }
+            }
         }
     }
 }
@@ -395,6 +530,17 @@ private fun LazyListScope.subtitleRows(prefs: AppPreferences, vm: PlaylistsViewM
 // ---------------------------------------------------------------------------
 
 private fun LazyListScope.appearanceRows(prefs: AppPreferences, vm: PlaylistsViewModel) {
+    item {
+        OptionRow(
+            title = "Gränssnitt",
+            description = "Minimal tar bort förklarande text — underrubriker i menyn, " +
+                "etiketter ovanför värden, beskrivningar här. Inga funktioner försvinner.",
+            options = InterfaceStyle.entries,
+            selected = prefs.interfaceStyle,
+            label = { it.label },
+            onSelect = vm::setInterfaceStyle,
+        )
+    }
     item {
         OptionRow(
             title = "Tema",

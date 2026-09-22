@@ -2,6 +2,7 @@ package se.norrsken.tv.data.remote
 
 import java.io.BufferedReader
 import java.io.IOException
+import java.io.InputStream
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
@@ -41,7 +42,20 @@ class PlaylistDownloader @Inject constructor() {
         url: String,
         userAgent: String = DEFAULT_USER_AGENT,
         block: (BufferedReader) -> T,
-    ): T {
+    ): T = openStream(url, userAgent).use { stream ->
+        block(BufferedReader(InputStreamReader(stream, Charsets.UTF_8)))
+    }
+
+    /**
+     * Samma hämtning, men som rå ström. Den som anropar stänger den.
+     *
+     * Finns för tablån: XMLTV-filer är ofta hundratals megabyte och ska
+     * tolkas medan de läses, med databasskrivningar i omgångar emellan —
+     * något en vanlig lambda inte kan göra, eftersom databasen är
+     * asynkron. Teckenkodningen avgör XML-tolkaren själv utifrån filens
+     * eget huvud.
+     */
+    fun openStream(url: String, userAgent: String = DEFAULT_USER_AGENT): InputStream {
         var current = url
         var redirects = 0
 
@@ -64,21 +78,18 @@ class PlaylistDownloader @Inject constructor() {
                 throw PlaylistException(explain(code), status = code)
             }
 
-            return connection.inputStream.buffered().use { raw ->
-                raw.mark(2)
-                val magic = ByteArray(2)
-                val read = raw.read(magic)
-                raw.reset()
+            val raw = connection.inputStream.buffered()
+            raw.mark(2)
+            val magic = ByteArray(2)
+            val read = raw.read(magic)
+            raw.reset()
 
-                val stream = if (read == 2 && magic[0] == 0x1f.toByte() &&
-                    magic[1] == 0x8b.toByte()
-                ) {
-                    GZIPInputStream(raw)
-                } else {
-                    raw
-                }
-
-                block(BufferedReader(InputStreamReader(stream, Charsets.UTF_8)))
+            // Gzip känns igen på de två första byten, inte på headern —
+            // leverantörer glömmer ofta att sätta Content-Encoding.
+            return if (read == 2 && magic[0] == 0x1f.toByte() && magic[1] == 0x8b.toByte()) {
+                GZIPInputStream(raw)
+            } else {
+                raw
             }
         }
     }

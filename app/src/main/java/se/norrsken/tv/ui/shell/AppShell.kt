@@ -196,7 +196,11 @@ private fun AppNavHost(navController: NavHostController) {
                 onManageCategories = { navController.navigate(CATEGORIES_ROUTE + "LIVE") },
             )
         }
-        composable(Destination.Guide.route) { GuideScreen() }
+        composable(Destination.Guide.route) {
+            GuideScreen(
+                onPlayChannel = { id -> navController.play(PlayableKind.CHANNEL, id) },
+            )
+        }
         composable(Destination.Movies.route) {
             MoviesScreen(
                 onOpenMovie = { id -> navController.navigate(MOVIE_ROUTE + id) },

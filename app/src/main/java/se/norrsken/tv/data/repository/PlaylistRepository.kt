@@ -19,6 +19,7 @@ interface PlaylistRepository {
     suspend fun add(playlist: PlaylistEntity): Long
     suspend fun setEnabled(playlist: PlaylistEntity, enabled: Boolean)
     suspend fun remove(playlist: PlaylistEntity)
+    suspend fun setEpgUrl(playlistId: Long, url: String?)
 }
 
 @Singleton
@@ -41,4 +42,7 @@ class RoomPlaylistRepository @Inject constructor(
 
     override suspend fun remove(playlist: PlaylistEntity) =
         withContext(io) { dao.delete(playlist) }
+
+    override suspend fun setEpgUrl(playlistId: Long, url: String?) =
+        withContext(io) { dao.setEpgUrl(playlistId, url?.trim()?.ifEmpty { null }) }
 }

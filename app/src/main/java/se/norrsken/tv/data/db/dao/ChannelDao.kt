@@ -23,6 +23,10 @@ interface ChannelDao {
     @Query("SELECT * FROM channels WHERE id = :id")
     suspend fun byId(id: Long): ChannelEntity?
 
+    /** Alla kanaler i en källa — för att koppla dem mot källans tablå. */
+    @Query("SELECT * FROM channels WHERE playlistId = :playlistId")
+    suspend fun channelsForPlaylist(playlistId: Long): List<ChannelEntity>
+
     @Query("SELECT COUNT(*) FROM channels WHERE hidden = 0")
     fun observeCount(): Flow<Int>
 

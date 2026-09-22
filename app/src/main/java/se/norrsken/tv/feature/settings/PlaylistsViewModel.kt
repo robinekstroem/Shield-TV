@@ -13,6 +13,8 @@ import kotlinx.coroutines.launch
 import se.norrsken.tv.data.db.entity.PlaylistEntity
 import se.norrsken.tv.data.db.entity.PlaylistType
 import se.norrsken.tv.data.playlist.ImportState
+import se.norrsken.tv.data.epg.EpgCoordinator
+import se.norrsken.tv.data.epg.EpgState
 import se.norrsken.tv.data.playlist.ImportCoordinator
 import se.norrsken.tv.data.settings.AccentChoice
 import se.norrsken.tv.data.settings.CategorySort
@@ -26,6 +28,8 @@ import se.norrsken.tv.data.settings.SubtitleSize
 import se.norrsken.tv.data.settings.TextScale
 import se.norrsken.tv.data.settings.ThemeChoice
 import se.norrsken.tv.data.settings.EffectLevel
+import se.norrsken.tv.data.settings.EpgDays
+import se.norrsken.tv.data.settings.InterfaceStyle
 import se.norrsken.tv.data.settings.MediaLanguage
 import se.norrsken.tv.data.settings.VideoQuality
 import se.norrsken.tv.data.settings.VideoScale
@@ -44,6 +48,7 @@ data class SourceHint(val message: String)
 class PlaylistsViewModel @Inject constructor(
     private val repository: PlaylistRepository,
     private val imports: ImportCoordinator,
+    private val epg: EpgCoordinator,
     private val settings: SettingsRepository,
     private val metadata: MetadataRepository,
 ) : ViewModel() {
@@ -67,6 +72,7 @@ class PlaylistsViewModel @Inject constructor(
     fun setChannelSort(value: ChannelSort) = edit { settings.setChannelSort(value) }
     fun setCategorySort(value: CategorySort) = edit { settings.setCategorySort(value) }
     fun setTheme(value: ThemeChoice) = edit { settings.setTheme(value) }
+    fun setInterfaceStyle(value: InterfaceStyle) = edit { settings.setInterfaceStyle(value) }
     fun setVideoScale(value: VideoScale) = edit { settings.setVideoScale(value) }
     fun setVideoQuality(value: VideoQuality) = edit { settings.setVideoQuality(value) }
     fun setTunneling(value: Boolean) = edit { settings.setTunneling(value) }
@@ -75,6 +81,17 @@ class PlaylistsViewModel @Inject constructor(
     fun setSubtitleLanguage(value: MediaLanguage) = edit { settings.setSubtitleLanguage(value) }
     fun setAutoSubtitles(value: Boolean) = edit { settings.setAutoSubtitles(value) }
     fun setEffects(value: EffectLevel) = edit { settings.setEffects(value) }
+
+    val epgState: StateFlow<EpgState> = epg.state
+    fun updateEpg() = epg.updateAll()
+    fun setEpgDays(value: EpgDays) = edit { settings.setEpgDays(value) }
+    fun setEpgOffset(minutes: Int) = edit { settings.setEpgOffset(minutes) }
+
+    /** Ny adress hämtas direkt — annars ser man inte om den fungerar. */
+    fun setEpgUrl(playlist: PlaylistEntity, url: String?) = edit {
+        repository.setEpgUrl(playlist.id, url)
+        epg.updateAll()
+    }
     fun setSubtitleSize(value: SubtitleSize) = edit { settings.setSubtitleSize(value) }
     fun setSubtitleBackground(value: SubtitleBackground) = edit { settings.setSubtitleBackground(value) }
     fun setTextScale(value: TextScale) = edit { settings.setTextScale(value) }

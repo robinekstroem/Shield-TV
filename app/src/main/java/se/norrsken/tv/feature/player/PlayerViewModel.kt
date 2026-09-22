@@ -7,9 +7,12 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import se.norrsken.tv.data.db.dao.ChannelDao
 import se.norrsken.tv.data.db.dao.LibraryDao
+import se.norrsken.tv.data.epg.NowNext
+import se.norrsken.tv.data.epg.NowPlayingRepository
 import se.norrsken.tv.data.player.PlayerFactory
 import se.norrsken.tv.data.settings.SettingsRepository
 import se.norrsken.tv.data.settings.VideoScale
@@ -36,7 +39,12 @@ class PlayerViewModel @Inject constructor(
     private val libraryDao: LibraryDao,
     val playerFactory: PlayerFactory,
     private val settings: SettingsRepository,
+    private val nowPlaying: NowPlayingRepository,
 ) : ViewModel() {
+
+    private val _programme = MutableStateFlow<NowNext?>(null)
+    /** Vad som sänds på kanalen just nu. Bara för live — null för film. */
+    val programme: StateFlow<NowNext?> = _programme.asStateFlow()
 
     /** Bildformatet sparas, sa nasta film oppnas som den forra. */
     fun cycleVideoScale(current: VideoScale) {
@@ -60,11 +68,20 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             val resolved = when {
                 kind == null || id == null -> null
-                kind == PlayableKind.CHANNEL -> channelDao.byId(id)?.let {
+                kind == PlayableKind.CHANNEL -> channelDao.byId(id)?.let { channel ->
+                    // Tablån följs så länge spelaren är öppen. Programmet
+                    // byts mitt i tittandet, och panelen ska visa rätt.
+                    viewModelScope.launch {
+                        while (true) {
+                            _programme.value = nowPlaying
+                                .forChannels(listOf(channel), System.currentTimeMillis())[channel.id]
+                            delay(30_000)
+                        }
+                    }
                     Playable(
-                        title = it.name,
-                        subtitle = it.groupTitle,
-                        url = it.streamUrl,
+                        title = channel.name,
+                        subtitle = channel.groupTitle,
+                        url = channel.streamUrl,
                         isLive = true,
                     )
                 }

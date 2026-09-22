@@ -18,6 +18,7 @@ import androidx.compose.ui.input.key.type
 import se.norrsken.tv.core.ui.component.FocusableSurface
 import se.norrsken.tv.core.ui.theme.LocalMetrics
 import se.norrsken.tv.core.ui.theme.LocalPalette
+import se.norrsken.tv.core.ui.theme.LocalThemeStyle
 
 /**
  * Byggstenarna for installningsskarmen. Allt ar [FocusableSurface], sa varje
@@ -87,7 +88,9 @@ fun <T> OptionRow(
                     style = MaterialTheme.typography.titleMedium,
                     color = palette.textPrimary,
                 )
-                if (description != null) {
+                // Beskrivningen är förklaring, inte funktion — den är det
+                // första som tas bort i minimalt läge.
+                if (description != null && !LocalThemeStyle.current.minimal) {
                     Text(
                         text = description,
                         style = MaterialTheme.typography.labelMedium,
@@ -126,7 +129,9 @@ fun LinkRow(
                     style = MaterialTheme.typography.titleMedium,
                     color = palette.textPrimary,
                 )
-                if (description != null) {
+                // Beskrivningen är förklaring, inte funktion — den är det
+                // första som tas bort i minimalt läge.
+                if (description != null && !LocalThemeStyle.current.minimal) {
                     Text(
                         text = description,
                         style = MaterialTheme.typography.labelMedium,

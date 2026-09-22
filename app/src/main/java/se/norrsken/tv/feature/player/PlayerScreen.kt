@@ -83,7 +83,9 @@ import se.norrsken.tv.core.ui.component.FocusableSurface
 import se.norrsken.tv.core.ui.theme.LocalMetrics
 import se.norrsken.tv.core.ui.theme.LocalPalette
 import se.norrsken.tv.core.ui.theme.LocalPreferences
+import se.norrsken.tv.core.ui.theme.LocalThemeStyle
 import se.norrsken.tv.core.util.findActivity
+import se.norrsken.tv.data.epg.NowNext
 import se.norrsken.tv.data.settings.SubtitleBackground
 import se.norrsken.tv.data.settings.VideoScale
 import se.norrsken.tv.data.settings.VolumeBoost
@@ -103,6 +105,7 @@ fun PlayerScreen(
 ) {
     val playable by viewModel.playable.collectAsStateWithLifecycle()
     val missing by viewModel.missing.collectAsStateWithLifecycle()
+    val programme by viewModel.programme.collectAsStateWithLifecycle()
     val preferences = LocalPreferences.current
     val profile = LocalDeviceProfile.current
     val context = LocalContext.current
@@ -404,6 +407,7 @@ fun PlayerScreen(
                 showClock = preferences.showClock,
                 hasAudioChoice = audio.size > 1,
                 hasSubtitles = subtitles.size > 1,
+                programme = programme,
                 videoScaleLabel = preferences.videoScale.label,
                 onVideoScale = {
                     viewModel.cycleVideoScale(preferences.videoScale)
@@ -470,6 +474,7 @@ private fun Controls(
     showClock: Boolean,
     hasAudioChoice: Boolean,
     hasSubtitles: Boolean,
+    programme: NowNext?,
     videoScaleLabel: String,
     onVideoScale: () -> Unit,
     playFocus: FocusRequester,
@@ -482,6 +487,7 @@ private fun Controls(
 ) {
     val palette = LocalPalette.current
     val metrics = LocalMetrics.current
+    val minimal = LocalThemeStyle.current.minimal
 
     Box(Modifier.fillMaxSize()) {
         // Tva mjuka gradienter i stallet for en gra panel: texten blir
@@ -520,10 +526,16 @@ private fun Controls(
                     Spacer(Modifier.width(metrics.spaceSm))
                 }
                 if (hasSubtitles) {
-                    ControlButton(label = "Undertext", onClick = onSubtitles)
+                    ControlButton(
+                        label = if (minimal) "Text" else "Undertext",
+                        onClick = onSubtitles,
+                    )
                     Spacer(Modifier.width(metrics.spaceSm))
                 }
-                ControlButton(label = "Bild: $videoScaleLabel", onClick = onVideoScale)
+                ControlButton(
+                    label = if (minimal) "Bild" else "Bild: $videoScaleLabel",
+                    onClick = onVideoScale,
+                )
             }
 
             Spacer(Modifier.weight(1f))
@@ -549,7 +561,50 @@ private fun Controls(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (subtitle != null) {
+            val current = programme?.current
+            // programme != null behövs uttryckligen: att current inte är null
+            // räcker inte för att Kotlin ska veta att programme inte är det.
+            if (isLive && programme != null && current != null) {
+                // Live med tablå: programmet är det intressanta, inte
+                // kanalens grupp.
+                Text(
+                    text = current.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = palette.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Row(
+                    modifier = Modifier.padding(top = metrics.spaceXs),
+                    horizontalArrangement = Arrangement.spacedBy(metrics.spaceSm),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = clockText(current.startUtc),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = palette.textSecondary,
+                    )
+                    AuroraProgress(
+                        fraction = programme.progress(System.currentTimeMillis()) ?: 0f,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = clockText(current.endUtc),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = palette.textSecondary,
+                    )
+                }
+                programme.next?.let { next ->
+                    Text(
+                        text = "Sedan ${clockText(next.startUtc)}  ${next.title}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = palette.textTertiary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = metrics.spaceXs),
+                    )
+                }
+            } else if (subtitle != null) {
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodyLarge,
@@ -591,13 +646,17 @@ private fun Controls(
                 ),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (!isLive) ControlButton(label = "-10 s", onClick = onSeekBack)
+                if (!isLive) {
+                    ControlButton(label = if (minimal) "-10" else "-10 s", onClick = onSeekBack)
+                }
                 ControlButton(
                     label = if (playing) "Pausa" else "Spela",
                     onClick = onPlayPause,
                     modifier = Modifier.focusRequester(playFocus),
                 )
-                if (!isLive) ControlButton(label = "+10 s", onClick = onSeekForward)
+                if (!isLive) {
+                    ControlButton(label = if (minimal) "+10" else "+10 s", onClick = onSeekForward)
+                }
             }
         }
     }
@@ -783,6 +842,9 @@ private fun captionStyle(background: SubtitleBackground): CaptionStyleCompat {
         )
     }
 }
+
+private fun clockText(ms: Long): String =
+    java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ms))
 
 private fun formatTime(ms: Long): String {
     val totalSeconds = ms / 1000

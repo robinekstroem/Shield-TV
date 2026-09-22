@@ -44,7 +44,10 @@ object DeviceCapabilities {
             width = mode.physicalWidth,
             height = mode.physicalHeight,
             refreshRate = mode.refreshRate.roundToInt(),
-            hdrFormats = hdrTypes.mapNotNull(::hdrName).distinct(),
+            // toList() först: mapNotNull finns inte för IntArray. Primitiva
+            // arrayer kan inte innehålla null, så Kotlin definierar den inte
+            // där.
+            hdrFormats = hdrTypes.toList().mapNotNull(::hdrName).distinct(),
         )
     }
 
