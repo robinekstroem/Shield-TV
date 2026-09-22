@@ -35,10 +35,24 @@ data class AppPreferences(
     val accent: AccentChoice = AccentChoice.THEME,
     val uiOpacity: Int = 100,
 
-    // --- Bild och undertext ---
+    // --- Bild ---
     val videoScale: VideoScale = VideoScale.FIT,
+    val videoQuality: VideoQuality = VideoQuality.AUTO,
+    val tunneling: Boolean = false,
+
+    // --- Ljud ---
+    val audioLanguage: MediaLanguage = MediaLanguage.SWEDISH,
+    val volumeBoost: VolumeBoost = VolumeBoost.OFF,
+
+    // --- Undertext ---
     val subtitleSize: SubtitleSize = SubtitleSize.NORMAL,
     val subtitleBackground: SubtitleBackground = SubtitleBackground.SHADOW,
+    val subtitleLanguage: MediaLanguage = MediaLanguage.SWEDISH,
+    /** Av: bara tvingade undertexter visas, t.ex. när någon talar ett tredje språk. */
+    val autoSubtitles: Boolean = false,
+
+    // --- Effekter ---
+    val effects: EffectLevel = EffectLevel.FULL,
 
     // --- Dolda kategorier ---
     /**
@@ -126,7 +140,53 @@ enum class CategorySort(val label: String, val code: Int) {
 enum class ThemeChoice(val label: String) {
     NORRSKEN("Norrsken"),
     TITAN("Titan"),
+    SNOW("Snö"),
     MIDNIGHT("Midnatt"),
+}
+
+/**
+ * Bakgrundseffekternas nivå. Reducerad halverar antalet partiklar och
+ * ritar med 30 bilder i sekunden — för telefoner och svagare boxar.
+ */
+enum class EffectLevel(val label: String, val particleFactor: Float) {
+    FULL("Full", 1f),
+    REDUCED("Reducerad", 0.45f),
+    OFF("Av", 0f),
+}
+
+/**
+ * Bildkvalitet för strömmar med flera kvalitetsnivåer (de flesta HLS).
+ *
+ * Automatisk börjar lågt och klättrar när nätet visat sig klara det — det
+ * ger snabb start men suddig bild de första sekunderna. Högsta hoppar
+ * direkt till bästa nivån enheten kan avkoda.
+ */
+enum class VideoQuality(val label: String) {
+    AUTO("Automatisk"),
+    HIGHEST("Högsta möjliga"),
+    DATA_SAVER("Spara data (720p)"),
+}
+
+/** [code] är ISO 639-1. null betyder "låt strömmen välja". */
+enum class MediaLanguage(val label: String, val code: String?) {
+    SWEDISH("Svenska", "sv"),
+    ENGLISH("Engelska", "en"),
+    NORWEGIAN("Norska", "no"),
+    DANISH("Danska", "da"),
+    FINNISH("Finska", "fi"),
+    ORIGINAL("Originalspråk", null),
+}
+
+/**
+ * Förstärkning i millibel. Många IPTV-kanaler sänds med låg nivå, och att
+ * behöva vrida upp TV:n till max för en kanal och sedan få nästa i ansiktet
+ * är ett vanligt klagomål.
+ */
+enum class VolumeBoost(val label: String, val millibels: Int) {
+    OFF("Av", 0),
+    LOW("+3 dB", 300),
+    MEDIUM("+6 dB", 600),
+    HIGH("+9 dB", 900),
 }
 
 /**

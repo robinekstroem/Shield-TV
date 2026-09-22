@@ -53,6 +53,13 @@ class SettingsRepository @Inject constructor(
             textScale = map[TEXT_SCALE].toEnum(TextScale.MEDIUM),
             accent = map[ACCENT].toEnum(AccentChoice.THEME),
             videoScale = map[VIDEO_SCALE].toEnum(VideoScale.FIT),
+            videoQuality = map[VIDEO_QUALITY].toEnum(VideoQuality.AUTO),
+            tunneling = map[TUNNELING]?.toBooleanStrictOrNull() ?: false,
+            audioLanguage = map[AUDIO_LANGUAGE].toEnum(MediaLanguage.SWEDISH),
+            volumeBoost = map[VOLUME_BOOST].toEnum(VolumeBoost.OFF),
+            subtitleLanguage = map[SUBTITLE_LANGUAGE].toEnum(MediaLanguage.SWEDISH),
+            autoSubtitles = map[AUTO_SUBTITLES]?.toBooleanStrictOrNull() ?: false,
+            effects = map[EFFECTS].toEnum(EffectLevel.FULL),
             subtitleSize = map[SUBTITLE_SIZE].toEnum(SubtitleSize.NORMAL),
             subtitleBackground = map[SUBTITLE_BG].toEnum(SubtitleBackground.SHADOW),
             hiddenCategories = map[HIDDEN_CATEGORIES].toLines().toSet(),
@@ -76,6 +83,13 @@ class SettingsRepository @Inject constructor(
     suspend fun setCategorySort(value: CategorySort) = put(CATEGORY_SORT, value.name)
     suspend fun setTheme(value: ThemeChoice) = put(THEME, value.name)
     suspend fun setVideoScale(value: VideoScale) = put(VIDEO_SCALE, value.name)
+    suspend fun setVideoQuality(value: VideoQuality) = put(VIDEO_QUALITY, value.name)
+    suspend fun setTunneling(value: Boolean) = put(TUNNELING, value.toString())
+    suspend fun setAudioLanguage(value: MediaLanguage) = put(AUDIO_LANGUAGE, value.name)
+    suspend fun setVolumeBoost(value: VolumeBoost) = put(VOLUME_BOOST, value.name)
+    suspend fun setSubtitleLanguage(value: MediaLanguage) = put(SUBTITLE_LANGUAGE, value.name)
+    suspend fun setAutoSubtitles(value: Boolean) = put(AUTO_SUBTITLES, value.toString())
+    suspend fun setEffects(value: EffectLevel) = put(EFFECTS, value.name)
     suspend fun setSubtitleSize(value: SubtitleSize) = put(SUBTITLE_SIZE, value.name)
     suspend fun setSubtitleBackground(value: SubtitleBackground) = put(SUBTITLE_BG, value.name)
 
@@ -133,6 +147,13 @@ class SettingsRepository @Inject constructor(
         const val CATEGORY_SORT = "sort.categories"
         const val THEME = "appearance.theme"
         const val VIDEO_SCALE = "player.video_scale"
+        const val VIDEO_QUALITY = "picture.quality"
+        const val TUNNELING = "picture.tunneling"
+        const val AUDIO_LANGUAGE = "audio.language"
+        const val VOLUME_BOOST = "audio.volume_boost"
+        const val SUBTITLE_LANGUAGE = "subtitles.language"
+        const val AUTO_SUBTITLES = "subtitles.auto"
+        const val EFFECTS = "appearance.effects"
         const val SUBTITLE_SIZE = "subtitles.size"
         const val SUBTITLE_BG = "subtitles.background"
         const val HIDDEN_CATEGORIES = "categories.hidden"

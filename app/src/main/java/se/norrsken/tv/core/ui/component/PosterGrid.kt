@@ -93,19 +93,7 @@ private fun PosterCard(
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
-                Box(
-                    modifier = Modifier.fillMaxSize().padding(metrics.spaceSm),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = item.title,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = palette.textTertiary,
-                        textAlign = TextAlign.Center,
-                        maxLines = 4,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                ArtworkPlaceholder(title = item.title)
             }
         }
 

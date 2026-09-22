@@ -7,6 +7,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.remember
@@ -19,7 +24,11 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import se.norrsken.tv.core.device.LocalDeviceProfile
+import se.norrsken.tv.core.ui.effects.AmbientBackground
 import se.norrsken.tv.core.ui.theme.LocalPalette
+import se.norrsken.tv.core.ui.theme.LocalMotion
+import se.norrsken.tv.core.ui.theme.LocalPreferences
+import se.norrsken.tv.core.ui.theme.effectFor
 import se.norrsken.tv.feature.categories.CategoryManagerScreen
 import se.norrsken.tv.feature.favorites.FavoritesScreen
 import se.norrsken.tv.feature.guide.GuideScreen
@@ -27,13 +36,17 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import se.norrsken.tv.feature.home.HomeScreen
 import se.norrsken.tv.feature.livetv.LiveTvScreen
+import se.norrsken.tv.feature.moviedetail.MovieDetailScreen
 import se.norrsken.tv.feature.movies.MoviesScreen
 import se.norrsken.tv.feature.player.PlayerScreen
 import se.norrsken.tv.feature.search.SearchScreen
 import se.norrsken.tv.feature.series.SeriesScreen
 import se.norrsken.tv.feature.seriesdetail.SeriesDetailScreen
+import se.norrsken.tv.data.settings.EffectLevel
 import se.norrsken.tv.feature.player.PlayableKind
 import se.norrsken.tv.feature.settings.SettingsScreen
+import se.norrsken.tv.feature.settings.SettingsSection
+import se.norrsken.tv.feature.settings.SettingsSectionScreen
 import se.norrsken.tv.navigation.Destination
 
 /**
@@ -47,6 +60,7 @@ fun AppShell(
 ) {
     val profile = LocalDeviceProfile.current
     val palette = LocalPalette.current
+    val preferences = LocalPreferences.current
     val navController = rememberNavController()
     val current = currentDestination(navController)
     val counts by shellViewModel.counts.collectAsStateWithLifecycle()
@@ -79,6 +93,16 @@ fun AppShell(
     }
 
     Box(modifier = modifier.fillMaxSize().background(palette.background)) {
+        // Atmosfären ligger under allt annat. Skärmarna saknar egen
+        // bakgrund, så den syns igenom — utom i spelaren, som har sitt eget
+        // svarta lager.
+        AmbientBackground(
+            effect = effectFor(preferences.theme),
+            // Rörelse avstängd — i systemet eller i appen — betyder inga
+            // partiklar heller.
+            level = if (LocalMotion.current.reduced) EffectLevel.OFF else preferences.effects,
+            isTv = profile.isTv,
+        )
         if (profile.isTv) {
             Row(Modifier.fillMaxSize()) {
                 NavigationRail(current = current, onSelect = select, counts = counts)
@@ -117,6 +141,8 @@ private fun currentDestination(navController: NavHostController): Destination {
         // "Hem" nar man stod pa en seriesida.
         ?: when {
             route?.startsWith(SERIES_ROUTE) == true -> Destination.Series
+            route?.startsWith(MOVIE_ROUTE) == true -> Destination.Movies
+            route?.startsWith(SETTINGS_SECTION_ROUTE) == true -> Destination.Settings
             // Hanteringsskarmen hor till den avdelning man kom ifran. Rutten
             // ar monstret, inte vardet, sa typen avgors av argumentet.
             route?.startsWith(CATEGORIES_ROUTE) == true -> when (entry?.arguments?.getString("kind")) {
@@ -130,17 +156,35 @@ private fun currentDestination(navController: NavHostController): Destination {
 
 @Composable
 private fun AppNavHost(navController: NavHostController) {
+    val motion = LocalMotion.current
+    // Runt 420 ms: tillräckligt för att kännas som att man går in i något,
+    // kort nog att aldrig stå i vägen. Noll när rörelse är avstängd.
+    val duration = motion.scale(motion.transitionMs + 120)
+
     NavHost(
         navController = navController,
         startDestination = Destination.Home.route,
+        // Ny skärm växer fram ur en aning mindre skala. Den gamla tonar
+        // bara bort — två rörelser samtidigt ser nervöst ut.
+        enterTransition = {
+            fadeIn(tween(duration)) + scaleIn(tween(duration), initialScale = 0.96f)
+        },
+        exitTransition = { fadeOut(tween(duration / 2)) },
+        popEnterTransition = { fadeIn(tween(duration)) },
+        popExitTransition = {
+            fadeOut(tween(duration / 2)) + scaleOut(tween(duration / 2), targetScale = 0.96f)
+        },
     ) {
         composable(Destination.Home.route) {
             HomeScreen(
-                onOpenMovie = { id -> navController.play(PlayableKind.MOVIE, id) },
+                onOpenMovie = { id -> navController.navigate(MOVIE_ROUTE + id) },
+                onPlayMovie = { id -> navController.play(PlayableKind.MOVIE, id) },
                 onOpenSeries = { id -> navController.navigate(SERIES_ROUTE + id) },
                 onOpenChannel = { id -> navController.play(PlayableKind.CHANNEL, id) },
+                // Direkt till Källor: den som trycker på knappen vill lägga
+                // till en spellista, inte bläddra i inställningar.
                 onOpenSettings = {
-                    navController.navigate(Destination.Settings.route) {
+                    navController.navigate(SETTINGS_SECTION_ROUTE + SettingsSection.SOURCES.name) {
                         launchSingleTop = true
                     }
                 },
@@ -155,7 +199,7 @@ private fun AppNavHost(navController: NavHostController) {
         composable(Destination.Guide.route) { GuideScreen() }
         composable(Destination.Movies.route) {
             MoviesScreen(
-                onOpenMovie = { id -> navController.play(PlayableKind.MOVIE, id) },
+                onOpenMovie = { id -> navController.navigate(MOVIE_ROUTE + id) },
                 onManageCategories = { navController.navigate(CATEGORIES_ROUTE + "MOVIE") },
             )
         }
@@ -169,12 +213,36 @@ private fun AppNavHost(navController: NavHostController) {
         composable(Destination.Search.route) {
             SearchScreen(
                 onOpenChannel = { id -> navController.play(PlayableKind.CHANNEL, id) },
-                onOpenMovie = { id -> navController.play(PlayableKind.MOVIE, id) },
+                onOpenMovie = { id -> navController.navigate(MOVIE_ROUTE + id) },
                 onOpenSeries = { id -> navController.navigate(SERIES_ROUTE + id) },
+            )
+        }
+
+        composable(
+            route = MOVIE_ROUTE + "{id}",
+            arguments = listOf(navArgument("id") { type = NavType.StringType }),
+        ) {
+            MovieDetailScreen(
+                onPlay = { id -> navController.play(PlayableKind.MOVIE, id) },
             )
         }
         composable(Destination.Settings.route) {
             SettingsScreen(
+                onOpenSection = { section ->
+                    navController.navigate(SETTINGS_SECTION_ROUTE + section.name)
+                },
+            )
+        }
+
+        composable(
+            route = SETTINGS_SECTION_ROUTE + "{section}",
+            arguments = listOf(navArgument("section") { type = NavType.StringType }),
+        ) { entry ->
+            val section = entry.arguments?.getString("section")
+                ?.let { runCatching { SettingsSection.valueOf(it) }.getOrNull() }
+                ?: SettingsSection.SOURCES
+            SettingsSectionScreen(
+                section = section,
                 onManageCategories = { kind -> navController.navigate(CATEGORIES_ROUTE + kind) },
             )
         }
@@ -213,4 +281,6 @@ private fun NavHostController.play(kind: PlayableKind, id: Long) {
 
 private const val PLAYER_ROUTE = "player/"
 private const val SERIES_ROUTE = "series-detail/"
+private const val MOVIE_ROUTE = "movie-detail/"
 private const val CATEGORIES_ROUTE = "categories/"
+private const val SETTINGS_SECTION_ROUTE = "settings/"

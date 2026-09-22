@@ -1,6 +1,20 @@
 package se.norrsken.tv.feature.seriesdetail
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
+import se.norrsken.tv.core.ui.component.AuroraLoader
+import se.norrsken.tv.core.ui.component.SecondaryAction
+import se.norrsken.tv.core.ui.theme.LocalThemeStyle
+import se.norrsken.tv.core.util.openTrailer
+import se.norrsken.tv.data.db.entity.SeriesEntity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -8,7 +22,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -58,6 +71,11 @@ class SeriesDetailViewModel @Inject constructor(
         libraryDao.observeEpisodes(seriesId)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** Hela serieraden, levande — backdrop och beskrivning fylls på i efterhand. */
+    val series: StateFlow<SeriesEntity?> =
+        libraryDao.observeSeriesById(seriesId)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
     init {
         viewModelScope.launch {
             _title.value = libraryDao.seriesById(seriesId)?.title.orEmpty()
@@ -80,27 +98,97 @@ fun SeriesDetailScreen(
     val loading by viewModel.loading.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
 
+    val series by viewModel.series.collectAsStateWithLifecycle()
+    val style = LocalThemeStyle.current
+    val context = LocalContext.current
+
     LazyColumn(
-        modifier = modifier.fillMaxSize().padding(metrics.screenEdge),
+        modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(metrics.spaceSm),
     ) {
         item {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.headlineMedium,
-                color = palette.textPrimary,
-                modifier = Modifier.padding(bottom = metrics.spaceMd),
-            )
+            // Seriens huvud: backdrop som tonar ut i atmosfären, titel,
+            // fakta och beskrivning. Samma språk som filmsidan.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(metrics.heroHeight),
+            ) {
+                series?.backdropUrl?.let { url ->
+                    AsyncImage(
+                        model = url,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(Brush.horizontalGradient(listOf(palette.scrim, palette.scrimClear)))
+                )
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(Brush.verticalGradient(listOf(palette.scrimClear, palette.background)))
+                )
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(metrics.screenEdge)
+                        .widthIn(max = 640.dp),
+                    verticalArrangement = Arrangement.spacedBy(metrics.spaceSm),
+                ) {
+                    val name = series?.title ?: title
+                    Text(
+                        text = if (style.uppercaseHeadings) name.uppercase() else name,
+                        style = MaterialTheme.typography.displayLarge,
+                        color = palette.textPrimary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    val facts = listOfNotNull(
+                        series?.year?.toString(),
+                        series?.rating?.let { "★ %.1f".format(it) },
+                        series?.genres,
+                    )
+                    if (facts.isNotEmpty()) {
+                        Text(
+                            text = facts.joinToString("  ·  "),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = palette.textSecondary,
+                        )
+                    }
+                    series?.overview?.let {
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = palette.textSecondary,
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    // Trailerknappen finns bara när leverantören faktiskt
+                    // skickat en trailer.
+                    series?.trailerUrl?.let { trailer ->
+                        SecondaryAction(
+                            label = "Trailer",
+                            onClick = { openTrailer(context, trailer) },
+                            modifier = Modifier.padding(top = metrics.spaceSm),
+                        )
+                    }
+                }
+            }
         }
 
         if (loading && episodes.isEmpty()) {
             item {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(metrics.spaceMd),
+                Column(
+                    modifier = Modifier.padding(horizontal = metrics.screenEdge),
+                    verticalArrangement = Arrangement.spacedBy(metrics.spaceSm),
                 ) {
-                    CircularProgressIndicator()
                     Text("Hämtar avsnitt …", color = palette.textSecondary)
+                    AuroraLoader(modifier = Modifier.widthIn(max = 320.dp).fillMaxWidth())
                 }
             }
         }
@@ -111,6 +199,7 @@ fun SeriesDetailScreen(
                     text = message,
                     style = MaterialTheme.typography.bodyLarge,
                     color = palette.alert,
+                    modifier = Modifier.padding(horizontal = metrics.screenEdge),
                 )
             }
         }
@@ -123,7 +212,7 @@ fun SeriesDetailScreen(
             // scrollordning, sa ett lopande varde ger rubriker som forsvinner
             // nar man scrollar tillbaka.
             val startsSeason = episodes.getOrNull(index - 1)?.season != episode.season
-            Column {
+            Column(Modifier.padding(horizontal = metrics.screenEdge)) {
                 if (startsSeason) {
                     Text(
                         text = "Säsong ${episode.season}",

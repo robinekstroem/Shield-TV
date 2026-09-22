@@ -29,6 +29,27 @@ interface PlaylistDao {
     @Update
     suspend fun update(playlist: PlaylistEntity)
 
+    /**
+     * Det enda en import får skriva på spellistan.
+     *
+     * Tidigare skrev importen tillbaka hela raden från sin egen kopia i
+     * minnet. Den kopian hade lösenordet i klartext — så första importen
+     * efter att ett konto lagts till skrev över det krypterade lösenordet
+     * med klartext. En riktad UPDATE kan inte göra det, och kan heller inte
+     * skriva över något användaren ändrat medan importen pågick.
+     *
+     * COALESCE: användarens egen EPG-adress vinner alltid över
+     * leverantörens.
+     */
+    @Query(
+        """
+        UPDATE playlists
+        SET epgUrl = COALESCE(epgUrl, :providerEpgUrl), lastSyncUtc = :syncedAt
+        WHERE id = :id
+        """
+    )
+    suspend fun markSynced(id: Long, providerEpgUrl: String?, syncedAt: Long)
+
     @Delete
     suspend fun delete(playlist: PlaylistEntity)
 

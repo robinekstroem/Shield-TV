@@ -49,11 +49,10 @@ class XtreamImporter @Inject constructor(
             val movies = importVod(playlist, credentials)
             val series = importSeries(playlist, credentials)
 
-            playlistDao.update(
-                playlist.copy(
-                    epgUrl = playlist.epgUrl ?: client.xmltvUrl(credentials),
-                    lastSyncUtc = System.currentTimeMillis(),
-                )
+            playlistDao.markSynced(
+                id = playlist.id,
+                providerEpgUrl = client.xmltvUrl(credentials),
+                syncedAt = System.currentTimeMillis(),
             )
 
             send(ImportState.Done(channels = channels, movies = movies, series = series))

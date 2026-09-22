@@ -13,7 +13,7 @@ import kotlinx.coroutines.launch
 import se.norrsken.tv.data.db.entity.PlaylistEntity
 import se.norrsken.tv.data.db.entity.PlaylistType
 import se.norrsken.tv.data.playlist.ImportState
-import se.norrsken.tv.data.playlist.SourceImporter
+import se.norrsken.tv.data.playlist.ImportCoordinator
 import se.norrsken.tv.data.settings.AccentChoice
 import se.norrsken.tv.data.settings.CategorySort
 import se.norrsken.tv.data.settings.ChannelSort
@@ -25,7 +25,11 @@ import se.norrsken.tv.data.settings.SubtitleBackground
 import se.norrsken.tv.data.settings.SubtitleSize
 import se.norrsken.tv.data.settings.TextScale
 import se.norrsken.tv.data.settings.ThemeChoice
+import se.norrsken.tv.data.settings.EffectLevel
+import se.norrsken.tv.data.settings.MediaLanguage
+import se.norrsken.tv.data.settings.VideoQuality
 import se.norrsken.tv.data.settings.VideoScale
+import se.norrsken.tv.data.settings.VolumeBoost
 import se.norrsken.tv.data.playlist.extractXtreamCredentials
 import se.norrsken.tv.data.playlist.normalizeBaseUrl
 import se.norrsken.tv.data.metadata.MetadataRepository
@@ -39,7 +43,7 @@ data class SourceHint(val message: String)
 @HiltViewModel
 class PlaylistsViewModel @Inject constructor(
     private val repository: PlaylistRepository,
-    private val importer: SourceImporter,
+    private val imports: ImportCoordinator,
     private val settings: SettingsRepository,
     private val metadata: MetadataRepository,
 ) : ViewModel() {
@@ -64,6 +68,13 @@ class PlaylistsViewModel @Inject constructor(
     fun setCategorySort(value: CategorySort) = edit { settings.setCategorySort(value) }
     fun setTheme(value: ThemeChoice) = edit { settings.setTheme(value) }
     fun setVideoScale(value: VideoScale) = edit { settings.setVideoScale(value) }
+    fun setVideoQuality(value: VideoQuality) = edit { settings.setVideoQuality(value) }
+    fun setTunneling(value: Boolean) = edit { settings.setTunneling(value) }
+    fun setAudioLanguage(value: MediaLanguage) = edit { settings.setAudioLanguage(value) }
+    fun setVolumeBoost(value: VolumeBoost) = edit { settings.setVolumeBoost(value) }
+    fun setSubtitleLanguage(value: MediaLanguage) = edit { settings.setSubtitleLanguage(value) }
+    fun setAutoSubtitles(value: Boolean) = edit { settings.setAutoSubtitles(value) }
+    fun setEffects(value: EffectLevel) = edit { settings.setEffects(value) }
     fun setSubtitleSize(value: SubtitleSize) = edit { settings.setSubtitleSize(value) }
     fun setSubtitleBackground(value: SubtitleBackground) = edit { settings.setSubtitleBackground(value) }
     fun setTextScale(value: TextScale) = edit { settings.setTextScale(value) }
@@ -89,8 +100,8 @@ class PlaylistsViewModel @Inject constructor(
     val playlists: StateFlow<List<PlaylistEntity>> = repository.observePlaylists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    private val _importState = MutableStateFlow<ImportState>(ImportState.Idle)
-    val importState: StateFlow<ImportState> = _importState.asStateFlow()
+    /** Importens läge lever i ImportCoordinator, så det överlever navigering. */
+    val importState: StateFlow<ImportState> = imports.state
 
     private val _hint = MutableStateFlow<SourceHint?>(null)
     val hint: StateFlow<SourceHint?> = _hint.asStateFlow()
@@ -105,11 +116,11 @@ class PlaylistsViewModel @Inject constructor(
         val trimmed = url.trim()
         when {
             trimmed.isEmpty() -> {
-                _importState.value = ImportState.Failed("Ingen länk angiven.")
+                imports.fail("Ingen länk angiven.")
                 return
             }
             !trimmed.startsWith("http://") && !trimmed.startsWith("https://") -> {
-                _importState.value = ImportState.Failed("Länken måste börja med http:// eller https://")
+                imports.fail("Länken måste börja med http:// eller https://")
                 return
             }
         }
@@ -143,7 +154,7 @@ class PlaylistsViewModel @Inject constructor(
 
     fun addXtream(name: String, server: String, username: String, password: String) {
         if (server.isBlank() || username.isBlank() || password.isBlank()) {
-            _importState.value = ImportState.Failed("Fyll i server, användarnamn och lösenord.")
+            imports.fail("Fyll i server, användarnamn och lösenord.")
             return
         }
         start(
@@ -157,27 +168,16 @@ class PlaylistsViewModel @Inject constructor(
         )
     }
 
-    fun refresh(playlist: PlaylistEntity) {
-        viewModelScope.launch { run(playlist) }
-    }
+    fun refresh(playlist: PlaylistEntity) = imports.refresh(playlist)
 
     fun remove(playlist: PlaylistEntity) {
         viewModelScope.launch { repository.remove(playlist) }
     }
 
     fun dismiss() {
-        _importState.value = ImportState.Idle
+        imports.dismiss()
         _hint.value = null
     }
 
-    private fun start(playlist: PlaylistEntity) {
-        viewModelScope.launch {
-            val id = repository.add(playlist)
-            run(playlist.copy(id = id))
-        }
-    }
-
-    private suspend fun run(playlist: PlaylistEntity) {
-        importer.import(playlist).collect { state -> _importState.value = state }
-    }
+    private fun start(playlist: PlaylistEntity) = imports.addAndImport(playlist)
 }

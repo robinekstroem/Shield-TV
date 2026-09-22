@@ -141,6 +141,7 @@ class HomeViewModel @Inject constructor(
 @Composable
 fun HomeScreen(
     onOpenMovie: (Long) -> Unit,
+    onPlayMovie: (Long) -> Unit,
     onOpenSeries: (Long) -> Unit,
     onOpenChannel: (Long) -> Unit,
     onOpenSettings: () -> Unit,
@@ -169,11 +170,14 @@ fun HomeScreen(
     ) {
         state.hero?.let { hero ->
             item {
+                // Film: Spela startar direkt, Mer info öppnar filmens sida.
+                // Serie: det finns inget att spela innan man valt avsnitt.
                 HeroBanner(
                     content = hero,
                     onPlay = {
-                        if (hero.isSeries) onOpenSeries(hero.id) else onOpenMovie(hero.id)
+                        if (hero.isSeries) onOpenSeries(hero.id) else onPlayMovie(hero.id)
                     },
+                    onInfo = if (hero.isSeries) null else ({ onOpenMovie(hero.id) }),
                 )
             }
         }

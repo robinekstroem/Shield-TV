@@ -7,12 +7,15 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.common.util.Util
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import dagger.hilt.android.qualifiers.ApplicationContext
 import se.norrsken.tv.data.settings.AppPreferences
+import se.norrsken.tv.data.settings.VideoQuality
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -36,6 +39,7 @@ class PlayerFactory @Inject constructor(
 
         val builder = ExoPlayer.Builder(context)
             .setRenderersFactory(renderers)
+            .setTrackSelector(trackSelector(preferences))
             .setMediaSourceFactory(mediaSourceFactory(preferences))
             .setVideoChangeFrameRateStrategy(
                 if (preferences.matchFrameRate) {
@@ -63,16 +67,53 @@ class PlayerFactory @Inject constructor(
 
         return builder.build().apply {
             playWhenReady = true
-            // Obegransat antal kanaler ar redan ExoPlayers standard, sa
-            // "pa" behover inte satta nagot. Det ar "av" som maste gora
-            // jobbet — annars vore reglaget utan funktion.
-            if (!preferences.preferSurround) {
-                trackSelectionParameters = trackSelectionParameters
-                    .buildUpon()
-                    .setMaxAudioChannelCount(2)
-                    .build()
-            }
+            // Egen ljudsession, satt direkt. Volymförstärkningen i spelaren
+            // kopplas till sessionen, och utan ett fast id finns det inget
+            // att koppla till förrän ljudet redan börjat.
+            setAudioSessionId(Util.generateAudioSessionIdV21(context))
         }
+    }
+
+    /**
+     * Spårvalet — där bild- och ljudinställningarna faktiskt landar.
+     */
+    @OptIn(UnstableApi::class)
+    private fun trackSelector(preferences: AppPreferences): DefaultTrackSelector {
+        val selector = DefaultTrackSelector(context)
+        val params = selector.buildUponParameters()
+
+        when (preferences.videoQuality) {
+            VideoQuality.AUTO -> Unit
+            // Hoppar över den adaptiva uppvärmningen. Ger skarp bild direkt,
+            // men kräver att nätet faktiskt klarar högsta nivån.
+            VideoQuality.HIGHEST -> params.setForceHighestSupportedBitrate(true)
+            VideoQuality.DATA_SAVER -> params.setMaxVideoSize(1280, 720)
+        }
+
+        // Tunnlad uppspelning låter TV-hårdvaran synka ljud och bild själv.
+        // Jämnare på Android TV — men bara där enheten stödjer det, och
+        // ExoPlayer slår själv av det för spår som inte går att tunnla.
+        params.setTunnelingEnabled(preferences.tunneling)
+
+        preferences.audioLanguage.code?.let { params.setPreferredAudioLanguages(it) }
+
+        if (preferences.autoSubtitles) {
+            preferences.subtitleLanguage.code?.let { params.setPreferredTextLanguages(it) }
+        } else {
+            // Utan det här väljer ExoPlayer ändå spår som strömmen märkt som
+            // standard. "Av" ska betyda av — bara tvingade undertexter, som
+            // när någon i filmen talar ett tredje språk.
+            params.setIgnoredTextSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+        }
+
+        // Obegränsat antal kanaler är redan standard, så "på" behöver inget.
+        // Det är "av" som måste göra jobbet.
+        if (!preferences.preferSurround) {
+            params.setMaxAudioChannelCount(2)
+        }
+
+        selector.setParameters(params.build())
+        return selector
     }
 
     /**

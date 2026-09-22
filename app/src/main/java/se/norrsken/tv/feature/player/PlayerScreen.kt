@@ -1,6 +1,7 @@
 package se.norrsken.tv.feature.player
 
 import android.content.pm.ActivityInfo
+import android.media.audiofx.LoudnessEnhancer
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
@@ -74,8 +75,10 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.SubtitleView
+import androidx.compose.animation.core.tween
 import kotlinx.coroutines.delay
 import se.norrsken.tv.core.device.LocalDeviceProfile
+import se.norrsken.tv.core.ui.component.AuroraProgress
 import se.norrsken.tv.core.ui.component.FocusableSurface
 import se.norrsken.tv.core.ui.theme.LocalMetrics
 import se.norrsken.tv.core.ui.theme.LocalPalette
@@ -83,6 +86,7 @@ import se.norrsken.tv.core.ui.theme.LocalPreferences
 import se.norrsken.tv.core.util.findActivity
 import se.norrsken.tv.data.settings.SubtitleBackground
 import se.norrsken.tv.data.settings.VideoScale
+import se.norrsken.tv.data.settings.VolumeBoost
 import kotlin.math.max
 import kotlin.math.min
 
@@ -129,6 +133,11 @@ fun PlayerScreen(
         preferences.matchFrameRate,
         preferences.userAgent,
         preferences.preferSurround,
+        preferences.videoQuality,
+        preferences.tunneling,
+        preferences.audioLanguage,
+        preferences.subtitleLanguage,
+        preferences.autoSubtitles,
     ) {
         viewModel.playerFactory.create(preferences)
     }
@@ -157,6 +166,30 @@ fun PlayerScreen(
             player.removeListener(listener)
             player.release()
         }
+    }
+
+    // Volymförstärkning. Kopplas till spelarens ljudsession, som
+    // PlayerFactory sätter direkt vid start. Fungerar bara när appen själv
+    // avkodar ljudet: vid passthrough går Dolby-strömmen orörd till
+    // förstärkaren, och vid tunnlad uppspelning byter ExoPlayer session.
+    DisposableEffect(player, preferences.volumeBoost, preferences.tunneling) {
+        val enhancer = if (
+            preferences.volumeBoost == VolumeBoost.OFF || preferences.tunneling
+        ) {
+            null
+        } else {
+            // Vissa enheter saknar effekten helt och kastar då. Hellre ingen
+            // förstärkning än en krasch vid uppspelningsstart.
+            runCatching {
+                LoudnessEnhancer(player.audioSessionId).apply {
+                    setTargetGain(preferences.volumeBoost.millibels)
+                    // setEnabled anropas som funktion: den returnerar en
+                    // statuskod, och då godtar Kotlin inte "enabled = true".
+                    setEnabled(true)
+                }
+            }.getOrNull()
+        }
+        onDispose { enhancer?.release() }
     }
 
     // Pausa nar appen hamnar i bakgrunden, annars fortsatter ljudet.
@@ -356,8 +389,10 @@ fun PlayerScreen(
 
         AnimatedVisibility(
             visible = controlsVisible && error == null && !missing,
-            enter = fadeIn(),
-            exit = fadeOut(),
+            // 180 ms: snabbt nog att kännas som svar på knapptrycket, långt
+            // nog att inte blinka.
+            enter = fadeIn(tween(180)),
+            exit = fadeOut(tween(180)),
         ) {
             Controls(
                 title = playable?.title.orEmpty(),
@@ -534,19 +569,10 @@ private fun Controls(
                         style = MaterialTheme.typography.labelMedium,
                         color = palette.textSecondary,
                     )
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .height(4.dp)
-                            .background(palette.hairline, RoundedCornerShape(2.dp))
-                    ) {
-                        Box(
-                            Modifier
-                                .fillMaxWidth((position.toFloat() / duration).coerceIn(0f, 1f))
-                                .fillMaxHeight()
-                                .background(palette.signal, RoundedCornerShape(2.dp))
-                        )
-                    }
+                    AuroraProgress(
+                        fraction = position.toFloat() / duration,
+                        modifier = Modifier.weight(1f),
+                    )
                     Text(
                         text = formatTime(duration),
                         style = MaterialTheme.typography.labelMedium,

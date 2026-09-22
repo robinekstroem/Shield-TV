@@ -75,6 +75,16 @@ interface LibraryDao {
     @Query("SELECT * FROM movies WHERE id = :id")
     suspend fun movie(id: Long): MovieEntity?
 
+    /**
+     * Levande variant för detaljsidan. När TMDB hunnit fylla i backdrop och
+     * beskrivning dyker de upp på sidan direkt, utan att den laddas om.
+     */
+    @Query("SELECT * FROM movies WHERE id = :id")
+    fun observeMovie(id: Long): Flow<MovieEntity?>
+
+    @Query("SELECT * FROM series WHERE id = :id")
+    fun observeSeriesById(id: Long): Flow<SeriesEntity?>
+
     /** [pattern] kommer från likePattern(), inte direkt från användaren. */
     @Query(
         """

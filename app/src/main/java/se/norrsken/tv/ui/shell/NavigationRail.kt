@@ -90,8 +90,15 @@ fun NavigationRail(
         modifier = modifier
             .fillMaxHeight()
             .width(if (expanded) metrics.railExpanded else metrics.railCollapsed)
+            // Halvgenomskinlig, så snö och norrsken syns även bakom menyn.
+            // Helt täckande hade gjort den till en vägg mitt i atmosfären.
             .background(
-                Brush.horizontalGradient(listOf(palette.ambient, palette.background))
+                Brush.horizontalGradient(
+                    listOf(
+                        palette.ambient.copy(alpha = 0.92f),
+                        palette.background.copy(alpha = 0.55f),
+                    )
+                )
             )
             .onFocusChanged { expanded = it.hasFocus }
             .focusGroup()

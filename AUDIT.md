@@ -12,6 +12,41 @@ Status per denna checkpoint. Skriven ur koden, inte ur minnet.
 
 ## Senast tillagt, overifierat på enhet
 
+### Cinematic-omgången
+- Spec:ens färgsystem i Norrsken-temat (#03070A, Aurora Cyan #57E6F2 m.fl.)
+  med sekundär accent för aurora-gradienter.
+- Bakgrundsmotor: genererat norrsken (31–45 s per cykel), vinjett, filmkorn.
+- Startsekvens 2,4 s ovanpå appen — blockerar inte starten, hoppas över
+  med ett tryck.
+- Detaljsida för film. Omslag öppnar den nu i stället för att spela direkt.
+- Filmiskt huvud på seriesidan.
+- Övergångar mellan skärmar, 180 ms-toning i spelaren.
+- Egen laddning och aurora-progress i stället för Materials komponenter.
+- Respekterar systemets "Ta bort animationer" fullt ut.
+
+### Inte byggt ur cinematic-spec:en, och varför
+- 4K-bakgrundsbilder: följde inte med. Motorn kan ta emot dem.
+- Resume-progress: kräver tittarhistorik.
+- Programinfo i Live TV: kräver EPG.
+- Filmlogotyper (clearlogo): TMDB har dem, hämtas inte än.
+- HDR/Dolby-märken på detaljsidan: kända först när strömmen spelar.
+- Dämpning av omgivande kort vid fokus, parallax: inte byggt.
+- Seek-förhandsbilder: IPTV-leverantörer skickar dem i praktiken aldrig.
+
+### Föregående omgång
+- Snö-tema. Bakgrundseffekter per tema: norrsken, gnistor, snö. Nivå
+  Full/Reducerad/Av. Aldrig bakom videon.
+- Inställningar uppdelade i åtta områden med aktuella värden i översikten.
+- Bild: kvalitet (automatisk/högsta/spara data), tunnlad uppspelning,
+  visning av skärmens upplösning och HDR-format.
+- Ljud: ljudspråk, volymförstärkning, visning av vilka format HDMI-kedjan tar.
+- Undertext: automatisk på/av och språk.
+- Import körs i appens livscykel — Back avbryter den inte längre.
+- **Säkerhetsfix:** importen skrev tillbaka hela spellisteraden och ersatte
+  därmed det krypterade lösenordet med klartext vid första importen.
+
+### Tidigare
+
 - Tre teman: Norrsken, Titan, Midnatt. Tema styr palett, fokusglöd,
   rubrikstil och typografins tyngd — inte bara accentfärgen.
 - Dolda kategorier: enskilt eller med ordfilter. Innehållet döljs även under
@@ -93,6 +128,9 @@ Daredevil" matchade inte varandra.
   öppnas igen börjar från början.
 - **Ljudfördröjning.** Media3 har inget enkelt API för det. Kräver egen
   AudioSink.
+- **Nattläge / dialogförstärkning.** Möjligt med Androids DynamicsProcessing
+  men inte byggt. Volymförstärkningen finns, komprimeringen inte.
+- **Tablå och Favoriter** leder fortfarande till platshållarskärmar.
 
 ## Nästa checkpoint
 

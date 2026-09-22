@@ -15,7 +15,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.unit.Dp
@@ -88,6 +90,23 @@ fun FocusableSurface(
                 width = if (focused) metrics.focusRingWidth else 0.dp,
                 color = if (focused) palette.focus else Color.Transparent,
                 shape = shape,
+            )
+            .then(
+                if (glow) {
+                    // Omslaget ljusnar en aning vid fokus. Ljus i stället för
+                    // en färgad ram — det är ljuset ögat hittar på avstånd.
+                    Modifier.drawWithContent {
+                        drawContent()
+                        if (focused) {
+                            drawRoundRect(
+                                color = Color.White.copy(alpha = 0.07f),
+                                cornerRadius = CornerRadius(cornerRadius.toPx()),
+                            )
+                        }
+                    }
+                } else {
+                    Modifier
+                }
             )
             .onFocusChanged { focused = it.isFocused }
             .clickable(

@@ -46,6 +46,7 @@ fun HeroBanner(
     content: HeroContent,
     onPlay: () -> Unit,
     modifier: Modifier = Modifier,
+    onInfo: (() -> Unit)? = null,
 ) {
     val palette = LocalPalette.current
     val metrics = LocalMetrics.current
@@ -126,11 +127,18 @@ fun HeroBanner(
                 )
             }
 
-            PrimaryAction(
-                label = if (content.isSeries) "Visa avsnitt" else "Spela nu",
-                onClick = onPlay,
+            Row(
                 modifier = Modifier.padding(top = metrics.spaceSm),
-            )
+                horizontalArrangement = Arrangement.spacedBy(metrics.spaceMd),
+            ) {
+                PrimaryAction(
+                    label = if (content.isSeries) "Visa avsnitt" else "Spela",
+                    onClick = onPlay,
+                )
+                if (onInfo != null) {
+                    SecondaryAction(label = "Mer info", onClick = onInfo)
+                }
+            }
         }
     }
 }
@@ -139,6 +147,30 @@ fun HeroBanner(
  * Vit knapp for den primara handlingen, som i mockupen. Vit — inte kulor —
  * sa den fungerar over vilken backdrop som helst.
  */
+@Composable
+fun SecondaryAction(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val palette = LocalPalette.current
+    val metrics = LocalMetrics.current
+
+    FocusableSurface(
+        onClick = onClick,
+        focusScale = 1.04f,
+        cornerRadius = metrics.radiusCard,
+        modifier = modifier,
+    ) { focused ->
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleMedium,
+            color = if (focused) palette.focus else palette.textPrimary,
+            modifier = Modifier.padding(horizontal = metrics.spaceLg, vertical = metrics.spaceSm),
+        )
+    }
+}
+
 @Composable
 fun PrimaryAction(
     label: String,

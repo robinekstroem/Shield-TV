@@ -121,34 +121,17 @@ private fun RailCard(
                             ),
                     )
                 } else {
-                    Text(
-                        text = item.title,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = palette.textTertiary,
-                        textAlign = TextAlign.Center,
-                        maxLines = 4,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .padding(metrics.spaceSm),
-                    )
+                    ArtworkPlaceholder(title = item.title)
                 }
 
                 item.progress?.let { value ->
-                    Box(
-                        Modifier
+                    AuroraProgress(
+                        fraction = value,
+                        height = 3.dp,
+                        modifier = Modifier
                             .align(Alignment.BottomStart)
-                            .fillMaxWidth()
-                            .height(3.dp)
-                            .background(palette.hairline)
-                    ) {
-                        Box(
-                            Modifier
-                                .fillMaxWidth(value.coerceIn(0f, 1f))
-                                .height(3.dp)
-                                .background(palette.signal, RoundedCornerShape(2.dp))
-                        )
-                    }
+                            .fillMaxWidth(),
+                    )
                 }
             }
         }

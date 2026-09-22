@@ -96,13 +96,10 @@ class PlaylistImporter @Inject constructor(
             send(ImportState.Saving("kanaler", saved, total))
         }
 
-        playlistDao.update(
-            playlist.copy(
-                // Leverantörens egen EPG-adress används bara om användaren
-                // inte redan satt en. Användarens val vinner alltid.
-                epgUrl = playlist.epgUrl ?: parsed.epgUrl,
-                lastSyncUtc = System.currentTimeMillis(),
-            )
+        playlistDao.markSynced(
+            id = playlist.id,
+            providerEpgUrl = parsed.epgUrl,
+            syncedAt = System.currentTimeMillis(),
         )
 
         send(ImportState.Done(channels = total, movies = 0, series = 0))
