@@ -1,5 +1,6 @@
 package se.norrsken.tv.core.ui.component
 
+import kotlinx.coroutines.delay
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -207,7 +208,7 @@ fun HeroInfo(
             return@LaunchedEffect
         }
         visible = false
-        kotlinx.coroutines.delay(motion.scale(140).toLong())
+        delay(motion.scale(140).toLong())
         shown = content
         visible = true
     }
