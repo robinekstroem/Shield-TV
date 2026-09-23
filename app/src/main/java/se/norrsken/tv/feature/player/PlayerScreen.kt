@@ -126,6 +126,7 @@ fun PlayerScreen(
 
     val rootFocus = remember { FocusRequester() }
     val playFocus = remember { FocusRequester() }
+    val timelineFocus = remember { FocusRequester() }
     val panelFocus = remember { FocusRequester() }
 
     // Byggs om bara nar ett val som styr sjalva motorn andras. Byte av
@@ -144,6 +145,10 @@ fun PlayerScreen(
     ) {
         viewModel.playerFactory.create(preferences)
     }
+
+    // Positionen överlever att spelaren byggs om. Utan det började filmen
+    // från noll varje gång en uppspelningsinställning ändrades mitt i.
+    var resumeAt by remember { mutableLongStateOf(-1L) }
 
     DisposableEffect(player) {
         val listener = object : Player.Listener {
@@ -166,6 +171,11 @@ fun PlayerScreen(
         player.addListener(listener)
         playing = player.playWhenReady
         onDispose {
+            // Spara innan spelaren släpps — både när skärmen lämnas och när
+            // den byggs om av en ändrad inställning.
+            val at = player.currentPosition
+            resumeAt = at
+            viewModel.saveProgress(at, player.duration)
             player.removeListener(listener)
             player.release()
         }
@@ -237,9 +247,24 @@ fun PlayerScreen(
         error = null
         player.setMediaItem(MediaItem.fromUri(url))
         player.prepare()
+        // Två fall: ombyggd spelare (positionen ligger i minnet) eller ny
+        // uppspelning (positionen kommer ur historiken).
+        val start = if (resumeAt >= 0) resumeAt else viewModel.resumePosition()
+        if (start > 0 && playable?.isLive != true) player.seekTo(start)
     }
 
     val isLive = playable?.isLive != false
+
+    // Löpande sparande. Utan det försvinner allt om appen dödas eller
+    // strömmen bryts mitt i en film.
+    LaunchedEffect(player, isLive) {
+        if (isLive) return@LaunchedEffect
+        while (true) {
+            delay(15_000)
+            viewModel.saveProgress(player.currentPosition, player.duration)
+        }
+    }
+
     LaunchedEffect(player, isLive, playable?.url) {
         if (isLive) return@LaunchedEffect
         while (true) {
@@ -264,7 +289,16 @@ fun PlayerScreen(
         runCatching {
             when {
                 panel != Panel.NONE -> panelFocus.requestFocus()
-                controlsVisible && profile.isTv -> playFocus.requestFocus()
+                // Film: fokus på tidslinjen, så vänster och höger spolar
+                // direkt. Finns ingen tidslinje ännu — live, eller längden
+                // inte känd — tas Spela i stället.
+                controlsVisible && profile.isTv ->
+                    if (!isLive) {
+                        runCatching { timelineFocus.requestFocus() }
+                            .getOrElse { playFocus.requestFocus() }
+                    } else {
+                        playFocus.requestFocus()
+                    }
                 !controlsVisible -> rootFocus.requestFocus()
             }
         }
@@ -417,6 +451,12 @@ fun PlayerScreen(
                 onPlayPause = { togglePlayback() },
                 onSeekBack = { seekBy(-SEEK_STEP_MS) },
                 onSeekForward = { seekBy(SEEK_STEP_MS) },
+                onSeekTo = { fraction ->
+                    val end = max(0L, player.duration)
+                    if (end > 0) player.seekTo((end * fraction).toLong().coerceIn(0L, end))
+                    touched()
+                },
+                timelineFocus = timelineFocus,
                 onAudio = { panel = Panel.AUDIO; touched() },
                 onSubtitles = { panel = Panel.SUBTITLES; touched() },
                 onBack = onBack,
@@ -481,6 +521,8 @@ private fun Controls(
     onPlayPause: () -> Unit,
     onSeekBack: () -> Unit,
     onSeekForward: () -> Unit,
+    onSeekTo: (Float) -> Unit,
+    timelineFocus: FocusRequester,
     onAudio: () -> Unit,
     onSubtitles: () -> Unit,
     onBack: () -> Unit,
@@ -614,24 +656,51 @@ private fun Controls(
 
             // Tidslinjen finns bara nar det finns en tid. Live har ingen.
             if (!isLive && duration > 0) {
+                var timelineFocused by remember { mutableStateOf(false) }
                 Row(
-                    modifier = Modifier.padding(top = metrics.spaceMd),
+                    modifier = Modifier
+                        .padding(top = metrics.spaceMd)
+                        .focusRequester(timelineFocus)
+                        .onFocusChanged { timelineFocused = it.isFocused }
+                        .focusable()
+                        // Tidslinjen äger pilarna när den har fokus. Utan det
+                        // flyttade vänster och höger bara fokus mellan
+                        // knapparna, och spolningen försvann just när man
+                        // tittade på tidslinjen.
+                        .onKeyEvent { event ->
+                            if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                            when (event.key) {
+                                Key.DirectionLeft -> { onSeekBack(); true }
+                                Key.DirectionRight -> { onSeekForward(); true }
+                                else -> false
+                            }
+                        },
                     horizontalArrangement = Arrangement.spacedBy(metrics.spaceSm),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
                         text = formatTime(position),
                         style = MaterialTheme.typography.labelMedium,
-                        color = palette.textSecondary,
+                        color = if (timelineFocused) palette.focus else palette.textSecondary,
                     )
                     AuroraProgress(
                         fraction = position.toFloat() / duration,
-                        modifier = Modifier.weight(1f),
+                        // Tjockare när den har fokus — så det syns vilket
+                        // element pilarna styr.
+                        height = if (timelineFocused) 8.dp else 4.dp,
+                        modifier = Modifier
+                            .weight(1f)
+                            // Tryck var som helst på linjen hoppar dit.
+                            .pointerInput(duration) {
+                                detectTapGestures { offset ->
+                                    onSeekTo((offset.x / size.width).coerceIn(0f, 1f))
+                                }
+                            },
                     )
                     Text(
                         text = formatTime(duration),
                         style = MaterialTheme.typography.labelMedium,
-                        color = palette.textSecondary,
+                        color = if (timelineFocused) palette.focus else palette.textSecondary,
                     )
                 }
             }

@@ -58,3 +58,23 @@ data class XtreamEpisode(
     val thumbnail: String?,
     val durationSeconds: Int?,
 )
+
+/**
+ * Leverantörens egen data om en film, hämtad på filmens eget id.
+ *
+ * Ingen titelmatchning inblandad — det här ÄR filmen, inte en gissning om
+ * vilken film den kan vara. Kvaliteten varierar mellan leverantörer, men
+ * den kan aldrig peka på fel titel.
+ */
+data class XtreamVodInfo(
+    val plot: String?,
+    val cover: String?,
+    val backdrop: String?,
+    val genre: String?,
+    val director: String?,
+    val cast: String?,
+    val releaseDate: String?,
+    val rating: Double?,
+    val durationSeconds: Int?,
+    val trailer: String?,
+)

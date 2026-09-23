@@ -76,6 +76,53 @@ class XtreamClient @Inject constructor(
         array(c, "get_series").mapObjects(::parseSeries)
 
     /**
+     * Leverantörens data om en film. Ett anrop per film, på begäran — av
+     * samma skäl som avsnitten: tusentals filmer skulle bli tusentals anrop.
+     */
+    fun vodInfo(c: XtreamCredentials, streamId: Int): XtreamVodInfo? {
+        val root = obj(c, "get_vod_info", "vod_id" to streamId.toString())
+        val info = root.optJSONObject("info") ?: return null
+        val movie = root.optJSONObject("movie_data")
+
+        // Backdropen kommer som lista; första bilden är den leverantören
+        // valt först.
+        val backdrop = info.optJSONArray("backdrop_path")
+            ?.takeIf { it.length() > 0 }
+            ?.optString(0)
+            ?.ifEmpty { null }
+
+        return XtreamVodInfo(
+            plot = info.optString("plot").ifEmpty { info.optString("description").ifEmpty { null } },
+            cover = info.optString("movie_image").ifEmpty { null },
+            backdrop = backdrop,
+            genre = info.optString("genre").ifEmpty { null },
+            director = info.optString("director").ifEmpty { null },
+            cast = info.optString("cast").ifEmpty { null },
+            releaseDate = info.optString("releasedate").ifEmpty {
+                info.optString("release_date").ifEmpty { null }
+            },
+            rating = info.optString("rating").toDoubleOrNull(),
+            // Vissa skickar sekunder, andra "1:58:00".
+            durationSeconds = info.optInt("duration_secs").takeIf { it > 0 }
+                ?: parseDuration(info.optString("duration")),
+            trailer = info.optString("youtube_trailer").ifEmpty { null }
+                ?: movie?.optString("youtube_trailer")?.ifEmpty { null },
+        )
+    }
+
+    /** "1:58:00" eller "118" → sekunder. */
+    private fun parseDuration(value: String): Int? {
+        if (value.isEmpty()) return null
+        val parts = value.split(':').mapNotNull { it.trim().toIntOrNull() }
+        return when (parts.size) {
+            3 -> parts[0] * 3600 + parts[1] * 60 + parts[2]
+            2 -> parts[0] * 60 + parts[1]
+            1 -> parts[0] * 60
+            else -> null
+        }.takeIf { it != null && it > 0 }
+    }
+
+    /**
      * Avsnitten för en serie. Hämtas per serie, på begäran — aldrig i
      * importen. Med 3000 serier i biblioteket skulle det bli 3000 anrop,
      * vilket tar tiotals minuter och får vissa paneler att strypa kontot.

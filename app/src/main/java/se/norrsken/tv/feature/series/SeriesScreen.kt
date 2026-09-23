@@ -18,7 +18,11 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -36,6 +40,8 @@ import se.norrsken.tv.data.db.entity.CategoryEntity
 import se.norrsken.tv.data.db.entity.ContentKind
 import se.norrsken.tv.data.metadata.MetadataRepository
 import se.norrsken.tv.data.repository.CategoryVisibility
+import se.norrsken.tv.data.repository.likePattern
+import se.norrsken.tv.feature.library.LibraryBrowser
 import se.norrsken.tv.data.repository.isCategoryHidden
 import se.norrsken.tv.data.settings.AppPreferences
 import se.norrsken.tv.data.settings.CategorySort
@@ -43,7 +49,7 @@ import se.norrsken.tv.data.settings.LibrarySort
 import se.norrsken.tv.data.settings.SettingsRepository
 import javax.inject.Inject
 
-@OptIn(ExperimentalCoroutinesApi::class)
+@OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 @HiltViewModel
 class SeriesViewModel @Inject constructor(
     libraryDao: LibraryDao,
@@ -100,16 +106,32 @@ class SeriesViewModel @Inject constructor(
         combine(_selected, hiddenIds) { id, hidden -> id?.takeIf { it !in hidden } }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    private val _filter = MutableStateFlow("")
+    val filter: StateFlow<String> = _filter.asStateFlow()
+
+    /** Hur många titlar som hämtas just nu. Växer när man närmar sig slutet. */
+    private val _limit = MutableStateFlow(PAGE)
+
     val series: StateFlow<List<PosterItem>> =
-        combine(_selected, preferences, hiddenIds) { id, prefs, hidden ->
-            Triple(id?.takeIf { it !in hidden }, prefs.librarySort, hidden)
+        combine(
+            _selected,
+            preferences,
+            hiddenIds,
+            // Paus innan sökningen körs: utan den blir varje tangenttryck en
+            // fråga mot databasen.
+            _filter.debounce(250).map { it.trim().ifBlank { null }?.let(::likePattern) },
+            _limit,
+        ) { id, prefs, hidden, pattern, limit ->
+            LibraryQuery(id?.takeIf { it !in hidden }, prefs.librarySort, hidden, pattern, limit)
         }
-        .flatMapLatest { (categoryId, sort, hidden) ->
+        .distinctUntilChanged()
+        .flatMapLatest { query ->
             libraryDao.observeSeries(
-                categoryId = categoryId,
-                sort = sort.code,
-                hiddenIds = hidden,
-                limit = 300,
+                categoryId = query.categoryId,
+                sort = query.sort.code,
+                hiddenIds = query.hidden,
+                filter = query.filter,
+                limit = query.limit,
             )
         }
         .map { list ->
@@ -119,13 +141,32 @@ class SeriesViewModel @Inject constructor(
                     title = item.title,
                     subtitle = item.year?.toString(),
                     posterUrl = item.posterUrl,
+                    backdropUrl = item.backdropUrl,
+                    rating = item.rating,
+                    overview = item.overview,
                 )
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    fun setFilter(value: String) {
+        _filter.value = value
+        _limit.value = PAGE
+    }
+
+    /**
+     * Nästa sida — men bara om den nuvarande faktiskt var full. Annars hade
+     * slutet av biblioteket bett om mer i all oändlighet.
+     */
+    fun loadMore() {
+        if (series.value.size >= _limit.value && _limit.value < MAX_ITEMS) {
+            _limit.value = _limit.value + PAGE
+        }
+    }
+
     fun select(categoryId: Long?) {
         _selected.value = categoryId
+        _limit.value = PAGE
     }
 
     fun fillMissingArtwork(id: Long) {
@@ -140,62 +181,45 @@ fun SeriesScreen(
     modifier: Modifier = Modifier,
     viewModel: SeriesViewModel = hiltViewModel(),
 ) {
-    val series by viewModel.series.collectAsStateWithLifecycle()
+    val items by viewModel.series.collectAsStateWithLifecycle()
     val categories by viewModel.categories.collectAsStateWithLifecycle()
     val selected by viewModel.selected.collectAsStateWithLifecycle()
     val sortLabel by viewModel.sortLabel.collectAsStateWithLifecycle()
     val categorySortLabel by viewModel.categorySortLabel.collectAsStateWithLifecycle()
-    val profile = LocalDeviceProfile.current
-    val metrics = LocalMetrics.current
+    val filter by viewModel.filter.collectAsStateWithLifecycle()
 
-    if (series.isEmpty() && categories.isEmpty()) {
-        EmptyState(
-            modifier = modifier,
-            title = "Inga serier",
-            body = "Serier kommer från ett Xtream-konto. Avsnitten hämtas " +
-                "först när du öppnar en serie.",
-        )
-        return
-    }
-
-    val grid = @Composable { mod: Modifier ->
-        PosterGrid(
-            items = series,
-            onOpen = { onOpenSeries(it.id) },
-            onMissingPoster = { viewModel.fillMissingArtwork(it.id) },
-            modifier = mod,
-        )
-    }
-
-    if (profile.isTv) {
-        Row(modifier = modifier.fillMaxSize().padding(start = metrics.screenEdge)) {
-            CategoryColumn(
-                categories = categories,
-                selected = selected,
-                onSelect = viewModel::select,
-                allLabel = "Alla serier",
-                sortLabel = sortLabel,
-                onCycleSort = viewModel::cycleSort,
-                categorySortLabel = categorySortLabel,
-                onCycleCategorySort = viewModel::cycleCategorySort,
-                onManage = onManageCategories,
-                modifier = Modifier.width(240.dp),
-            )
-            grid(Modifier)
-        }
-    } else {
-        Column(modifier = modifier.fillMaxSize()) {
-            CategoryRow(
-                categories = categories,
-                selected = selected,
-                onSelect = viewModel::select,
-                allLabel = "Alla",
-                sortLabel = sortLabel,
-                onCycleSort = viewModel::cycleSort,
-                onManage = onManageCategories,
-                modifier = Modifier.padding(horizontal = metrics.screenEdge),
-            )
-            grid(Modifier)
-        }
-    }
+    LibraryBrowser(
+        items = items,
+        categories = categories,
+        selectedCategory = selected,
+        onSelectCategory = viewModel::select,
+        sortLabel = sortLabel,
+        onCycleSort = viewModel::cycleSort,
+        categorySortLabel = categorySortLabel,
+        onCycleCategorySort = viewModel::cycleCategorySort,
+        onManageCategories = onManageCategories,
+        filter = filter,
+        onFilterChange = viewModel::setFilter,
+        onOpen = { onOpenSeries(it.id) },
+        onMissingPoster = { viewModel.fillMissingArtwork(it.id) },
+        onNeedMore = viewModel::loadMore,
+        allLabel = "Alla serier",
+        filterLabel = "Filtrera serier",
+        emptyTitle = "Inga serier",
+        emptyBody = "Serier kommer från ett Xtream-konto. Avsnitten hämtas först när du öppnar en serie.",
+        modifier = modifier,
+    )
 }
+
+/** Allt som avgör vilken frågan blir. */
+private data class LibraryQuery(
+    val categoryId: Long?,
+    val sort: LibrarySort,
+    val hidden: List<Long>,
+    val filter: String?,
+    val limit: Int,
+)
+
+private const val PAGE = 200
+/** Tak mot att hela biblioteket hamnar i minnet på en TV-box. */
+private const val MAX_ITEMS = 4_000

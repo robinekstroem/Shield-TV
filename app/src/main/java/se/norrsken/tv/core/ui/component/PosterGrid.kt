@@ -9,12 +9,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -27,6 +30,10 @@ data class PosterItem(
     val title: String,
     val subtitle: String?,
     val posterUrl: String?,
+    /** Används av huvudytan när kortet markeras — inte av kortet självt. */
+    val backdropUrl: String? = null,
+    val rating: Double? = null,
+    val overview: String? = null,
 )
 
 /**
@@ -42,10 +49,21 @@ fun PosterGrid(
     onOpen: (PosterItem) -> Unit,
     modifier: Modifier = Modifier,
     onMissingPoster: (PosterItem) -> Unit = {},
+    onFocusItem: (PosterItem) -> Unit = {},
+    onNeedMore: () -> Unit = {},
 ) {
     val metrics = LocalMetrics.current
+    val state = rememberLazyGridState()
+
+    // Hämtar nästa sida när slutet närmar sig. Utan det stannade biblioteket
+    // vid första sidan, och resten av titlarna gick inte att nå alls.
+    LaunchedEffect(state, items.size) {
+        snapshotFlow { state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
+            .collect { last -> if (last >= items.size - 12) onNeedMore() }
+    }
 
     LazyVerticalGrid(
+        state = state,
         columns = GridCells.Adaptive(minSize = metrics.posterWidth),
         modifier = modifier.fillMaxSize().padding(metrics.screenEdge),
         horizontalArrangement = Arrangement.spacedBy(metrics.railSpacing),
@@ -56,6 +74,7 @@ fun PosterGrid(
                 item = items[index],
                 onOpen = onOpen,
                 onMissingPoster = onMissingPoster,
+                onFocusItem = onFocusItem,
             )
         }
     }
@@ -66,6 +85,7 @@ private fun PosterCard(
     item: PosterItem,
     onOpen: (PosterItem) -> Unit,
     onMissingPoster: (PosterItem) -> Unit,
+    onFocusItem: (PosterItem) -> Unit,
 ) {
     val palette = LocalPalette.current
     val metrics = LocalMetrics.current
@@ -83,7 +103,12 @@ private fun PosterCard(
             focusScale = metrics.focusScalePoster,
             cornerRadius = metrics.radiusPoster,
             glow = true,
-            modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f),
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(2f / 3f)
+                // Markeringen rapporteras uppåt: huvudytan visar filmens
+                // backdrop och fakta medan man bläddrar.
+                .onFocusChanged { if (it.isFocused) onFocusItem(item) },
         ) { _ ->
             if (item.posterUrl != null) {
                 AsyncImage(

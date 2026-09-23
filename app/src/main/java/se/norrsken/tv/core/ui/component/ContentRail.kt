@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.focusRestorer
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -41,8 +45,17 @@ data class RailItem(
     val imageUrl: String?,
     val progress: Float? = null,
     val wide: Boolean = false,
+    /** Avgör vad ett tryck ska göra: spela, eller öppna avsnittslistan. */
+    val isSeries: Boolean = false,
+    // Fälten nedan används av heron när kortet markeras, inte av kortet.
+    val backdropUrl: String? = null,
+    val overview: String? = null,
+    /** Färdigbyggd faktarad. Tom när inget är känt — aldrig "2026 • •". */
+    val meta: String? = null,
+    val isLive: Boolean = false,
 )
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ContentRail(
     title: String,
@@ -50,6 +63,7 @@ fun ContentRail(
     onOpen: (RailItem) -> Unit,
     modifier: Modifier = Modifier,
     onMissingImage: (RailItem) -> Unit = {},
+    onFocusItem: (RailItem) -> Unit = {},
 ) {
     if (items.isEmpty()) return
 
@@ -65,13 +79,28 @@ fun ContentRail(
             ),
         )
         LazyRow(
+            // focusRestorer: raden minns vilket kort som senast hade fokus
+            // och återställer det när man kommer tillbaka nerifrån eller
+            // från en detaljsida.
+            modifier = Modifier.focusRestorer(),
             horizontalArrangement = Arrangement.spacedBy(metrics.railSpacing),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                horizontal = metrics.screenEdge,
+            contentPadding = PaddingValues(
+                // Marginal bara till vänster: korten ska fortsätta ut ur
+                // bilden åt höger, så det syns att raden har mer.
+                start = metrics.screenEdge,
+                // Luft uppåt och nedåt så att ett förstorat kort inte
+                // klipps av radens kant.
+                top = metrics.spaceSm,
+                bottom = metrics.spaceSm,
             ),
         ) {
             items(items, key = { it.id }) { item ->
-                RailCard(item = item, onOpen = onOpen, onMissingImage = onMissingImage)
+                RailCard(
+                item = item,
+                onOpen = onOpen,
+                onMissingImage = onMissingImage,
+                onFocusItem = onFocusItem,
+            )
             }
         }
     }
@@ -82,6 +111,7 @@ private fun RailCard(
     item: RailItem,
     onOpen: (RailItem) -> Unit,
     onMissingImage: (RailItem) -> Unit,
+    onFocusItem: (RailItem) -> Unit,
 ) {
     val palette = LocalPalette.current
     val metrics = LocalMetrics.current
@@ -99,7 +129,10 @@ private fun RailCard(
             focusScale = metrics.focusScalePoster,
             cornerRadius = metrics.radiusPoster,
             glow = true,
-            modifier = Modifier.fillMaxWidth().aspectRatio(ratio),
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(ratio)
+                .onFocusChanged { if (it.isFocused) onFocusItem(item) },
         ) { _ ->
             Box(Modifier.fillMaxSize()) {
                 if (item.imageUrl != null) {

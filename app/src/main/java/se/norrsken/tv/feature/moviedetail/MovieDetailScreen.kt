@@ -55,6 +55,7 @@ import se.norrsken.tv.core.util.openTrailer
 import se.norrsken.tv.data.db.dao.LibraryDao
 import se.norrsken.tv.data.db.entity.MovieEntity
 import se.norrsken.tv.data.metadata.MetadataRepository
+import se.norrsken.tv.data.repository.VodDetailsRepository
 import javax.inject.Inject
 
 @HiltViewModel
@@ -62,6 +63,7 @@ class MovieDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     libraryDao: LibraryDao,
     metadata: MetadataRepository,
+    vodDetails: VodDetailsRepository,
 ) : ViewModel() {
 
     val movieId: Long = savedStateHandle.get<String>("id")?.toLongOrNull() ?: 0L
@@ -70,10 +72,16 @@ class MovieDetailViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     init {
-        // Saknas backdrop eller beskrivning försöker metadatalagret fylla i
-        // dem. Redan matchade titlar hoppas över där, så det här är gratis
-        // när allt redan finns.
-        viewModelScope.launch { metadata.resolveMovie(movieId) }
+        viewModelScope.launch {
+            // Leverantörens egen data först. Den slås upp på filmens eget
+            // id hos leverantören och kan därför aldrig peka på fel film.
+            val fromProvider = vodDetails.ensureDetails(movieId)
+
+            // TMDB används bara när leverantören inte hade något. Det är en
+            // matchning på titel, alltså en kvalificerad gissning — därför
+            // sist, aldrig först.
+            if (!fromProvider) metadata.resolveMovie(movieId)
+        }
     }
 }
 

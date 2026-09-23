@@ -29,6 +29,7 @@ interface LibraryDao {
         SELECT * FROM movies
         WHERE (:categoryId IS NULL OR categoryId = :categoryId)
           AND (categoryId IS NULL OR categoryId NOT IN (:hiddenIds))
+          AND (:filter IS NULL OR title LIKE :filter ESCAPE '\' OR rawTitle LIKE :filter ESCAPE '\')
         ORDER BY
             CASE WHEN :sort = 0 THEN addedUtc END DESC,
             CASE WHEN :sort = 1 THEN LOWER(title) END ASC,
@@ -42,6 +43,8 @@ interface LibraryDao {
         categoryId: Long?,
         sort: Int,
         hiddenIds: List<Long>,
+        /** Mönster från likePattern(), eller null för allt. */
+        filter: String?,
         limit: Int,
     ): Flow<List<MovieEntity>>
 
@@ -50,6 +53,7 @@ interface LibraryDao {
         SELECT * FROM series
         WHERE (:categoryId IS NULL OR categoryId = :categoryId)
           AND (categoryId IS NULL OR categoryId NOT IN (:hiddenIds))
+          AND (:filter IS NULL OR title LIKE :filter ESCAPE '\' OR rawTitle LIKE :filter ESCAPE '\')
         ORDER BY
             CASE WHEN :sort = 0 THEN addedUtc END DESC,
             CASE WHEN :sort = 1 THEN LOWER(title) END ASC,
@@ -63,6 +67,8 @@ interface LibraryDao {
         categoryId: Long?,
         sort: Int,
         hiddenIds: List<Long>,
+        /** Mönster från likePattern(), eller null för allt. */
+        filter: String?,
         limit: Int,
     ): Flow<List<SeriesEntity>>
 
@@ -74,6 +80,44 @@ interface LibraryDao {
 
     @Query("SELECT * FROM movies WHERE id = :id")
     suspend fun movie(id: Long): MovieEntity?
+
+    /**
+     * Fyller i leverantörens egen data om en film.
+     *
+     * COALESCE genomgående: ingenting som redan finns skrivs över. Har en
+     * titel redan matchats mot TMDB, eller rättats för hand, står det kvar.
+     *
+     * `cast` måste citeras — det är ett reserverat ord i SQL.
+     */
+    @Query(
+        """
+        UPDATE movies SET
+            overview = COALESCE(overview, :overview),
+            posterUrl = COALESCE(posterUrl, :poster),
+            backdropUrl = COALESCE(backdropUrl, :backdrop),
+            genres = COALESCE(genres, :genres),
+            director = COALESCE(director, :director),
+            `cast` = COALESCE(`cast`, :actors),
+            rating = COALESCE(rating, :rating),
+            runtimeMinutes = COALESCE(runtimeMinutes, :runtimeMinutes),
+            trailerUrl = COALESCE(trailerUrl, :trailer),
+            year = COALESCE(year, :year)
+        WHERE id = :id
+        """
+    )
+    suspend fun fillMovieDetails(
+        id: Long,
+        overview: String?,
+        poster: String?,
+        backdrop: String?,
+        genres: String?,
+        director: String?,
+        actors: String?,
+        rating: Double?,
+        runtimeMinutes: Int?,
+        trailer: String?,
+        year: Int?,
+    )
 
     /**
      * Levande variant för detaljsidan. När TMDB hunnit fylla i backdrop och

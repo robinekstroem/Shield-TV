@@ -52,11 +52,11 @@ data class Metrics(
             focusScalePoster = 1.08f,
             focusScaleWide = 1.04f,
             focusRingWidth = 3.dp,
-            posterWidth = 168.dp,
+            posterWidth = 200.dp,
             railSpacing = 20.dp,
             heroHeight = 420.dp,
             wideCardWidth = 260.dp,
-            railCollapsed = 88.dp,
+            railCollapsed = 72.dp,
             railExpanded = 256.dp,
         )
 

@@ -15,7 +15,11 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.padding
+import se.norrsken.tv.core.ui.theme.LocalMetrics
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.NavType
@@ -104,9 +108,30 @@ fun AppShell(
             isTv = profile.isTv,
         )
         if (profile.isTv) {
-            Row(Modifier.fillMaxSize()) {
-                NavigationRail(current = current, onSelect = select, counts = counts)
-                Box(Modifier.weight(1f)) { navHost() }
+            // Menyn ligger ÖVER innehållet, inte bredvid. Expanderar den i
+            // en rad flyttas hela skärmen åt höger, och då hoppar bilden
+            // varje gång man går in i menyn.
+            Box(Modifier.fillMaxSize()) {
+                // Hemskärmen får hela ytan: dess backdrop ska gå ända ut i
+                // vänsterkanten och menyn ligga ovanpå den. Övriga skärmar
+                // har text längst till vänster och behöver marginalen.
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(
+                            start = if (current == Destination.Home) {
+                                0.dp
+                            } else {
+                                LocalMetrics.current.railCollapsed
+                            }
+                        )
+                ) { navHost() }
+                NavigationRail(
+                    current = current,
+                    onSelect = select,
+                    counts = counts,
+                    modifier = Modifier.align(Alignment.CenterStart),
+                )
             }
         } else {
             Column(Modifier.fillMaxSize()) {
@@ -179,6 +204,7 @@ private fun AppNavHost(navController: NavHostController) {
             HomeScreen(
                 onOpenMovie = { id -> navController.navigate(MOVIE_ROUTE + id) },
                 onPlayMovie = { id -> navController.play(PlayableKind.MOVIE, id) },
+                onPlayEpisode = { id -> navController.play(PlayableKind.EPISODE, id) },
                 onOpenSeries = { id -> navController.navigate(SERIES_ROUTE + id) },
                 onOpenChannel = { id -> navController.play(PlayableKind.CHANNEL, id) },
                 // Direkt till Källor: den som trycker på knappen vill lägga

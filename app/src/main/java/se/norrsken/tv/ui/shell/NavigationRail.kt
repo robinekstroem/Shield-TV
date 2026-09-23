@@ -93,11 +93,13 @@ fun NavigationRail(
             .width(if (expanded) metrics.railExpanded else metrics.railCollapsed)
             // Halvgenomskinlig, så snö och norrsken syns även bakom menyn.
             // Helt täckande hade gjort den till en vägg mitt i atmosfären.
+            // Utfälld täcker menyn innehållet under sig och måste vara
+            // tätare. Kollapsad får atmosfären lysa igenom.
             .background(
                 Brush.horizontalGradient(
                     listOf(
-                        palette.ambient.copy(alpha = 0.92f),
-                        palette.background.copy(alpha = 0.55f),
+                        palette.background.copy(alpha = if (expanded) 0.97f else 0.85f),
+                        palette.background.copy(alpha = if (expanded) 0.90f else 0.35f),
                     )
                 )
             )

@@ -11,9 +11,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import se.norrsken.tv.data.db.dao.ChannelDao
 import se.norrsken.tv.data.db.dao.LibraryDao
+import se.norrsken.tv.data.db.entity.MediaKind
 import se.norrsken.tv.data.epg.NowNext
 import se.norrsken.tv.data.epg.NowPlayingRepository
 import se.norrsken.tv.data.player.PlayerFactory
+import se.norrsken.tv.data.repository.WatchHistoryRepository
 import se.norrsken.tv.data.settings.SettingsRepository
 import se.norrsken.tv.data.settings.VideoScale
 import javax.inject.Inject
@@ -40,6 +42,7 @@ class PlayerViewModel @Inject constructor(
     val playerFactory: PlayerFactory,
     private val settings: SettingsRepository,
     private val nowPlaying: NowPlayingRepository,
+    private val history: WatchHistoryRepository,
 ) : ViewModel() {
 
     private val _programme = MutableStateFlow<NowNext?>(null)
@@ -60,10 +63,34 @@ class PlayerViewModel @Inject constructor(
     /** Sant nar raden inte gick att hitta — battre an en tom svart skarm. */
     val missing: StateFlow<Boolean> = _missing.asStateFlow()
 
+    private val kind = savedStateHandle.get<String>("kind")
+        ?.let { runCatching { PlayableKind.valueOf(it) }.getOrNull() }
+    private val id = savedStateHandle.get<String>("id")?.toLongOrNull()
+
+    /** Serien ett avsnitt hör till — så historiken kan grupperas senare. */
+    private var seriesId: Long? = null
+
+    private val historyKind: MediaKind? = when (kind) {
+        PlayableKind.MOVIE -> MediaKind.MOVIE
+        PlayableKind.EPISODE -> MediaKind.EPISODE
+        // Live har ingen position att komma ihåg.
+        PlayableKind.CHANNEL, null -> null
+    }
+
+    /** Var uppspelningen ska börja. 0 = från början. */
+    suspend fun resumePosition(): Long {
+        val mediaKind = historyKind ?: return 0L
+        val mediaId = id ?: return 0L
+        return history.resumePosition(mediaKind, mediaId)
+    }
+
+    fun saveProgress(positionMs: Long, durationMs: Long) {
+        val mediaKind = historyKind ?: return
+        val mediaId = id ?: return
+        history.save(mediaKind, mediaId, seriesId, positionMs, durationMs)
+    }
+
     init {
-        val kind = savedStateHandle.get<String>("kind")
-            ?.let { runCatching { PlayableKind.valueOf(it) }.getOrNull() }
-        val id = savedStateHandle.get<String>("id")?.toLongOrNull()
 
         viewModelScope.launch {
             val resolved = when {
@@ -94,6 +121,7 @@ class PlayerViewModel @Inject constructor(
                     )
                 }
                 else -> libraryDao.episode(id)?.let { episode ->
+                    seriesId = episode.seriesId
                     val series = libraryDao.seriesById(episode.seriesId)
                     Playable(
                         title = episode.title,
