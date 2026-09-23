@@ -10,8 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.focusRestorer
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -55,7 +53,6 @@ data class RailItem(
     val isLive: Boolean = false,
 )
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ContentRail(
     title: String,
@@ -79,10 +76,6 @@ fun ContentRail(
             ),
         )
         LazyRow(
-            // focusRestorer: raden minns vilket kort som senast hade fokus
-            // och återställer det när man kommer tillbaka nerifrån eller
-            // från en detaljsida.
-            modifier = Modifier.focusRestorer(),
             horizontalArrangement = Arrangement.spacedBy(metrics.railSpacing),
             contentPadding = PaddingValues(
                 // Marginal bara till vänster: korten ska fortsätta ut ur

@@ -1,5 +1,6 @@
 package se.norrsken.tv.feature.player
 
+import androidx.compose.ui.focus.onFocusChanged
 import android.content.pm.ActivityInfo
 import android.media.audiofx.LoudnessEnhancer
 import android.view.ViewGroup
