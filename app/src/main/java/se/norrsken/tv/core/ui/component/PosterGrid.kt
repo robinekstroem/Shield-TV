@@ -22,6 +22,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import se.norrsken.tv.core.ui.theme.LocalMetrics
 import se.norrsken.tv.core.ui.theme.LocalPalette
