@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -134,18 +134,25 @@ fun AppShell(
                 )
             }
         } else {
-            // Mobil: innehållet ritas edge-to-edge. Topbaren ligger ovanpå
-            // artworken i stället för att reservera en svart remsa överst.
-            Column(Modifier.fillMaxSize()) {
-                Box(Modifier.weight(1f)) {
-                    navHost()
-                    TopBar(
-                        current = current,
-                        onSelect = select,
-                        modifier = Modifier.statusBarsPadding().align(Alignment.TopCenter),
-                    )
-                }
-                BottomBar(current = current, onSelect = select)
+            // Mobil V5: samma cinematic navigation-språk som på TV. Inga
+            // dubbla topp-/bottenmenyer: en smal rail ligger ovanpå artwork
+            // längs vänsterkanten. Bibliotekens sekundära glass-panel öppnas
+            // direkt till höger om denna rail.
+            // safeDrawingPadding: utan den ritas rubriker under klockan och
+            // hålkameran. Den ligger på innehållet och menyn, inte på
+            // bakgrunden — atmosfären ska fortfarande gå ut i kanten.
+            Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(start = LocalMetrics.current.railCollapsed)
+                ) { navHost() }
+                NavigationRail(
+                    current = current,
+                    onSelect = select,
+                    counts = counts,
+                    modifier = Modifier.align(Alignment.CenterStart),
+                )
             }
         }
     }

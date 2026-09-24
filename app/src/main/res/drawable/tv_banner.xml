@@ -1,13 +1,69 @@
-<!-- Android TV kräver 320x180. Platshållare tills du har riktig grafik. -->
+<!--
+  Banner för Android TV-menyn. Märket till vänster, ordbilden till höger.
+  Bokstäverna är ritade som streck, inte som text: en vektorfil kan inte
+  bära ett typsnitt, och geometriska former håller ihop med märket.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="320dp"
     android:height="180dp"
     android:viewportWidth="320"
     android:viewportHeight="180">
+
     <path
         android:fillColor="#03070A"
         android:pathData="M0,0h320v180h-320z" />
+
+    <!-- Märket -->
+    <path
+        android:pathData="M94.7,71.3 A26,26 0 1 0 94.7,108.7"
+        android:strokeColor="#56F0B4"
+        android:strokeWidth="4"
+        android:strokeAlpha="0.5"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M88.3,79.7 A16,16 0 1 0 88.3,100.3"
+        android:strokeColor="#57E6F2"
+        android:strokeWidth="6.5"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+    <path
+        android:fillColor="#F5F8FA"
+        android:pathData="M78,85 a5,5 0 1 0 0.01,0 z" />
+
+    <!-- C -->
+    <path
+        android:pathData="M160.1,73.1 A22,22 0 1 0 160.1,106.9"
+        android:strokeColor="#57E6F2"
+        android:strokeWidth="8"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- i -->
+    <path
+        android:pathData="M184,80 L184,112"
+        android:strokeColor="#F5F8FA"
+        android:strokeWidth="8"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
     <path
         android:fillColor="#57E6F2"
-        android:pathData="M96,118c20,-46 40,-70 64,-70s44,24 64,70c-24,-20 -44,-30 -64,-30s-40,10 -64,30z" />
+        android:pathData="M184,62 a4.5,4.5 0 1 0 0.01,0 z" />
+
+    <!-- T -->
+    <path
+        android:pathData="M202,72 L238,72 M220,72 L220,112"
+        android:strokeColor="#F5F8FA"
+        android:strokeWidth="8"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- V -->
+    <path
+        android:pathData="M250,72 L264,112 L278,72"
+        android:strokeColor="#F5F8FA"
+        android:strokeWidth="8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
 </vector>

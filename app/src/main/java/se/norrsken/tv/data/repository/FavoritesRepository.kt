@@ -21,8 +21,13 @@ class FavoritesRepository @Inject constructor(private val dao: UserDataDao) {
     fun series(): Flow<List<FavoriteSeries>> = dao.observeFavoriteSeries(PROFILE)
     fun channels(): Flow<List<FavoriteChannel>> = dao.observeFavoriteChannels(PROFILE)
 
-    suspend fun toggle(kind: MediaKind, refId: Long, favorite: Boolean) {
-        if (favorite) {
+    /**
+     * [currentlyFavorite] är läget just nu, inte det önskade. Hette
+     * parametern "favorite" läste man den som "gör till favorit", och nästa
+     * anropare hade fått tvärtom utan att något syntes.
+     */
+    suspend fun toggle(kind: MediaKind, refId: Long, currentlyFavorite: Boolean) {
+        if (currentlyFavorite) {
             dao.removeFavorite(PROFILE, kind, refId)
         } else {
             dao.addFavorite(

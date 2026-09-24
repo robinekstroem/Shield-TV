@@ -78,8 +78,8 @@ data class Metrics(
             railSpacing = 12.dp,
             heroHeight = 280.dp,
             wideCardWidth = 200.dp,
-            railCollapsed = 0.dp,
-            railExpanded = 0.dp,
+            railCollapsed = 58.dp,
+            railExpanded = 232.dp,
         )
     }
 }

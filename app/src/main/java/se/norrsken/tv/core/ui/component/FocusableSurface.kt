@@ -73,8 +73,8 @@ fun FocusableSurface(
                         elevation = 24.dp,
                         shape = shape,
                         clip = false,
-                        ambientColor = palette.signal,
-                        spotColor = palette.signal,
+                        ambientColor = Color.White.copy(alpha = 0.35f),
+                        spotColor = Color.White.copy(alpha = 0.55f),
                     )
                 } else {
                     Modifier

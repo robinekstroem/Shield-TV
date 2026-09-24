@@ -1,6 +1,11 @@
 package se.norrsken.tv.feature.library
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -13,10 +18,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -82,6 +90,9 @@ fun LibraryBrowser(
     val isTv = LocalDeviceProfile.current.isTv
 
     var focusedItem by remember { mutableStateOf<PosterItem?>(null) }
+    // På mobil öppnas nivå två direkt när man går in i Filmer/Serier. Ett
+    // val drar undan panelen och lämnar hela ytan åt innehållet.
+    var mobileMenuOpen by remember { mutableStateOf(!isTv) }
     // Markeringen kan peka på en titel som filtrerats bort. Visa bara den
     // som fortfarande finns i listan.
     val highlighted = focusedItem?.takeIf { current -> items.any { it.id == current.id } }
@@ -146,19 +157,48 @@ fun LibraryBrowser(
                     }
                 }
             } else {
-                CategoryRow(
-                    categories = categories,
-                    selected = selectedCategory,
-                    onSelect = onSelectCategory,
-                    allLabel = allLabel,
-                    sortLabel = sortLabel,
-                    onCycleSort = onCycleSort,
-                    onManage = onManageCategories,
-                    modifier = Modifier.padding(horizontal = metrics.screenEdge, vertical = 4.dp),
-                )
-                FilterField(filter, onFilterChange, filterLabel, compact = true)
-                Content(items, onOpen, onMissingPoster, onNeedMore, { focusedItem = it },
-                    emptyTitle, emptyBody, filter)
+                // Mobilens innehåll ligger kvar bakom nivå-två-menyn. Det gör
+                // att panelen känns som frostat glas ovanpå filmen, inte som
+                // ännu en separat Android-skärm.
+                Column(Modifier.fillMaxSize()) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = metrics.screenEdge, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        TextButton(onClick = { mobileMenuOpen = true }) {
+                            Text("Kategorier")
+                        }
+                    }
+                    FilterField(filter, onFilterChange, filterLabel, compact = true)
+                    Content(items, onOpen, onMissingPoster, onNeedMore, { focusedItem = it },
+                        emptyTitle, emptyBody, filter)
+                }
+
+                AnimatedVisibility(
+                    visible = mobileMenuOpen,
+                    enter = slideInHorizontally(initialOffsetX = { -it }) + fadeIn(),
+                    exit = slideOutHorizontally(targetOffsetX = { -it }) + fadeOut(),
+                ) {
+                    CategoryColumn(
+                        categories = categories,
+                        selected = selectedCategory,
+                        onSelect = { id ->
+                            onSelectCategory(id)
+                            mobileMenuOpen = false
+                        },
+                        allLabel = allLabel,
+                        sortLabel = sortLabel,
+                        onCycleSort = onCycleSort,
+                        categorySortLabel = categorySortLabel,
+                        onCycleCategorySort = onCycleCategorySort,
+                        onManage = onManageCategories,
+                        modifier = Modifier
+                            .width(224.dp)
+                            .fillMaxHeight(),
+                    )
+                }
             }
         }
     }

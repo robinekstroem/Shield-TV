@@ -19,6 +19,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -40,6 +43,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import se.norrsken.tv.R
+import se.norrsken.tv.core.device.LocalDeviceProfile
 import se.norrsken.tv.core.ui.component.FocusableSurface
 import se.norrsken.tv.core.ui.theme.LocalMetrics
 import se.norrsken.tv.core.ui.theme.LocalMotion
@@ -86,6 +90,7 @@ fun NavigationRail(
     //
     // verticalScroll rullar automatiskt fram det val som far fokus.
     val scroll = rememberScrollState()
+    val isTv = LocalDeviceProfile.current.isTv
 
     Column(
         modifier = modifier
@@ -98,18 +103,40 @@ fun NavigationRail(
             .background(
                 Brush.horizontalGradient(
                     listOf(
-                        palette.background.copy(alpha = if (expanded) 0.97f else 0.85f),
-                        palette.background.copy(alpha = if (expanded) 0.90f else 0.35f),
+                        palette.background.copy(alpha = if (expanded) 0.88f else 0.72f),
+                        palette.surface.copy(alpha = if (expanded) 0.66f else 0.28f),
+                        palette.signal.copy(alpha = if (expanded) 0.055f else 0.025f),
+                        Color.Transparent,
                     )
                 )
             )
-            .onFocusChanged { expanded = it.hasFocus }
+            // Fokus finns med fjärrkontroll, inte med finger. På TV styr
+            // fokus; på telefonen sköter knappen längst upp utfällningen.
+            .onFocusChanged { if (isTv) expanded = it.hasFocus }
             .focusGroup()
             .animateContentSize(tween(motion.scale(motion.transitionMs)))
             .verticalScroll(scroll)
             .padding(vertical = metrics.spaceMd),
         verticalArrangement = Arrangement.spacedBy(metrics.spaceXs),
     ) {
+        if (!isTv) {
+            // Utan det här satt telefonanvändaren med en kolumn ikoner
+            // utan text och inget sätt att se vad de betyder.
+            FocusableSurface(
+                onClick = { expanded = !expanded },
+                focusScale = 1f,
+                modifier = Modifier.padding(bottom = metrics.spaceSm),
+            ) { _ ->
+                Icon(
+                    imageVector = if (expanded) Icons.Filled.Close else Icons.Filled.Menu,
+                    contentDescription = if (expanded) "Stäng menyn" else "Visa menyn",
+                    tint = palette.textSecondary,
+                    modifier = Modifier
+                        .padding(metrics.spaceMd)
+                        .size(22.dp),
+                )
+            }
+        }
         Destination.entries.forEach { destination ->
             RailItem(
                 destination = destination,
@@ -138,23 +165,15 @@ private fun Brand(expanded: Boolean) {
             bottom = metrics.spaceLg,
         ),
     ) {
-        // Namnet får inte plats i den smala menyn och klipptes till "NOR".
-        // Bättre att det inte står något alls än en avhuggen rad.
+        // Namnet får inte plats i den smala menyn. Bättre att det inte står
+        // något alls än en avhuggen rad.
         if (!expanded) return@Column
         Text(
-            text = "NORRSKEN",
+            text = "CiTV",
             style = MaterialTheme.typography.titleMedium,
             color = palette.textPrimary,
             maxLines = 1,
         )
-        AnimatedVisibility(visible = expanded && !LocalThemeStyle.current.minimal) {
-            Text(
-                text = stringResource(R.string.brand_tagline),
-                style = MaterialTheme.typography.labelMedium,
-                color = palette.textTertiary,
-                maxLines = 1,
-            )
-        }
     }
 }
 
@@ -180,8 +199,8 @@ private fun RailItem(
     ) { focused ->
         val surface by animateColorAsState(
             targetValue = when {
-                focused -> palette.surfaceRaised
-                selected -> palette.surface
+                focused -> palette.surfaceRaised.copy(alpha = 0.72f)
+                selected -> palette.surface.copy(alpha = 0.48f)
                 else -> Color.Transparent
             },
             animationSpec = tween(motion.scale(motion.focusMs)),
@@ -202,7 +221,7 @@ private fun RailItem(
                     .width(3.dp)
                     .height(28.dp)
                     .background(
-                        if (selected) palette.signal else Color.Transparent,
+                        if (selected) palette.focus.copy(alpha = 0.92f) else Color.Transparent,
                         RoundedCornerShape(2.dp),
                     )
             )

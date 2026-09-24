@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Norrsken</string>
+    <string name="app_name">CiTV</string>
 
     <string name="nav_home">Start</string>
     <string name="nav_live">Live TV</string>
@@ -23,5 +23,4 @@
     <string name="sub_favorites">Din lista</string>
     <string name="sub_search">Hela biblioteket</string>
     <string name="sub_settings">Källor &amp; uppspelning</string>
-    <string name="brand_tagline">WATCH MORE</string>
 </resources>
