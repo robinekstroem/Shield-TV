@@ -134,16 +134,16 @@ fun AppShell(
                 )
             }
         } else {
+            // Mobil: innehållet ritas edge-to-edge. Topbaren ligger ovanpå
+            // artworken i stället för att reservera en svart remsa överst.
             Column(Modifier.fillMaxSize()) {
-                // enableEdgeToEdge ritar under statusfältet. Utan det här
-                // hamnar rubrikerna under klockan och hålkameran.
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .statusBarsPadding()
-                ) {
-                    TopBar(current = current, onSelect = select)
-                    Box(Modifier.weight(1f)) { navHost() }
+                Box(Modifier.weight(1f)) {
+                    navHost()
+                    TopBar(
+                        current = current,
+                        onSelect = select,
+                        modifier = Modifier.statusBarsPadding().align(Alignment.TopCenter),
+                    )
                 }
                 BottomBar(current = current, onSelect = select)
             }

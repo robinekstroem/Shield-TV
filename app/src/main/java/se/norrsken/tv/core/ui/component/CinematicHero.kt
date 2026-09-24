@@ -238,7 +238,6 @@ fun HeroInfo(
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
-        PremiumBadge(text = if (current.isLive) "NORRSKEN • LIVE" else if (current.isSeries) "NORRSKEN • SERIES" else "NORRSKEN • FEATURED")
         if (current.meta.isNotEmpty()) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(metrics.spaceSm),

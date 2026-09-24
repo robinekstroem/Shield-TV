@@ -39,6 +39,7 @@ import se.norrsken.tv.core.ui.component.metaLine
 import se.norrsken.tv.core.ui.component.EmptyState
 import se.norrsken.tv.core.ui.component.RailItem
 import se.norrsken.tv.core.ui.theme.LocalMetrics
+import se.norrsken.tv.core.device.LocalDeviceProfile
 import se.norrsken.tv.data.db.dao.ChannelDao
 import se.norrsken.tv.data.db.dao.LibraryDao
 import se.norrsken.tv.data.db.entity.ContentKind
@@ -205,6 +206,7 @@ fun HomeScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val continueWatching by viewModel.continueWatching.collectAsStateWithLifecycle()
     val metrics = LocalMetrics.current
+    val isTv = LocalDeviceProfile.current.isTv
 
     if (state.isEmpty) {
         EmptyState(
@@ -260,8 +262,8 @@ fun HomeScreen(
                 // i bildens nedre halva — resten av skärmen är artwork.
                 Box(
                     modifier = Modifier
-                        .fillParentMaxHeight(0.72f)
-                        .fillMaxWidth(0.56f),
+                        .fillParentMaxHeight(if (isTv) 0.72f else 0.62f)
+                        .fillMaxWidth(if (isTv) 0.56f else 0.94f),
                     contentAlignment = Alignment.BottomStart,
                 ) {
                     HeroInfo(

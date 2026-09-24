@@ -24,14 +24,14 @@ fun CinematicLightField(modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         drawRect(
             brush = Brush.radialGradient(
-                colors = listOf(palette.signal.copy(alpha = .13f), Color.Transparent),
+                colors = listOf(Color.White.copy(alpha = .055f), Color.Transparent),
                 center = Offset(size.width * .78f, size.height * .28f),
                 radius = size.maxDimension * .52f,
             )
         )
         drawRect(
             brush = Brush.radialGradient(
-                colors = listOf(palette.secondary.copy(alpha = .07f), Color.Transparent),
+                colors = listOf(Color.Black.copy(alpha = .12f), Color.Transparent),
                 center = Offset(size.width * .58f, size.height * .70f),
                 radius = size.maxDimension * .42f,
             )

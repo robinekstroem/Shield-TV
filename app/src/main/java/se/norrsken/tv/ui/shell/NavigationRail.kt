@@ -110,8 +110,6 @@ fun NavigationRail(
             .padding(vertical = metrics.spaceMd),
         verticalArrangement = Arrangement.spacedBy(metrics.spaceXs),
     ) {
-        Brand(expanded = expanded)
-
         Destination.entries.forEach { destination ->
             RailItem(
                 destination = destination,

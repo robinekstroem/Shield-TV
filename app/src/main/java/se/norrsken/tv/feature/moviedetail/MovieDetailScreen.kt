@@ -195,7 +195,7 @@ fun MovieDetailScreen(
                 },
             verticalArrangement = Arrangement.spacedBy(metrics.spaceSm),
         ) {
-            PremiumBadge("NORRSKEN  •  CINEMA")
+            PremiumBadge("FILM")
 
             Text(
                 text = if (style.uppercaseHeadings) current.title.uppercase() else current.title,

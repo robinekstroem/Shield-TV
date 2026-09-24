@@ -206,7 +206,7 @@ fun SeriesDetailScreen(
                         },
                     verticalArrangement = Arrangement.spacedBy(metrics.spaceSm),
                 ) {
-                    PremiumBadge("NORRSKEN  •  SERIES")
+                    PremiumBadge("SERIE")
                     val name = series?.title ?: title
                     Text(
                         text = if (style.uppercaseHeadings) name.uppercase() else name,

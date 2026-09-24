@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import coil3.compose.AsyncImage
 import se.norrsken.tv.core.ui.theme.LocalMetrics
 import se.norrsken.tv.core.ui.theme.LocalPalette
+import se.norrsken.tv.core.device.LocalDeviceProfile
 
 data class PosterItem(
     val id: Long,
@@ -54,6 +55,7 @@ fun PosterGrid(
     onNeedMore: () -> Unit = {},
 ) {
     val metrics = LocalMetrics.current
+    val isTv = LocalDeviceProfile.current.isTv
     val state = rememberLazyGridState()
 
     // Hämtar nästa sida när slutet närmar sig. Utan det stannade biblioteket
@@ -65,8 +67,13 @@ fun PosterGrid(
 
     LazyVerticalGrid(
         state = state,
-        columns = GridCells.Adaptive(minSize = metrics.posterWidth),
-        modifier = modifier.fillMaxSize().padding(metrics.screenEdge),
+        // Mobil: tre stabila kolumner utnyttjar S26-skärmen bättre och gör
+        // biblioteket mer streaming-app än desktop-grid. TV behåller adaptiv bredd.
+        columns = if (isTv) GridCells.Adaptive(minSize = metrics.posterWidth) else GridCells.Fixed(3),
+        modifier = modifier.fillMaxSize().padding(
+            horizontal = metrics.screenEdge,
+            vertical = if (isTv) metrics.screenEdge else 8.dp,
+        ),
         horizontalArrangement = Arrangement.spacedBy(metrics.railSpacing),
         verticalArrangement = Arrangement.spacedBy(metrics.railSpacing),
     ) {

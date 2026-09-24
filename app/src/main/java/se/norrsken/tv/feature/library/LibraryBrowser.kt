@@ -118,7 +118,10 @@ fun LibraryBrowser(
         }
 
         Column(Modifier.fillMaxSize()) {
-            HighlightHeader(item = highlighted)
+            // TV får en reaktiv informationsyta ovanför biblioteket. På mobil
+            // finns ingen D-pad-fokus och ytan blev därför bara ett stort tomt
+            // svart hål innan kategorierna. Mobilen går direkt på innehållet.
+            if (isTv) HighlightHeader(item = highlighted)
 
             if (isTv) {
                 Row(Modifier.fillMaxSize()) {
@@ -151,9 +154,9 @@ fun LibraryBrowser(
                     sortLabel = sortLabel,
                     onCycleSort = onCycleSort,
                     onManage = onManageCategories,
-                    modifier = Modifier.padding(horizontal = metrics.screenEdge),
+                    modifier = Modifier.padding(horizontal = metrics.screenEdge, vertical = 4.dp),
                 )
-                FilterField(filter, onFilterChange, filterLabel)
+                FilterField(filter, onFilterChange, filterLabel, compact = true)
                 Content(items, onOpen, onMissingPoster, onNeedMore, { focusedItem = it },
                     emptyTitle, emptyBody, filter)
             }
@@ -238,7 +241,7 @@ private fun HighlightHeader(item: PosterItem?) {
 }
 
 @Composable
-private fun FilterField(value: String, onChange: (String) -> Unit, label: String) {
+private fun FilterField(value: String, onChange: (String) -> Unit, label: String, compact: Boolean = false) {
     val metrics = LocalMetrics.current
     OutlinedTextField(
         value = value,
@@ -249,7 +252,7 @@ private fun FilterField(value: String, onChange: (String) -> Unit, label: String
         // Smalt fält, inte en låda tvärs över skärmen. Ett sökfält ska
         // finnas till hands, inte dominera vyn.
         modifier = Modifier
-            .widthIn(max = 380.dp)
-            .padding(horizontal = metrics.screenEdge, vertical = metrics.spaceSm),
+            .then(if (compact) Modifier.fillMaxWidth() else Modifier.widthIn(max = 380.dp))
+            .padding(horizontal = metrics.screenEdge, vertical = if (compact) 4.dp else metrics.spaceSm),
     )
 }
