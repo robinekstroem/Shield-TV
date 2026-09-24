@@ -42,9 +42,13 @@ class ImportCoordinator @Inject constructor(
     fun addAndImport(playlist: PlaylistEntity) {
         if (busy) return
         job = scope.launch {
-            val id = repository.add(playlist)
-            importer.import(playlist.copy(id = id)).collect { _state.value = it }
-            afterImport()
+            runCatching {
+                val id = repository.add(playlist)
+                importer.import(playlist.copy(id = id)).collect { _state.value = it }
+                afterImport()
+            }.onFailure { error ->
+                _state.value = ImportState.Failed(error.message ?: "Kunde inte lägga till källan")
+            }
         }
     }
 

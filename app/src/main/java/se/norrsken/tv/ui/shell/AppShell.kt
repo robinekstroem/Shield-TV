@@ -239,7 +239,13 @@ private fun AppNavHost(navController: NavHostController) {
                 onManageCategories = { navController.navigate(CATEGORIES_ROUTE + "SERIES") },
             )
         }
-        composable(Destination.Favorites.route) { FavoritesScreen() }
+        composable(Destination.Favorites.route) {
+            FavoritesScreen(
+                onOpenMovie = { id -> navController.navigate(MOVIE_ROUTE + id) },
+                onOpenSeries = { id -> navController.navigate(SERIES_ROUTE + id) },
+                onOpenChannel = { id -> navController.play(PlayableKind.CHANNEL, id) },
+            )
+        }
         composable(Destination.Search.route) {
             SearchScreen(
                 onOpenChannel = { id -> navController.play(PlayableKind.CHANNEL, id) },

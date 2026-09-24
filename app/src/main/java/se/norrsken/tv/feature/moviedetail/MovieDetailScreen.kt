@@ -45,6 +45,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import se.norrsken.tv.core.ui.component.AuroraLoader
+import se.norrsken.tv.core.ui.component.CinematicLightField
+import se.norrsken.tv.core.ui.component.MetaChip
+import se.norrsken.tv.core.ui.component.PremiumBadge
 import se.norrsken.tv.core.ui.component.PrimaryAction
 import se.norrsken.tv.core.ui.component.SecondaryAction
 import se.norrsken.tv.core.ui.theme.LocalMetrics
@@ -54,6 +57,8 @@ import se.norrsken.tv.core.ui.theme.LocalThemeStyle
 import se.norrsken.tv.core.util.openTrailer
 import se.norrsken.tv.data.db.dao.LibraryDao
 import se.norrsken.tv.data.db.entity.MovieEntity
+import se.norrsken.tv.data.db.entity.MediaKind
+import se.norrsken.tv.data.repository.FavoritesRepository
 import se.norrsken.tv.data.metadata.MetadataRepository
 import se.norrsken.tv.data.repository.VodDetailsRepository
 import javax.inject.Inject
@@ -64,12 +69,20 @@ class MovieDetailViewModel @Inject constructor(
     libraryDao: LibraryDao,
     metadata: MetadataRepository,
     vodDetails: VodDetailsRepository,
+    private val favorites: FavoritesRepository,
 ) : ViewModel() {
 
     val movieId: Long = savedStateHandle.get<String>("id")?.toLongOrNull() ?: 0L
 
     val movie: StateFlow<MovieEntity?> = libraryDao.observeMovie(movieId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val isFavorite: StateFlow<Boolean> = favorites.isFavorite(MediaKind.MOVIE, movieId)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    fun toggleFavorite() {
+        viewModelScope.launch { favorites.toggle(MediaKind.MOVIE, movieId, isFavorite.value) }
+    }
 
     init {
         viewModelScope.launch {
@@ -104,6 +117,7 @@ fun MovieDetailScreen(
     val style = LocalThemeStyle.current
     val context = LocalContext.current
     val movie by viewModel.movie.collectAsStateWithLifecycle()
+    val isFavorite by viewModel.isFavorite.collectAsStateWithLifecycle()
 
     val playFocus = remember { FocusRequester() }
     var shown by remember { mutableStateOf(false) }
@@ -149,6 +163,8 @@ fun MovieDetailScreen(
             )
         }
 
+        CinematicLightField(Modifier.fillMaxSize())
+
         // Två gradienter: vänster bär texten, botten syr ihop bilden med
         // atmosfären så ingen kant syns.
         Box(
@@ -179,6 +195,8 @@ fun MovieDetailScreen(
                 },
             verticalArrangement = Arrangement.spacedBy(metrics.spaceSm),
         ) {
+            PremiumBadge("NORRSKEN  •  CINEMA")
+
             Text(
                 text = if (style.uppercaseHeadings) current.title.uppercase() else current.title,
                 style = MaterialTheme.typography.displayLarge,
@@ -189,16 +207,14 @@ fun MovieDetailScreen(
 
             val facts = listOfNotNull(
                 current.year?.toString(),
-                current.rating?.let { "★ %.1f".format(it) },
+                current.rating?.takeIf { it > 0 }?.let { "★ %.1f".format(it) },
                 current.runtimeMinutes?.let { formatRuntime(it) },
                 current.genres,
             )
             if (facts.isNotEmpty()) {
-                Text(
-                    text = facts.joinToString("  ·  "),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = palette.textSecondary,
-                )
+                Row(horizontalArrangement = Arrangement.spacedBy(metrics.spaceSm)) {
+                    facts.take(4).forEach { fact -> MetaChip(fact) }
+                }
             }
 
             current.overview?.let { text ->
@@ -226,6 +242,10 @@ fun MovieDetailScreen(
                         onClick = { openTrailer(context, trailer) },
                     )
                 }
+                SecondaryAction(
+                    label = if (isFavorite) "Ta bort favorit" else "Lägg till favorit",
+                    onClick = viewModel::toggleFavorite,
+                )
             }
         }
     }

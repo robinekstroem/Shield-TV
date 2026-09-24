@@ -35,12 +35,11 @@ class CredentialStore @Inject constructor() {
             cipher.init(Cipher.ENCRYPT_MODE, secretKey())
             val bytes = cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
             "$PREFIX:${encode(cipher.iv)}:${encode(bytes)}"
-        }.getOrElse {
-            // Keystore kan saknas eller vara trasig pa udda enheter. Da ar
-            // ett fungerande konto battre an en app som inte gar att
-            // konfigurera — men vardet lagras da som det ar, inte som falskt
-            // krypterat.
-            plain
+        }.getOrElse { cause ->
+            // Spara aldrig leverantörslösenord i klartext. Om Keystore är
+            // trasig får anroparen ett tydligt fel och kan be användaren
+            // försöka igen, i stället för att säkerheten tyst degraderas.
+            throw IllegalStateException("Kunde inte skydda kontouppgifterna med Android Keystore", cause)
         }
     }
 

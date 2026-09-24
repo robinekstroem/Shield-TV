@@ -133,12 +133,21 @@ private fun CategoryChip(label: String, active: Boolean, onClick: () -> Unit) {
     val palette = LocalPalette.current
     val metrics = LocalMetrics.current
 
-    FocusableSurface(onClick = onClick, focusScale = 1f) { focused ->
+    FocusableSurface(
+        onClick = onClick,
+        focusScale = 1f,
+        // Ingen egen yta: kategorierna är en lista, inte en samling
+        // knappar. Det valda markeras med ljus text, det fokuserade med
+        // fokusringen — inte med en fylld platta per rad.
+        background = active,
+        cornerRadius = metrics.radiusCard,
+    ) { focused ->
         Text(
             text = label,
             style = MaterialTheme.typography.titleMedium,
             color = when {
-                focused || active -> palette.textPrimary
+                focused -> palette.focus
+                active -> palette.textPrimary
                 else -> palette.textSecondary
             },
             maxLines = 1,

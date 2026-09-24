@@ -217,7 +217,7 @@ private fun HighlightHeader(item: PosterItem?) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        val facts = listOfNotNull(item.subtitle, item.rating?.let { "★ %.1f".format(it) })
+        val facts = listOfNotNull(item.subtitle, item.rating?.takeIf { it > 0 }?.let { "★ %.1f".format(it) })
         if (facts.isNotEmpty()) {
             Text(
                 text = facts.joinToString("  ·  "),
@@ -246,8 +246,10 @@ private fun FilterField(value: String, onChange: (String) -> Unit, label: String
         label = { Text(label) },
         singleLine = true,
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        // Smalt fält, inte en låda tvärs över skärmen. Ett sökfält ska
+        // finnas till hands, inte dominera vyn.
         modifier = Modifier
-            .fillMaxWidth()
+            .widthIn(max = 380.dp)
             .padding(horizontal = metrics.screenEdge, vertical = metrics.spaceSm),
     )
 }

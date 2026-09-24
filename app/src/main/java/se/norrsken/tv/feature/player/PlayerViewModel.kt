@@ -16,6 +16,7 @@ import se.norrsken.tv.data.epg.NowNext
 import se.norrsken.tv.data.epg.NowPlayingRepository
 import se.norrsken.tv.data.player.PlayerFactory
 import se.norrsken.tv.data.repository.WatchHistoryRepository
+import se.norrsken.tv.data.repository.FavoritesRepository
 import se.norrsken.tv.data.settings.SettingsRepository
 import se.norrsken.tv.data.settings.VideoScale
 import javax.inject.Inject
@@ -43,6 +44,7 @@ class PlayerViewModel @Inject constructor(
     private val settings: SettingsRepository,
     private val nowPlaying: NowPlayingRepository,
     private val history: WatchHistoryRepository,
+    private val favorites: FavoritesRepository,
 ) : ViewModel() {
 
     private val _programme = MutableStateFlow<NowNext?>(null)
@@ -77,6 +79,15 @@ class PlayerViewModel @Inject constructor(
         PlayableKind.CHANNEL, null -> null
     }
 
+    private val _isFavorite = MutableStateFlow(false)
+    val isFavorite: StateFlow<Boolean> = _isFavorite.asStateFlow()
+
+    fun toggleChannelFavorite() {
+        if (kind != PlayableKind.CHANNEL) return
+        val mediaId = id ?: return
+        viewModelScope.launch { favorites.toggle(MediaKind.CHANNEL, mediaId, _isFavorite.value) }
+    }
+
     /** Var uppspelningen ska börja. 0 = från början. */
     suspend fun resumePosition(): Long {
         val mediaKind = historyKind ?: return 0L
@@ -91,6 +102,11 @@ class PlayerViewModel @Inject constructor(
     }
 
     init {
+        if (kind == PlayableKind.CHANNEL && id != null) {
+            viewModelScope.launch {
+                favorites.isFavorite(MediaKind.CHANNEL, id).collect { _isFavorite.value = it }
+            }
+        }
 
         viewModelScope.launch {
             val resolved = when {

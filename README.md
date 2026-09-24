@@ -1,15 +1,18 @@
-# Norrsken — Fas 1, import och omslagshämtning
+# Norrsken — Android & Android TV
 
-Android- och Android TV-klient för IPTV, film och serier.
+Android- och Android TV-klient för Live TV, film och serier.
 
-Fas 1 är klar: projektarkitektur, navigation, designsystem och databas.
-Ovanpå den ligger två fungerande importvägar — M3U-fil och Xtream-API.
-Kanaler hamnar under Live TV, filmer och serier i rutnät med omslag.
-Att trycka på något gör ännu ingenting: spelaren är Fas 3.
+## Status
 
-**Uppdaterar du från förra versionen: avinstallera appen först.** Databasen
-har fått nya kolumner och kastas i stället för att migreras (se DataModule —
-det måste bytas mot riktiga migrationer innan release).
+Projektet innehåller nu fungerande M3U- och Xtream-import, Media3/ExoPlayer,
+EPG/XMLTV, TMDB-metadata, sök, film- och seriedetaljer, tittarhistorik med
+**Fortsätt titta**, återupptagning av film/avsnitt samt favoriter för filmer,
+serier och livekanaler. Favoriter kan läggas till från detaljsidorna och, för
+livekanaler, direkt från spelarens kontrollpanel.
+
+Databasen använder riktiga Room-migrationer och ska inte avinstalleras mellan
+uppdateringar. Leverantörslösenord skyddas med AES/GCM i Android Keystore; om
+Keystore inte kan användas sparas lösenordet inte i klartext.
 
 ## Innan du bygger
 

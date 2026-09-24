@@ -44,6 +44,8 @@ fun SecondaryAction(
             text = label,
             style = MaterialTheme.typography.titleMedium,
             color = if (focused) palette.focus else palette.textPrimary,
+            maxLines = 1,
+            softWrap = false,
             modifier = Modifier.padding(horizontal = metrics.spaceLg, vertical = metrics.spaceSm),
         )
     }
@@ -94,6 +96,10 @@ fun PrimaryAction(
                 text = label,
                 style = MaterialTheme.typography.titleMedium,
                 color = palette.onAccent,
+                // Utan det här radbryts texten tecken för tecken när
+                // knappen hamnar i en smal spalt.
+                maxLines = 1,
+                softWrap = false,
             )
         }
     }

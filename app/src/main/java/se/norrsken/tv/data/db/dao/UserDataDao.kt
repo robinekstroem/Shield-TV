@@ -10,6 +10,28 @@ import se.norrsken.tv.data.db.entity.MediaKind
 import se.norrsken.tv.data.db.entity.ProfileEntity
 import se.norrsken.tv.data.db.entity.WatchHistoryEntity
 
+
+data class FavoriteMovie(
+    val id: Long,
+    val title: String,
+    val posterUrl: String?,
+    val year: Int?,
+)
+
+data class FavoriteSeries(
+    val id: Long,
+    val title: String,
+    val posterUrl: String?,
+    val year: Int?,
+)
+
+data class FavoriteChannel(
+    val id: Long,
+    val name: String,
+    val logoUrl: String?,
+    val groupTitle: String?,
+)
+
 data class ContinueMovie(
     val id: Long,
     val title: String,
@@ -47,6 +69,33 @@ interface UserDataDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun addFavorite(favorite: FavoriteEntity)
+
+    @Query("SELECT EXISTS(SELECT 1 FROM favorites WHERE profileId = :profileId AND kind = :kind AND refId = :refId)")
+    fun observeIsFavorite(profileId: Long, kind: MediaKind, refId: Long): Flow<Boolean>
+
+    @Query("""
+        SELECT m.id AS id, m.title AS title, m.posterUrl AS posterUrl, m.year AS year
+        FROM favorites f INNER JOIN movies m ON m.id = f.refId
+        WHERE f.profileId = :profileId AND f.kind = 'MOVIE'
+        ORDER BY f.addedUtc DESC
+    """)
+    fun observeFavoriteMovies(profileId: Long): Flow<List<FavoriteMovie>>
+
+    @Query("""
+        SELECT s.id AS id, s.title AS title, s.posterUrl AS posterUrl, s.year AS year
+        FROM favorites f INNER JOIN series s ON s.id = f.refId
+        WHERE f.profileId = :profileId AND f.kind = 'SERIES'
+        ORDER BY f.addedUtc DESC
+    """)
+    fun observeFavoriteSeries(profileId: Long): Flow<List<FavoriteSeries>>
+
+    @Query("""
+        SELECT c.id AS id, c.name AS name, c.logoUrl AS logoUrl, c.groupTitle AS groupTitle
+        FROM favorites f INNER JOIN channels c ON c.id = f.refId
+        WHERE f.profileId = :profileId AND f.kind = 'CHANNEL'
+        ORDER BY f.addedUtc DESC
+    """)
+    fun observeFavoriteChannels(profileId: Long): Flow<List<FavoriteChannel>>
 
     @Query("DELETE FROM favorites WHERE profileId = :profileId AND kind = :kind AND refId = :refId")
     suspend fun removeFavorite(profileId: Long, kind: MediaKind, refId: Long)

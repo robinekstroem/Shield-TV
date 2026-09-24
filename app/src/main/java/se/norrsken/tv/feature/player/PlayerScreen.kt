@@ -107,6 +107,7 @@ fun PlayerScreen(
     val playable by viewModel.playable.collectAsStateWithLifecycle()
     val missing by viewModel.missing.collectAsStateWithLifecycle()
     val programme by viewModel.programme.collectAsStateWithLifecycle()
+    val isFavorite by viewModel.isFavorite.collectAsStateWithLifecycle()
     val preferences = LocalPreferences.current
     val profile = LocalDeviceProfile.current
     val context = LocalContext.current
@@ -461,6 +462,8 @@ fun PlayerScreen(
                 onAudio = { panel = Panel.AUDIO; touched() },
                 onSubtitles = { panel = Panel.SUBTITLES; touched() },
                 onBack = onBack,
+                isFavorite = isFavorite,
+                onToggleFavorite = viewModel::toggleChannelFavorite,
             )
         }
 
@@ -527,6 +530,8 @@ private fun Controls(
     onAudio: () -> Unit,
     onSubtitles: () -> Unit,
     onBack: () -> Unit,
+    isFavorite: Boolean,
+    onToggleFavorite: () -> Unit,
 ) {
     val palette = LocalPalette.current
     val metrics = LocalMetrics.current
@@ -572,6 +577,13 @@ private fun Controls(
                     ControlButton(
                         label = if (minimal) "Text" else "Undertext",
                         onClick = onSubtitles,
+                    )
+                    Spacer(Modifier.width(metrics.spaceSm))
+                }
+                if (isLive) {
+                    ControlButton(
+                        label = if (isFavorite) "★ Favorit" else "☆ Favorit",
+                        onClick = onToggleFavorite,
                     )
                     Spacer(Modifier.width(metrics.spaceSm))
                 }

@@ -18,7 +18,7 @@ data class ProfileEntity(
     val isDefault: Boolean = false,
 )
 
-enum class MediaKind { CHANNEL, MOVIE, EPISODE }
+enum class MediaKind { CHANNEL, MOVIE, SERIES, EPISODE }
 
 @Entity(
     tableName = "favorites",

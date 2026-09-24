@@ -7,13 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.addCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -29,7 +23,6 @@ import se.norrsken.tv.data.settings.AppPreferences
 import se.norrsken.tv.data.settings.EffectLevel
 import se.norrsken.tv.data.settings.SettingsRepository
 import se.norrsken.tv.ui.shell.AppShell
-import se.norrsken.tv.ui.shell.SplashOverlay
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -98,17 +91,8 @@ class MainActivity : ComponentActivity() {
             val prefs by preferences.collectAsState()
             // Effekter "Av" är prestandaläget: det stänger av rörelse också.
             val reducedMotion = systemReducedMotion || prefs.effects == EffectLevel.OFF
-            // rememberSaveable: sekvensen visas vid kallstart, inte när
-            // skärmen vrids eller appen kommer tillbaka från bakgrunden.
-            var showSplash by rememberSaveable { mutableStateOf(!systemReducedMotion) }
-
             NorrskenTheme(preferences = prefs, reducedMotion = reducedMotion) {
-                Box(Modifier.fillMaxSize()) {
-                    AppShell()
-                    if (showSplash) {
-                        SplashOverlay(onFinished = { showSplash = false })
-                    }
-                }
+                AppShell()
             }
         }
     }

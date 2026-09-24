@@ -140,6 +140,9 @@ private fun Brand(expanded: Boolean) {
             bottom = metrics.spaceLg,
         ),
     ) {
+        // Namnet får inte plats i den smala menyn och klipptes till "NOR".
+        // Bättre att det inte står något alls än en avhuggen rad.
+        if (!expanded) return@Column
         Text(
             text = "NORRSKEN",
             style = MaterialTheme.typography.titleMedium,

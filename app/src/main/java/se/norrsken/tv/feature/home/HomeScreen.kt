@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import se.norrsken.tv.core.ui.component.ContentRail
+import se.norrsken.tv.core.ui.component.CinematicLightField
 import se.norrsken.tv.core.ui.component.HeroBackdrop
 import se.norrsken.tv.core.ui.component.HeroContent
 import se.norrsken.tv.core.ui.component.HeroInfo
@@ -146,7 +147,7 @@ class HomeViewModel @Inject constructor(
                     overview = it.overview,
                     meta = metaLine(
                         it.year?.toString(),
-                        it.rating?.let { value -> "★ %.1f".format(value) },
+                        it.rating?.takeIf { value -> value > 0 }?.let { value -> "★ %.1f".format(value) },
                         it.genres,
                     ),
                 )
@@ -161,7 +162,7 @@ class HomeViewModel @Inject constructor(
                     overview = it.overview,
                     meta = metaLine(
                         it.year?.toString(),
-                        it.rating?.let { value -> "★ %.1f".format(value) },
+                        it.rating?.takeIf { value -> value > 0 }?.let { value -> "★ %.1f".format(value) },
                         it.genres,
                     ),
                     isSeries = true,
@@ -244,6 +245,7 @@ fun HomeScreen(
         // Lager 1 och 2: bilden och mörkningen. Båda ligger still medan
         // raderna rullar ovanpå, så ingen kant uppstår där heron "slutar".
         HeroBackdrop(url = current?.backdropUrl)
+        CinematicLightField(Modifier.fillMaxSize())
         HeroScrim()
 
         LazyColumn(
@@ -258,8 +260,8 @@ fun HomeScreen(
                 // i bildens nedre halva — resten av skärmen är artwork.
                 Box(
                     modifier = Modifier
-                        .fillParentMaxHeight(0.66f)
-                        .fillMaxWidth(0.42f),
+                        .fillParentMaxHeight(0.72f)
+                        .fillMaxWidth(0.56f),
                     contentAlignment = Alignment.BottomStart,
                 ) {
                     HeroInfo(
