@@ -9,12 +9,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onKeyEvent
-import androidx.compose.ui.input.key.type
 import se.norrsken.tv.core.ui.component.FocusableSurface
 import se.norrsken.tv.core.ui.theme.LocalMetrics
 import se.norrsken.tv.core.ui.theme.LocalPalette
@@ -38,9 +36,12 @@ fun SettingsHeader(title: String, modifier: Modifier = Modifier) {
 }
 
 /**
- * Val mellan namngivna alternativ. Pilar i stallet for lista: pa en
- * fjarrkontroll ar hoger/vanster snabbare an att oppna en meny, valja och
- * stanga den.
+ * Val mellan namngivna alternativ — alla synliga på en gång.
+ *
+ * Tidigare stegade raden ett steg per tryck. Man såg aldrig vilka val som
+ * fanns, bara det man råkade stå på, och fel val krävde att man varvade
+ * hela vägen runt. Nu ligger alternativen som brickor: man ser dem, pekar
+ * på det man vill ha och trycker en gång.
  */
 @Composable
 fun <T> OptionRow(
@@ -55,54 +56,56 @@ fun <T> OptionRow(
     val palette = LocalPalette.current
     val metrics = LocalMetrics.current
 
-    fun step(delta: Int) {
-        if (options.isEmpty()) return
-        val index = options.indexOf(selected).takeIf { it >= 0 } ?: 0
-        val next = ((index + delta) % options.size + options.size) % options.size
-        onSelect(options[next])
-    }
-
-    FocusableSurface(
-        onClick = { step(1) },
+    Column(
         modifier = modifier
             .fillMaxWidth()
-            // Hoger och vanster stegar. Pa en fjarrkontroll ar det snabbare
-            // an att trycka OK sig igenom en lista, och vanster maste kunna
-            // ga bakat — annars far man varva hela vagen runt.
-            .onKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
-                when (event.key) {
-                    Key.DirectionRight -> { step(1); true }
-                    Key.DirectionLeft -> { step(-1); true }
-                    else -> false
-                }
-            },
-    ) { _ ->
+            .padding(horizontal = metrics.spaceMd, vertical = metrics.spaceSm),
+        verticalArrangement = Arrangement.spacedBy(metrics.spaceXs),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            color = palette.textPrimary,
+        )
+        // Beskrivningen är förklaring, inte funktion — den är det första
+        // som tas bort i minimalt läge.
+        if (description != null && !LocalThemeStyle.current.minimal) {
+            Text(
+                text = description,
+                style = MaterialTheme.typography.labelMedium,
+                color = palette.textTertiary,
+            )
+        }
         Row(
-            modifier = Modifier.padding(metrics.spaceMd),
-            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .horizontalScroll(rememberScrollState())
+                .padding(top = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(metrics.spaceSm),
         ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = palette.textPrimary,
-                )
-                // Beskrivningen är förklaring, inte funktion — den är det
-                // första som tas bort i minimalt läge.
-                if (description != null && !LocalThemeStyle.current.minimal) {
+            options.forEach { option ->
+                val active = option == selected
+                FocusableSurface(
+                    onClick = { onSelect(option) },
+                    focusScale = 1f,
+                    cornerRadius = metrics.radiusCard,
+                    background = active,
+                ) { focused ->
                     Text(
-                        text = description,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = palette.textTertiary,
+                        text = label(option),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = when {
+                            focused -> palette.focus
+                            active -> palette.signal
+                            else -> palette.textSecondary
+                        },
+                        maxLines = 1,
+                        modifier = Modifier.padding(
+                            horizontal = metrics.spaceMd,
+                            vertical = metrics.spaceXs,
+                        ),
                     )
                 }
             }
-            Text(
-                text = label(selected),
-                style = MaterialTheme.typography.titleMedium,
-                color = palette.signal,
-            )
         }
     }
 }

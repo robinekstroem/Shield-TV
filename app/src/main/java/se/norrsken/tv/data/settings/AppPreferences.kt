@@ -26,11 +26,15 @@ data class AppPreferences(
 
     // --- Sortering ---
     val librarySort: LibrarySort = LibrarySort.RECENT,
+    /**
+     * Omslag per rad på TV. Åtta ger ungefär 90 dp per omslag på 1080p —
+     * tätt men läsbart. Färre gör dem större, fler gör dem till frimärken.
+     */
+    val gridColumns: Int = 8,
     val channelSort: ChannelSort = ChannelSort.PROVIDER,
     val categorySort: CategorySort = CategorySort.PROVIDER,
 
     // --- Utseende ---
-    val theme: ThemeChoice = ThemeChoice.NORRSKEN,
     val interfaceStyle: InterfaceStyle = InterfaceStyle.STANDARD,
     val textScale: TextScale = TextScale.MEDIUM,
     val accent: AccentChoice = AccentChoice.THEME,
@@ -160,20 +164,13 @@ enum class InterfaceStyle(val label: String) {
     MINIMAL("Minimal"),
 }
 
-enum class ThemeChoice(val label: String) {
-    NORRSKEN("Norrsken"),
-    TITAN("Titan"),
-    SNOW("Snö"),
-    MIDNIGHT("Midnatt"),
-}
-
 /**
  * Bakgrundseffekternas nivå. Reducerad halverar antalet partiklar och
  * ritar med 30 bilder i sekunden — för telefoner och svagare boxar.
  */
 enum class EffectLevel(val label: String, val particleFactor: Float) {
-    FULL("Full", 1f),
-    REDUCED("Reducerad", 0.45f),
+    FULL("På", 1f),
+    REDUCED("Svag", 0.45f),
     OFF("Av", 0f),
 }
 
@@ -247,7 +244,7 @@ enum class SubtitleBackground(val label: String) {
 
 /** [rgb] 0 betyder "anvand temats egen accent". */
 enum class AccentChoice(val label: String, val rgb: Long) {
-    THEME("Temats egen", 0L),
+    THEME("Standard", 0L),
     BLUE("Isblå", 0xFF4C8DFF),
     TEAL("Glaciär", 0xFF5FC9B8),
     AMBER("Bärnsten", 0xFFE0A34A),

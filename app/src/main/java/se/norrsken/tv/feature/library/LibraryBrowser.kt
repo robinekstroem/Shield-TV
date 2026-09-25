@@ -1,31 +1,25 @@
 package se.norrsken.tv.feature.library
 
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,36 +27,35 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.delay
 import se.norrsken.tv.core.device.LocalDeviceProfile
 import se.norrsken.tv.core.ui.component.CategoryColumn
 import se.norrsken.tv.core.ui.component.CategoryRow
 import se.norrsken.tv.core.ui.component.EmptyState
 import se.norrsken.tv.core.ui.component.PosterGrid
 import se.norrsken.tv.core.ui.component.PosterItem
+import se.norrsken.tv.core.ui.component.PrimaryAction
+import se.norrsken.tv.core.ui.component.SecondaryAction
 import se.norrsken.tv.core.ui.theme.LocalMetrics
 import se.norrsken.tv.core.ui.theme.LocalPalette
+import se.norrsken.tv.core.ui.theme.LocalPreferences
 import se.norrsken.tv.core.ui.theme.LocalThemeStyle
 import se.norrsken.tv.data.db.entity.CategoryEntity
 
 /**
  * Bläddringsvyn för filmer och serier.
  *
- * Tre saker gör skillnad mot ett rent rutnät:
+ * Kategorierna står i en kolumn till vänster, innehållet till höger: överst
+ * det markerade — titel, fakta, skådespelare, regissör, beskrivning och
+ * knappar — och under det rutnätet.
  *
- * Rummet reagerar. Markerar man en titel byts bakgrunden mot dess backdrop
- * och fakta visas överst — man ser vad något är utan att öppna det.
- *
- * Filtret. Med tiotusen titlar är bläddring inte ett sätt att hitta något
- * bestämt. Att skriva tre bokstäver är det.
- *
- * Fler sidor. Rutnätet hämtar mer när slutet närmar sig, i stället för att
- * tyst sluta vid första sidan.
+ * Kolumnen kostar bredd. Med den kvar ryms fem till sex omslag per rad på
+ * 1080p i stället för åtta; antalet är en inställning.
  */
 @Composable
 fun LibraryBrowser(
@@ -78,29 +71,42 @@ fun LibraryBrowser(
     filter: String,
     onFilterChange: (String) -> Unit,
     onOpen: (PosterItem) -> Unit,
+    onPlay: (PosterItem) -> Unit,
+    onTrailer: (PosterItem) -> Unit,
     onMissingPoster: (PosterItem) -> Unit,
     onNeedMore: () -> Unit,
+    /** Anropas när markeringen stått still en stund — hämtar detaljer. */
+    onFocusHold: (Long) -> Unit,
+    /** Antal i kategorin enligt databasen, inte antal inlästa. */
+    total: Int,
     allLabel: String,
     filterLabel: String,
     emptyTitle: String,
     emptyBody: String,
+    /** Serier spelas inte direkt — man väljer avsnitt först. */
+    isSeries: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val palette = LocalPalette.current
     val metrics = LocalMetrics.current
     val isTv = LocalDeviceProfile.current.isTv
+    val columns = LocalPreferences.current.gridColumns
 
     var focusedItem by remember { mutableStateOf<PosterItem?>(null) }
-    // På mobil öppnas nivå två direkt när man går in i Filmer/Serier. Ett
-    // val drar undan panelen och lämnar hela ytan åt innehållet.
-    var mobileMenuOpen by remember { mutableStateOf(!isTv) }
-    // Markeringen kan peka på en titel som filtrerats bort. Visa bara den
-    // som fortfarande finns i listan.
+    // Markeringen kan peka på en titel som filtrerats bort.
     val highlighted = focusedItem?.takeIf { current -> items.any { it.id == current.id } }
+    val position = highlighted?.let { current -> items.indexOfFirst { it.id == current.id } + 1 } ?: 0
+    val categoryName = categories.firstOrNull { it.id == selectedCategory }?.name ?: allLabel
+
+    LaunchedEffect(highlighted?.id) {
+        val id = highlighted?.id ?: return@LaunchedEffect
+        // Paus innan detaljerna hämtas: bläddrar man förbi tjugo filmer ska
+        // inte tjugo anrop gå iväg.
+        delay(400)
+        onFocusHold(id)
+    }
 
     Box(modifier = modifier.fillMaxSize()) {
-        // Backdropen ligger bakom allt och byts mjukt. Kort övergång: den
-        // ska följa bläddringen, inte släpa efter den.
         Crossfade(
             targetState = highlighted?.backdropUrl,
             animationSpec = tween(400),
@@ -114,14 +120,22 @@ fun LibraryBrowser(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
                     )
-                    // Utan de här två skulle texten ligga direkt på en
-                    // okontrollerad bild och bli oläsbar på ljusa motiv.
+                    // Utan mörkningen hamnar texten direkt på en okontrollerad
+                    // bild och blir oläsbar på ljusa motiv.
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.horizontalGradient(listOf(palette.scrim, palette.scrimClear))
+                            )
+                    )
                     Box(
                         Modifier
                             .fillMaxSize()
                             .background(
                                 Brush.verticalGradient(
-                                    listOf(palette.scrim, palette.background),
+                                    0.35f to palette.scrimClear,
+                                    1f to palette.background,
                                 )
                             )
                     )
@@ -129,78 +143,199 @@ fun LibraryBrowser(
             }
         }
 
-        Column(Modifier.fillMaxSize()) {
-            // TV får en reaktiv informationsyta ovanför biblioteket. På mobil
-            // finns ingen D-pad-fokus och ytan blev därför bara ett stort tomt
-            // svart hål innan kategorierna. Mobilen går direkt på innehållet.
-            if (isTv) HighlightHeader(item = highlighted)
-
-            if (isTv) {
-                Row(Modifier.fillMaxSize()) {
-                    CategoryColumn(
-                        categories = categories,
-                        selected = selectedCategory,
-                        onSelect = onSelectCategory,
-                        allLabel = allLabel,
-                        sortLabel = sortLabel,
-                        onCycleSort = onCycleSort,
-                        categorySortLabel = categorySortLabel,
-                        onCycleCategorySort = onCycleCategorySort,
-                        onManage = onManageCategories,
-                        modifier = Modifier
-                            .width(240.dp)
-                            .padding(start = metrics.screenEdge),
-                    )
-                    Column(Modifier.fillMaxSize()) {
-                        FilterField(filter, onFilterChange, filterLabel)
-                        Content(items, onOpen, onMissingPoster, onNeedMore, { focusedItem = it },
-                            emptyTitle, emptyBody, filter)
-                    }
-                }
-            } else {
-                // Mobilens innehåll ligger kvar bakom nivå-två-menyn. Det gör
-                // att panelen känns som frostat glas ovanpå filmen, inte som
-                // ännu en separat Android-skärm.
+        if (isTv) {
+            Row(Modifier.fillMaxSize()) {
+                CategoryColumn(
+                    categories = categories,
+                    selected = selectedCategory,
+                    onSelect = onSelectCategory,
+                    allLabel = allLabel,
+                    sortLabel = sortLabel,
+                    onCycleSort = onCycleSort,
+                    categorySortLabel = categorySortLabel,
+                    onCycleCategorySort = onCycleCategorySort,
+                    onManage = onManageCategories,
+                    modifier = Modifier
+                        .width(224.dp)
+                        .fillMaxHeight()
+                        .padding(start = metrics.screenEdge),
+                )
                 Column(Modifier.fillMaxSize()) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = metrics.screenEdge, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        TextButton(onClick = { mobileMenuOpen = true }) {
-                            Text("Kategorier")
-                        }
-                    }
-                    FilterField(filter, onFilterChange, filterLabel, compact = true)
+                    HighlightHeader(highlighted, isSeries, onPlay, onOpen, onTrailer)
+                    GridHeader(categoryName, position, total, filter, onFilterChange, filterLabel)
                     Content(items, onOpen, onMissingPoster, onNeedMore, { focusedItem = it },
-                        emptyTitle, emptyBody, filter)
-                }
-
-                AnimatedVisibility(
-                    visible = mobileMenuOpen,
-                    enter = slideInHorizontally(initialOffsetX = { -it }) + fadeIn(),
-                    exit = slideOutHorizontally(targetOffsetX = { -it }) + fadeOut(),
-                ) {
-                    CategoryColumn(
-                        categories = categories,
-                        selected = selectedCategory,
-                        onSelect = { id ->
-                            onSelectCategory(id)
-                            mobileMenuOpen = false
-                        },
-                        allLabel = allLabel,
-                        sortLabel = sortLabel,
-                        onCycleSort = onCycleSort,
-                        categorySortLabel = categorySortLabel,
-                        onCycleCategorySort = onCycleCategorySort,
-                        onManage = onManageCategories,
-                        modifier = Modifier
-                            .width(224.dp)
-                            .fillMaxHeight(),
-                    )
+                        emptyTitle, emptyBody, filter, columns)
                 }
             }
+        } else {
+            Column(Modifier.fillMaxSize()) {
+                CategoryRow(
+                    categories = categories,
+                    selected = selectedCategory,
+                    onSelect = onSelectCategory,
+                    allLabel = allLabel,
+                    sortLabel = sortLabel,
+                    onCycleSort = onCycleSort,
+                    onManage = onManageCategories,
+                    modifier = Modifier.padding(horizontal = metrics.screenEdge),
+                )
+                HighlightHeader(highlighted, isSeries, onPlay, onOpen, onTrailer)
+                GridHeader(categoryName, position, total, filter, onFilterChange, filterLabel)
+                Content(items, onOpen, onMissingPoster, onNeedMore, { focusedItem = it },
+                    emptyTitle, emptyBody, filter, columns)
+            }
+        }
+    }
+}
+
+/**
+ * Den markerade titeln: vad den är, och vad man kan göra med den.
+ *
+ * Fast höjd — annars hoppar rutnätet varje gång man rör sig mellan en titel
+ * med beskrivning och en utan. Knapparna nås genom att gå uppåt från
+ * rutnätets första rad, och markeringen ligger kvar medan man står på dem.
+ */
+@Composable
+private fun HighlightHeader(
+    item: PosterItem?,
+    isSeries: Boolean,
+    onPlay: (PosterItem) -> Unit,
+    onOpen: (PosterItem) -> Unit,
+    onTrailer: (PosterItem) -> Unit,
+) {
+    val palette = LocalPalette.current
+    val metrics = LocalMetrics.current
+    val style = LocalThemeStyle.current
+    val isTv = LocalDeviceProfile.current.isTv
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(if (isTv) 236.dp else 168.dp)
+            .padding(horizontal = metrics.screenEdge, vertical = metrics.spaceMd)
+            .widthIn(max = 820.dp),
+        verticalArrangement = Arrangement.spacedBy(metrics.spaceXs, Alignment.Bottom),
+    ) {
+        if (item == null) return@Column
+
+        Text(
+            text = if (style.uppercaseHeadings) item.title.uppercase() else item.title,
+            style = MaterialTheme.typography.headlineMedium,
+            color = palette.textPrimary,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+
+        val facts = listOfNotNull(
+            item.rating?.takeIf { it > 0 }?.let { "★ %.1f".format(it) },
+            item.subtitle,
+        )
+        if (facts.isNotEmpty()) {
+            Text(
+                text = facts.joinToString("  ·  "),
+                style = MaterialTheme.typography.labelMedium,
+                color = palette.signal,
+            )
+        }
+
+        // Skådespelare och regissör kommer från leverantören och saknas för
+        // serier. Raden visas bara när det finns något att visa.
+        item.cast?.takeIf { it.isNotBlank() }?.let {
+            CreditRow("Skådespelare", it)
+        }
+        item.director?.takeIf { it.isNotBlank() }?.let {
+            CreditRow("Regissör", it)
+        }
+
+        item.overview?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodyLarge,
+                color = palette.textSecondary,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        Row(
+            modifier = Modifier.padding(top = metrics.spaceXs),
+            horizontalArrangement = Arrangement.spacedBy(metrics.spaceMd),
+        ) {
+            PrimaryAction(
+                label = if (isSeries) "Visa avsnitt" else "Spela",
+                onClick = { if (isSeries) onOpen(item) else onPlay(item) },
+            )
+            // Trailerknappen finns bara när leverantören skickat en.
+            if (item.trailerUrl != null) {
+                SecondaryAction(label = "Trailer", onClick = { onTrailer(item) })
+            }
+            SecondaryAction(label = "Mer info", onClick = { onOpen(item) })
+        }
+    }
+}
+
+@Composable
+private fun CreditRow(label: String, value: String) {
+    val palette = LocalPalette.current
+    val metrics = LocalMetrics.current
+    Row(horizontalArrangement = Arrangement.spacedBy(metrics.spaceSm)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = palette.textTertiary,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.labelMedium,
+            color = palette.textSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** Kategorins namn, var man är i den, och filtret. */
+@Composable
+private fun GridHeader(
+    categoryName: String,
+    position: Int,
+    total: Int,
+    filter: String,
+    onFilterChange: (String) -> Unit,
+    filterLabel: String,
+) {
+    val palette = LocalPalette.current
+    val metrics = LocalMetrics.current
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = metrics.screenEdge),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(metrics.spaceMd),
+    ) {
+        Text(
+            text = categoryName,
+            style = MaterialTheme.typography.titleMedium,
+            color = palette.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        OutlinedTextField(
+            value = filter,
+            onValueChange = onFilterChange,
+            label = { Text(filterLabel) },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            modifier = Modifier.widthIn(max = 320.dp),
+        )
+        if (total > 0) {
+            Text(
+                text = if (position > 0) "$position / $total" else "$total",
+                style = MaterialTheme.typography.labelMedium,
+                color = palette.textTertiary,
+            )
         }
     }
 }
@@ -215,6 +350,7 @@ private fun Content(
     emptyTitle: String,
     emptyBody: String,
     filter: String,
+    columns: Int,
 ) {
     if (items.isEmpty()) {
         // Tomt på grund av filtret är något annat än tomt bibliotek.
@@ -231,69 +367,6 @@ private fun Content(
         onMissingPoster = onMissingPoster,
         onFocusItem = onFocusItem,
         onNeedMore = onNeedMore,
-    )
-}
-
-/**
- * Fakta om den markerade titeln. Fast höjd — annars hoppar rutnätet varje
- * gång man flyttar sig mellan en film med beskrivning och en utan.
- */
-@Composable
-private fun HighlightHeader(item: PosterItem?) {
-    val palette = LocalPalette.current
-    val metrics = LocalMetrics.current
-    val style = LocalThemeStyle.current
-    val isTv = LocalDeviceProfile.current.isTv
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(if (isTv) 168.dp else 118.dp)
-            .padding(horizontal = metrics.screenEdge, vertical = metrics.spaceMd)
-            .widthIn(max = 720.dp),
-        verticalArrangement = Arrangement.spacedBy(metrics.spaceXs, Alignment.Bottom),
-    ) {
-        if (item == null) return@Column
-        Text(
-            text = if (style.uppercaseHeadings) item.title.uppercase() else item.title,
-            style = MaterialTheme.typography.headlineMedium,
-            color = palette.textPrimary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        val facts = listOfNotNull(item.subtitle, item.rating?.takeIf { it > 0 }?.let { "★ %.1f".format(it) })
-        if (facts.isNotEmpty()) {
-            Text(
-                text = facts.joinToString("  ·  "),
-                style = MaterialTheme.typography.labelMedium,
-                color = palette.signal,
-            )
-        }
-        item.overview?.let {
-            Text(
-                text = it,
-                style = MaterialTheme.typography.bodyLarge,
-                color = palette.textSecondary,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
-
-@Composable
-private fun FilterField(value: String, onChange: (String) -> Unit, label: String, compact: Boolean = false) {
-    val metrics = LocalMetrics.current
-    OutlinedTextField(
-        value = value,
-        onValueChange = onChange,
-        label = { Text(label) },
-        singleLine = true,
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-        // Smalt fält, inte en låda tvärs över skärmen. Ett sökfält ska
-        // finnas till hands, inte dominera vyn.
-        modifier = Modifier
-            .then(if (compact) Modifier.fillMaxWidth() else Modifier.widthIn(max = 380.dp))
-            .padding(horizontal = metrics.screenEdge, vertical = if (compact) 4.dp else metrics.spaceSm),
+        columns = columns,
     )
 }

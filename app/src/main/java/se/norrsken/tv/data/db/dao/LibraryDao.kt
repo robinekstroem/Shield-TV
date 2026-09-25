@@ -72,6 +72,31 @@ interface LibraryDao {
         limit: Int,
     ): Flow<List<SeriesEntity>>
 
+    /**
+     * Antal i den valda kategorin, med samma villkor som listan. Utan den
+     * hade räknaren visat hur många som råkat laddas in, inte hur många
+     * som finns.
+     */
+    @Query(
+        """
+        SELECT COUNT(*) FROM movies
+        WHERE (:categoryId IS NULL OR categoryId = :categoryId)
+          AND (categoryId IS NULL OR categoryId NOT IN (:hiddenIds))
+          AND (:filter IS NULL OR title LIKE :filter ESCAPE '\' OR rawTitle LIKE :filter ESCAPE '\')
+        """
+    )
+    fun countMovies(categoryId: Long?, hiddenIds: List<Long>, filter: String?): Flow<Int>
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM series
+        WHERE (:categoryId IS NULL OR categoryId = :categoryId)
+          AND (categoryId IS NULL OR categoryId NOT IN (:hiddenIds))
+          AND (:filter IS NULL OR title LIKE :filter ESCAPE '\' OR rawTitle LIKE :filter ESCAPE '\')
+        """
+    )
+    fun countSeries(categoryId: Long?, hiddenIds: List<Long>, filter: String?): Flow<Int>
+
     @Query("SELECT COUNT(*) FROM movies")
     fun observeMovieCount(): Flow<Int>
 

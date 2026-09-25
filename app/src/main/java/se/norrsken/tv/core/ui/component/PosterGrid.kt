@@ -17,6 +17,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.background
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.ContentScale
@@ -37,6 +39,9 @@ data class PosterItem(
     val backdropUrl: String? = null,
     val rating: Double? = null,
     val overview: String? = null,
+    val trailerUrl: String? = null,
+    val cast: String? = null,
+    val director: String? = null,
 )
 
 /**
@@ -54,6 +59,8 @@ fun PosterGrid(
     onMissingPoster: (PosterItem) -> Unit = {},
     onFocusItem: (PosterItem) -> Unit = {},
     onNeedMore: () -> Unit = {},
+    /** Antal per rad på TV. Telefonen har alltid tre. */
+    columns: Int = 6,
 ) {
     val metrics = LocalMetrics.current
     val isTv = LocalDeviceProfile.current.isTv
@@ -70,13 +77,17 @@ fun PosterGrid(
         state = state,
         // Mobil: tre stabila kolumner utnyttjar S26-skärmen bättre och gör
         // biblioteket mer streaming-app än desktop-grid. TV behåller adaptiv bredd.
-        columns = if (isTv) GridCells.Adaptive(minSize = metrics.posterWidth) else GridCells.Fixed(3),
+        // Fast antal, inte adaptivt: användaren bestämmer täthet, inte
+        // omslagets minimibredd.
+        columns = GridCells.Fixed(if (isTv) columns else 3),
         modifier = modifier.fillMaxSize().padding(
             horizontal = metrics.screenEdge,
             vertical = if (isTv) metrics.screenEdge else 8.dp,
         ),
-        horizontalArrangement = Arrangement.spacedBy(metrics.railSpacing),
-        verticalArrangement = Arrangement.spacedBy(metrics.railSpacing),
+        // Tätt rutnät behöver mindre luft, annars äter mellanrummen
+        // bredden som omslagen skulle haft.
+        horizontalArrangement = Arrangement.spacedBy(if (isTv && columns >= 7) 10.dp else metrics.railSpacing),
+        verticalArrangement = Arrangement.spacedBy(if (isTv && columns >= 7) 10.dp else metrics.railSpacing),
     ) {
         items(items.size, key = { items[it].id }) { index ->
             PosterCard(
@@ -128,6 +139,20 @@ private fun PosterCard(
                 )
             } else {
                 ArtworkPlaceholder(title = item.title)
+            }
+            // Betyget som en liten bricka i hörnet. Syns på avstånd utan
+            // att ta plats från bilden.
+            item.rating?.takeIf { it > 0 }?.let { rating ->
+                Text(
+                    text = "%.1f".format(rating),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = palette.textPrimary,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(4.dp)
+                        .background(palette.background.copy(alpha = 0.78f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 5.dp, vertical = 1.dp),
+                )
             }
         }
 

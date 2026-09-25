@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import se.norrsken.tv.data.db.dao.ChannelDao
 import se.norrsken.tv.data.db.dao.LibraryDao
+import se.norrsken.tv.data.player.MiniPlayback
+import se.norrsken.tv.data.player.PlaybackController
 import javax.inject.Inject
 
 /**
@@ -28,7 +30,17 @@ data class LibraryCounts(
 class ShellViewModel @Inject constructor(
     channelDao: ChannelDao,
     libraryDao: LibraryDao,
+    private val playback: PlaybackController,
 ) : ViewModel() {
+
+    val mini: StateFlow<MiniPlayback?> = playback.mini
+
+    fun heldPlayer() = playback.heldPlayer()
+
+    fun stopPlayback() = playback.stop()
+
+    /** Appen i bakgrunden — ljudet ska inte fortsätta i fickan. */
+    fun pausePlayback() = playback.pause()
 
     val counts: StateFlow<LibraryCounts> = combine(
         channelDao.observeCount(),

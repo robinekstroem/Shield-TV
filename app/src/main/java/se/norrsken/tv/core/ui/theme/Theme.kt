@@ -32,41 +32,26 @@ fun NorrskenTheme(
     val context = LocalContext.current
     val resolved = profile ?: remember(context) { detectDeviceProfile(context) }
 
-    val style = remember(preferences.theme, preferences.interfaceStyle) {
-        val base = styleFor(preferences.theme)
-        if (preferences.interfaceStyle == InterfaceStyle.MINIMAL) {
-            // Accentstrecket före rubriker är dekor och försvinner först.
-            base.copy(minimal = true, headingAccentBar = false)
-        } else {
-            base
-        }
+    val style = remember(preferences.interfaceStyle) {
+        ThemeStyle(minimal = preferences.interfaceStyle == InterfaceStyle.MINIMAL)
     }
 
-    val palette = remember(preferences.theme, preferences.accent, preferences.uiOpacity) {
-        val themed = paletteFor(preferences.theme)
-        // "Temats egen" behaller temats accent. Ett eget val skriver over den.
+    val palette = remember(preferences.accent, preferences.uiOpacity) {
         val base = if (preferences.accent == AccentChoice.THEME) {
-            themed
+            Palette()
         } else {
-            themed.copy(signal = Color(preferences.accent.rgb))
+            Palette(signal = Color(preferences.accent.rgb))
         }
         if (preferences.uiOpacity >= 100) {
             base
         } else {
-            // Genomskinligheten galler ytorna, aldrig texten. Halvgenomskinlig
-            // text over en backdrop blir olaslig, vilket ar ett annat problem
-            // an "lite luftigare".
             val alpha = preferences.uiOpacity / 100f
             base.copy(
                 surface = base.surface.copy(alpha = alpha),
                 surfaceRaised = base.surfaceRaised.copy(alpha = alpha),
-                ambient = base.ambient.copy(alpha = alpha),
             )
         }
     }
-
-    val metrics = if (resolved.isTv) Metrics.Tv else Metrics.Handheld
-    val motion = remember(reducedMotion) { Motion(reduced = reducedMotion) }
 
     val typography = remember(resolved.isTv, preferences.textScale, style) {
         if (resolved.isTv) {

@@ -1,5 +1,8 @@
 package se.norrsken.tv.feature.settings
 
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -57,7 +60,6 @@ import se.norrsken.tv.data.settings.MediaLanguage
 import se.norrsken.tv.data.settings.SubtitleBackground
 import se.norrsken.tv.data.settings.SubtitleSize
 import se.norrsken.tv.data.settings.TextScale
-import se.norrsken.tv.data.settings.ThemeChoice
 import se.norrsken.tv.data.settings.VideoQuality
 import se.norrsken.tv.data.settings.VideoScale
 import se.norrsken.tv.data.settings.VolumeBoost
@@ -98,8 +100,89 @@ enum class SettingsSection(val title: String) {
 @Composable
 fun SettingsScreen(
     onOpenSection: (SettingsSection) -> Unit,
+    onManageCategories: (String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: PlaylistsViewModel = hiltViewModel(),
+) {
+    // TV: områdena till vänster, innehållet till höger — allt på en skärm.
+    // Att gå in i ett område, ändra en sak och backa ut igen är mycket
+    // arbete med en fjärrkontroll.
+    if (LocalDeviceProfile.current.isTv) {
+        SettingsTwoPane(onManageCategories, viewModel, modifier)
+    } else {
+        SettingsHub(onOpenSection, viewModel, modifier)
+    }
+}
+
+@Composable
+private fun SettingsTwoPane(
+    onManageCategories: (String) -> Unit,
+    viewModel: PlaylistsViewModel,
+    modifier: Modifier = Modifier,
+) {
+    val metrics = LocalMetrics.current
+    val prefs by viewModel.preferences.collectAsStateWithLifecycle()
+    val playlists by viewModel.playlists.collectAsStateWithLifecycle()
+    val epgState by viewModel.epgState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val display = remember { DeviceCapabilities.display(context) }
+    val audio = remember { DeviceCapabilities.audio(context) }
+
+    var section by rememberSaveable { mutableStateOf(SettingsSection.SOURCES) }
+
+    Row(modifier = modifier.fillMaxSize().padding(metrics.screenEdge)) {
+        LazyColumn(
+            modifier = Modifier.width(260.dp).fillMaxHeight(),
+            verticalArrangement = Arrangement.spacedBy(metrics.spaceXs),
+        ) {
+            item {
+                SectionHeading(
+                    title = "Inställningar",
+                    modifier = Modifier.padding(bottom = metrics.spaceMd),
+                )
+            }
+            items(SettingsSection.entries) { entry ->
+                SectionRow(
+                    title = entry.title,
+                    summary = summaryOf(entry, prefs, playlists.size),
+                    active = entry == section,
+                    onClick = { section = entry },
+                )
+            }
+        }
+
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(start = metrics.spaceLg),
+            verticalArrangement = Arrangement.spacedBy(metrics.spaceSm),
+        ) {
+            item {
+                SectionHeading(
+                    title = section.title,
+                    modifier = Modifier.padding(bottom = metrics.spaceMd),
+                )
+            }
+            if (section == SettingsSection.SOURCES) {
+                item { SourcesPanel(viewModel) }
+            } else {
+                sectionRows(
+                    section, prefs, viewModel, epgState, playlists,
+                    isTv = true, display = display, audio = audio,
+                    onManageCategories = onManageCategories,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Översikten på telefonen, där två spalter inte får plats. Varje område
+ * visar sina aktuella värden direkt i raden.
+ */
+@Composable
+private fun SettingsHub(
+    onOpenSection: (SettingsSection) -> Unit,
+    viewModel: PlaylistsViewModel,
+    modifier: Modifier = Modifier,
 ) {
     val metrics = LocalMetrics.current
     val prefs by viewModel.preferences.collectAsStateWithLifecycle()
@@ -115,11 +198,12 @@ fun SettingsScreen(
                 modifier = Modifier.padding(bottom = metrics.spaceMd),
             )
         }
-        items(SettingsSection.entries) { section ->
+        items(SettingsSection.entries) { entry ->
             SectionRow(
-                title = section.title,
-                summary = summaryOf(section, prefs, playlists.size),
-                onClick = { onOpenSection(section) },
+                title = entry.title,
+                summary = summaryOf(entry, prefs, playlists.size),
+                active = false,
+                onClick = { onOpenSection(entry) },
             )
         }
     }
@@ -141,32 +225,42 @@ private fun summaryOf(section: SettingsSection, prefs: AppPreferences, sources: 
             if (prefs.autoSubtitles) "${prefs.subtitleLanguage.label} · ${prefs.subtitleSize.label}"
             else "Av · ${prefs.subtitleSize.label}"
         SettingsSection.APPEARANCE ->
-            "${prefs.theme.label} · ${prefs.interfaceStyle.label}"
+            "${prefs.interfaceStyle.label} · Glöd ${prefs.effects.label.lowercase()}"
         SettingsSection.LIBRARY -> prefs.librarySort.label
         SettingsSection.PLAYBACK -> "Buffert ${prefs.buffer.label.lowercase()}"
         SettingsSection.GENERAL -> if (prefs.confirmExit) "Bekräfta avslut på" else "Bekräfta avslut av"
     }
 
 @Composable
-private fun SectionRow(title: String, summary: String, onClick: () -> Unit) {
+private fun SectionRow(title: String, summary: String, active: Boolean, onClick: () -> Unit) {
     val palette = LocalPalette.current
     val metrics = LocalMetrics.current
 
-    FocusableSurface(onClick = onClick, modifier = Modifier.fillMaxWidth()) { focused ->
-        Row(
-            modifier = Modifier.padding(horizontal = metrics.spaceLg, vertical = metrics.spaceMd),
-            verticalAlignment = Alignment.CenterVertically,
+    FocusableSurface(
+        onClick = onClick,
+        focusScale = 1f,
+        cornerRadius = metrics.radiusCard,
+        background = active,
+        modifier = Modifier.fillMaxWidth(),
+    ) { focused ->
+        Column(
+            modifier = Modifier.padding(horizontal = metrics.spaceMd, vertical = metrics.spaceSm),
         ) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleMedium,
-                color = if (focused) palette.focus else palette.textPrimary,
-                modifier = Modifier.weight(1f),
+                color = when {
+                    focused -> palette.focus
+                    active -> palette.textPrimary
+                    else -> palette.textSecondary
+                },
             )
             Text(
                 text = summary,
                 style = MaterialTheme.typography.labelMedium,
-                color = if (focused) palette.focus else palette.signal,
+                color = if (active || focused) palette.signal else palette.textTertiary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -181,7 +275,7 @@ fun SettingsSectionScreen(
     viewModel: PlaylistsViewModel = hiltViewModel(),
 ) {
     if (section == SettingsSection.SOURCES) {
-        SourcesPage(modifier = modifier, viewModel = viewModel)
+        SourcesPanel(viewModel = viewModel)
         return
     }
 
@@ -206,17 +300,32 @@ fun SettingsSectionScreen(
                 modifier = Modifier.padding(bottom = metrics.spaceMd),
             )
         }
-        when (section) {
-            SettingsSection.EPG -> epgRows(prefs, viewModel, epgState, playlists)
-            SettingsSection.PICTURE -> pictureRows(prefs, viewModel, isTv, display)
-            SettingsSection.AUDIO -> audioRows(prefs, viewModel, audio)
-            SettingsSection.SUBTITLES -> subtitleRows(prefs, viewModel)
-            SettingsSection.APPEARANCE -> appearanceRows(prefs, viewModel)
-            SettingsSection.LIBRARY -> libraryRows(prefs, viewModel, onManageCategories)
-            SettingsSection.PLAYBACK -> playbackRows(prefs, viewModel)
-            SettingsSection.GENERAL -> generalRows(prefs, viewModel)
-            SettingsSection.SOURCES -> Unit
-        }
+        sectionRows(section, prefs, viewModel, epgState, playlists, isTv, display, audio, onManageCategories)
+    }
+}
+
+/** Raderna för ett område. Samma kod på telefonens undersida och TV:ns vy. */
+private fun LazyListScope.sectionRows(
+    section: SettingsSection,
+    prefs: AppPreferences,
+    viewModel: PlaylistsViewModel,
+    epgState: EpgState,
+    playlists: List<PlaylistEntity>,
+    isTv: Boolean,
+    display: se.norrsken.tv.data.device.DisplayInfo?,
+    audio: se.norrsken.tv.data.device.AudioOutputInfo,
+    onManageCategories: (String) -> Unit,
+) {
+    when (section) {
+        SettingsSection.EPG -> epgRows(prefs, viewModel, epgState, playlists)
+        SettingsSection.PICTURE -> pictureRows(prefs, viewModel, isTv, display)
+        SettingsSection.AUDIO -> audioRows(prefs, viewModel, audio)
+        SettingsSection.SUBTITLES -> subtitleRows(prefs, viewModel)
+        SettingsSection.APPEARANCE -> appearanceRows(prefs, viewModel)
+        SettingsSection.LIBRARY -> libraryRows(prefs, viewModel, onManageCategories)
+        SettingsSection.PLAYBACK -> playbackRows(prefs, viewModel)
+        SettingsSection.GENERAL -> generalRows(prefs, viewModel)
+        SettingsSection.SOURCES -> Unit
     }
 }
 
@@ -543,20 +652,8 @@ private fun LazyListScope.appearanceRows(prefs: AppPreferences, vm: PlaylistsVie
     }
     item {
         OptionRow(
-            title = "Tema",
-            description = "Ändrar färger, fokusglöd, rubrikstil och bakgrundens atmosfär: " +
-                "norrsken, glödande gnistor eller snö.",
-            options = ThemeChoice.entries,
-            selected = prefs.theme,
-            label = { it.label },
-            onSelect = vm::setTheme,
-        )
-    }
-    item {
-        OptionRow(
-            title = "Bakgrundseffekter",
-            description = "Reducerad halverar partiklarna och sparar batteri. " +
-                "Pausas alltid under uppspelning.",
+            title = "Bakgrundsglöd",
+            description = "En svag glöd bakom innehållet. Svag tar bort filmkornet, Av släcker den helt.",
             options = EffectLevel.entries,
             selected = prefs.effects,
             label = { it.label },
@@ -612,6 +709,16 @@ private fun LazyListScope.libraryRows(
             selected = prefs.librarySort,
             label = { it.label },
             onSelect = vm::setLibrarySort,
+        )
+    }
+    item {
+        OptionRow(
+            title = "Omslag per rad",
+            description = "På 1080p ger åtta ungefär 90 dp per omslag. Färre gör dem större.",
+            options = listOf(5, 6, 7, 8, 10),
+            selected = prefs.gridColumns,
+            label = { "$it" },
+            onSelect = vm::setGridColumns,
         )
     }
     item {
@@ -762,10 +869,7 @@ private fun InfoCard(title: String, lines: List<String>, note: String) {
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun SourcesPage(
-    modifier: Modifier = Modifier,
-    viewModel: PlaylistsViewModel,
-) {
+private fun SourcesPanel(viewModel: PlaylistsViewModel) {
     val palette = LocalPalette.current
     val metrics = LocalMetrics.current
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()

@@ -40,7 +40,10 @@ import se.norrsken.tv.data.db.entity.CategoryEntity
 import se.norrsken.tv.data.db.entity.ContentKind
 import se.norrsken.tv.data.metadata.MetadataRepository
 import se.norrsken.tv.data.repository.CategoryVisibility
+import se.norrsken.tv.data.repository.VodDetailsRepository
 import se.norrsken.tv.data.repository.likePattern
+import androidx.compose.ui.platform.LocalContext
+import se.norrsken.tv.core.util.openTrailer
 import se.norrsken.tv.feature.library.LibraryBrowser
 import se.norrsken.tv.data.repository.isCategoryHidden
 import se.norrsken.tv.data.settings.AppPreferences
@@ -55,6 +58,7 @@ class MoviesViewModel @Inject constructor(
     private val libraryDao: LibraryDao,
     playlistDao: PlaylistDao,
     private val metadata: MetadataRepository,
+    private val details: VodDetailsRepository,
     private val settings: SettingsRepository,
     visibility: CategoryVisibility,
 ) : ViewModel() {
@@ -144,10 +148,33 @@ class MoviesViewModel @Inject constructor(
                     backdropUrl = movie.backdropUrl,
                     rating = movie.rating,
                     overview = movie.overview,
+                    trailerUrl = movie.trailerUrl,
+                    cast = movie.cast,
+                    director = movie.director,
                 )
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * Markeringen har stått still — hämta leverantörens beskrivning och
+     * trailer för just den titeln. Utan det står huvudytan tom tills man
+     * öppnat filmen en gång.
+     */
+    fun focusHold(id: Long) {
+        viewModelScope.launch { details.ensureDetails(id) }
+    }
+
+    /** Antal i kategorin enligt databasen — inte antal inlästa. */
+    val total: StateFlow<Int> =
+        combine(_selected, hiddenIds, _filter.debounce(250)) { id, hidden, text ->
+            Triple(id?.takeIf { it !in hidden }, hidden, text.trim().ifBlank { null }?.let(::likePattern))
+        }
+        .distinctUntilChanged()
+        .flatMapLatest { (categoryId, hidden, pattern) ->
+            libraryDao.countMovies(categoryId, hidden, pattern)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     fun setFilter(value: String) {
         _filter.value = value
@@ -177,6 +204,7 @@ class MoviesViewModel @Inject constructor(
 @Composable
 fun MoviesScreen(
     onOpenMovie: (Long) -> Unit,
+    onPlayMovie: (Long) -> Unit,
     onManageCategories: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: MoviesViewModel = hiltViewModel(),
@@ -187,6 +215,8 @@ fun MoviesScreen(
     val sortLabel by viewModel.sortLabel.collectAsStateWithLifecycle()
     val categorySortLabel by viewModel.categorySortLabel.collectAsStateWithLifecycle()
     val filter by viewModel.filter.collectAsStateWithLifecycle()
+    val total by viewModel.total.collectAsStateWithLifecycle()
+    val context = LocalContext.current
 
     LibraryBrowser(
         items = items,
@@ -201,6 +231,10 @@ fun MoviesScreen(
         filter = filter,
         onFilterChange = viewModel::setFilter,
         onOpen = { onOpenMovie(it.id) },
+        onPlay = { onPlayMovie(it.id) },
+        onTrailer = { item -> item.trailerUrl?.let { openTrailer(context, it) } },
+        onFocusHold = viewModel::focusHold,
+        total = total,
         onMissingPoster = { viewModel.fillMissingArtwork(it.id) },
         onNeedMore = viewModel::loadMore,
         allLabel = "Alla filmer",

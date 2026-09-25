@@ -32,7 +32,6 @@ import se.norrsken.tv.core.ui.effects.AmbientBackground
 import se.norrsken.tv.core.ui.theme.LocalPalette
 import se.norrsken.tv.core.ui.theme.LocalMotion
 import se.norrsken.tv.core.ui.theme.LocalPreferences
-import se.norrsken.tv.core.ui.theme.effectFor
 import se.norrsken.tv.feature.categories.CategoryManagerScreen
 import se.norrsken.tv.feature.favorites.FavoritesScreen
 import se.norrsken.tv.feature.guide.GuideScreen
@@ -68,6 +67,7 @@ fun AppShell(
     val navController = rememberNavController()
     val current = currentDestination(navController)
     val counts by shellViewModel.counts.collectAsStateWithLifecycle()
+    val miniPlayback by shellViewModel.mini.collectAsStateWithLifecycle()
 
     // Ingen jamforelse mot current: star man pa en underrutt ar current
     // huvudavdelningen, och ett likhetstest hade da gjort menyvalet dott.
@@ -101,11 +101,8 @@ fun AppShell(
         // bakgrund, så den syns igenom — utom i spelaren, som har sitt eget
         // svarta lager.
         AmbientBackground(
-            effect = effectFor(preferences.theme),
-            // Rörelse avstängd — i systemet eller i appen — betyder inga
-            // partiklar heller.
+            // Rörelse avstängd — i systemet eller i appen — släcker glöden.
             level = if (LocalMotion.current.reduced) EffectLevel.OFF else preferences.effects,
-            isTv = profile.isTv,
         )
         if (profile.isTv) {
             // Menyn ligger ÖVER innehållet, inte bredvid. Expanderar den i
@@ -154,6 +151,20 @@ fun AppShell(
                     modifier = Modifier.align(Alignment.CenterStart),
                 )
             }
+        }
+
+        // Mini-rutan ligger överst av allt i skalet — men aldrig i
+        // spelaren, som returnerar innan hit. Samma ström som nyss fyllde
+        // skärmen, ingen ny anslutning.
+        miniPlayback?.let { playing ->
+            MiniPlayer(
+                mini = playing,
+                player = shellViewModel.heldPlayer(),
+                onOpen = { navController.navigate(playing.route) },
+                onClose = shellViewModel::stopPlayback,
+                onAppBackgrounded = shellViewModel::pausePlayback,
+                modifier = Modifier.align(Alignment.TopStart),
+            )
         }
     }
 }
@@ -237,6 +248,7 @@ private fun AppNavHost(navController: NavHostController) {
         composable(Destination.Movies.route) {
             MoviesScreen(
                 onOpenMovie = { id -> navController.navigate(MOVIE_ROUTE + id) },
+                onPlayMovie = { id -> navController.play(PlayableKind.MOVIE, id) },
                 onManageCategories = { navController.navigate(CATEGORIES_ROUTE + "MOVIE") },
             )
         }
@@ -274,6 +286,7 @@ private fun AppNavHost(navController: NavHostController) {
                 onOpenSection = { section ->
                     navController.navigate(SETTINGS_SECTION_ROUTE + section.name)
                 },
+                onManageCategories = { kind -> navController.navigate(CATEGORIES_ROUTE + kind) },
             )
         }
 

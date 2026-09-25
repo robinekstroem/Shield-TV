@@ -3,204 +3,59 @@ package se.norrsken.tv.core.ui.effects
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.ImageShader
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import se.norrsken.tv.core.ui.theme.LocalPalette
 import se.norrsken.tv.data.settings.EffectLevel
-import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.sin
 import kotlin.random.Random
 
-/** Vilken atmosfär ett tema har. Temat väljer, användaren styr nivån. */
-enum class BackgroundEffect { NONE, SNOW, EMBERS, AURORA }
-
 /**
- * En partikel beskrivs helt av sina startvärden. Positionen räknas fram ur
- * tiden varje bildruta — inget flyttas, inget allokeras.
- */
-private class Particle(
-    val x: Float,
-    val y: Float,
-    val speed: Float,
-    val radius: Float,
-    val drift: Float,
-    val driftRate: Float,
-    val phase: Float,
-    val alpha: Float,
-)
-
-private fun particles(count: Int, seed: Int): List<Particle> {
-    val random = Random(seed)
-    return List(count) {
-        Particle(
-            x = random.nextFloat(),
-            y = random.nextFloat(),
-            speed = 0.02f + random.nextFloat() * 0.06f,
-            radius = 1.2f + random.nextFloat() * 2.8f,
-            drift = 0.4f + random.nextFloat(),
-            driftRate = 0.3f + random.nextFloat() * 0.8f,
-            phase = random.nextFloat() * (2 * PI).toFloat(),
-            alpha = 0.25f + random.nextFloat() * 0.55f,
-        )
-    }
-}
-
-private fun baseCount(effect: BackgroundEffect): Int = when (effect) {
-    BackgroundEffect.SNOW -> 140
-    BackgroundEffect.EMBERS -> 60
-    BackgroundEffect.AURORA -> 0
-    BackgroundEffect.NONE -> 0
-}
-
-private val AURORA_COLORS = listOf(
-    Color(0xFF57E6F2),
-    Color(0xFF56F0B4),
-    Color(0xFF92E8FF),
-)
-
-/**
- * Temats atmosfär bakom gränssnittet.
+ * Bakgrunden: svart, med en svag glöd och mörkare kanter.
  *
- * Aldrig bakom videon — spelaren har eget lager utan effekter.
+ * Ingenting rör sig. Tidigare låg här partiklar och böljande ridåer som
+ * ritades om sextio gånger i sekunden — de tog uppmärksamhet från
+ * innehållet och kostade ström på en TV-box som aldrig stängs av. En stilla
+ * glöd ger djup utan att konkurrera.
+ *
+ * Aldrig bakom videon — spelaren har eget svart lager.
  */
 @Composable
-fun AmbientBackground(
-    effect: BackgroundEffect,
-    level: EffectLevel,
-    isTv: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    if (effect == BackgroundEffect.NONE || level == EffectLevel.OFF) return
-
-    val deviceFactor = if (isTv) 1f else 0.55f
-    val count = (baseCount(effect) * level.particleFactor * deviceFactor).toInt()
-    val seeds = remember(effect, count) { particles(count, seed = effect.ordinal * 7919) }
-    val aurora = remember { List(3) { Path() } }
+fun AmbientBackground(level: EffectLevel, modifier: Modifier = Modifier) {
+    if (level == EffectLevel.OFF) return
+    val palette = LocalPalette.current
+    val glow = palette.signal
     val grain = remember(level) { if (level == EffectLevel.FULL) grainTexture() else null }
 
-    var time by remember { mutableFloatStateOf(0f) }
-
-    LaunchedEffect(effect, level) {
-        // Reducerat läge ritar med minst 33 ms mellanrum, alltså runt 30
-        // bilder i sekunden. Rörelsen är långsam nog att det inte syns.
-        val minGap = if (level == EffectLevel.REDUCED) 33_000_000L else 0L
-        var start = -1L
-        var last = 0L
-        while (true) {
-            withFrameNanos { now ->
-                if (start < 0) start = now
-                if (now - last >= minGap) {
-                    time = (now - start) / 1_000_000_000f
-                    last = now
-                }
-            }
-        }
-    }
-
     Canvas(modifier = modifier.fillMaxSize()) {
-        // time läses i ritfasen, så bara Canvasen ritas om varje bildruta.
-        val t = time
-        when (effect) {
-            BackgroundEffect.SNOW -> drawSnow(seeds, t)
-            BackgroundEffect.EMBERS -> drawEmbers(seeds, t)
-            BackgroundEffect.AURORA -> drawAurora(aurora, t)
-            BackgroundEffect.NONE -> Unit
-        }
-        drawVignette()
-        grain?.let { drawGrain(it) }
-    }
-}
-
-private fun DrawScope.drawSnow(seeds: List<Particle>, t: Float) {
-    val scale = size.minDimension / 540f
-    for (p in seeds) {
-        val y = ((p.y + t * p.speed) % 1f) * size.height
-        // Flingor pendlar i sidled. Rak snö ser ut som regn.
-        val sway = sin(t * p.driftRate + p.phase) * p.drift * 14f * scale
-        drawCircle(
-            color = Color.White.copy(alpha = p.alpha * 0.7f),
-            radius = p.radius * scale,
-            center = Offset(p.x * size.width + sway, y),
-        )
-    }
-}
-
-private fun DrawScope.drawEmbers(seeds: List<Particle>, t: Float) {
-    val scale = size.minDimension / 540f
-    for (p in seeds) {
-        val progress = (p.y + t * p.speed * 0.7f) % 1f
-        val y = (1f - progress) * size.height
-        val sway = sin(t * p.driftRate * 0.6f + p.phase) * p.drift * 22f * scale
-        // Gnistor falnar mot toppen och flimrar — som aska över en eld.
-        val flicker = 0.65f + 0.35f * sin(t * 3.1f + p.phase * 5f)
-        val fade = (1f - progress).coerceIn(0f, 1f)
-        val warm = if (p.phase > PI.toFloat()) Color(0xFFFF6A2B) else Color(0xFFE0283A)
-        drawCircle(
-            color = warm.copy(alpha = p.alpha * flicker * fade * 0.8f),
-            radius = p.radius * 0.8f * scale,
-            center = Offset(p.x * size.width + sway, y),
-        )
-    }
-}
-
-/**
- * Tre ljusridåer nära skärmens överkant.
- *
- * Tidigare nådde de ner mot mitten och var fyllda ända till underkanten.
- * Då blev de solida siluetter — det såg ut som berg, inte som ljus. Nu
- * ligger de högt, är mycket svagare, och gradienten tar slut exakt där
- * ridån slutar så att ingen hård kant kan uppstå.
- */
-private fun DrawScope.drawAurora(paths: List<Path>, t: Float) {
-    val width = size.width
-    val steps = 48
-
-    paths.forEachIndexed { index, path ->
-        val base = size.height * (0.10f + index * 0.05f)
-        val amplitude = size.height * (0.035f + index * 0.012f)
-        // Ett varv tar 31–45 sekunder. Snabbare än så syns loopen.
-        val speed = 0.14f + index * 0.03f
-        val phase = index * 1.9f
-
-        path.reset()
-        path.moveTo(0f, 0f)
-        for (step in 0..steps) {
-            val fx = step / steps.toFloat()
-            val wave = sin(fx * 2.3f * 2 * PI.toFloat() + t * speed + phase) * amplitude +
-                sin(fx * 5.1f * 2 * PI.toFloat() - t * speed * 1.4f) * amplitude * 0.35f
-            path.lineTo(fx * width, base + wave)
-        }
-        path.lineTo(width, 0f)
-        path.close()
-
-        val color = AURORA_COLORS[index]
-        drawPath(
-            path = path,
-            brush = Brush.verticalGradient(
-                colors = listOf(
-                    color.copy(alpha = 0f),
-                    color.copy(alpha = 0.07f),
-                    color.copy(alpha = 0f),
-                ),
-                startY = 0f,
-                endY = base - amplitude,
+        // Två ljuskällor: en större uppe till vänster där innehållet börjar,
+        // en svagare nere till höger som balans. Båda långt under vad ögat
+        // läser som "färg" — de gör svärtan djup, inte blå.
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(glow.copy(alpha = 0.075f), Color.Transparent),
+                center = Offset(size.width * 0.18f, size.height * 0.10f),
+                radius = size.maxDimension * 0.75f,
             ),
         )
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(glow.copy(alpha = 0.035f), Color.Transparent),
+                center = Offset(size.width * 0.92f, size.height * 0.95f),
+                radius = size.maxDimension * 0.6f,
+            ),
+        )
+        drawVignette()
+        grain?.let { drawGrain(it) }
     }
 }
 
@@ -222,7 +77,7 @@ private fun DrawScope.drawVignette() {
 private fun DrawScope.drawGrain(texture: ImageBitmap) {
     drawRect(
         brush = ShaderBrush(ImageShader(texture, TileMode.Repeated, TileMode.Repeated)),
-        alpha = 0.035f,
+        alpha = 0.03f,
     )
 }
 

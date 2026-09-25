@@ -47,9 +47,9 @@ class SettingsRepository @Inject constructor(
             showClock = map[CLOCK]?.toBooleanStrictOrNull() ?: true,
             confirmExit = map[CONFIRM_EXIT]?.toBooleanStrictOrNull() ?: true,
             librarySort = map[LIBRARY_SORT].toEnum(LibrarySort.RECENT),
+            gridColumns = map[GRID_COLUMNS]?.toIntOrNull()?.coerceIn(4, 10) ?: 8,
             channelSort = map[CHANNEL_SORT].toEnum(ChannelSort.PROVIDER),
             categorySort = map[CATEGORY_SORT].toEnum(CategorySort.PROVIDER),
-            theme = map[THEME].toEnum(ThemeChoice.NORRSKEN),
             interfaceStyle = map[INTERFACE_STYLE].toEnum(InterfaceStyle.STANDARD),
             textScale = map[TEXT_SCALE].toEnum(TextScale.MEDIUM),
             accent = map[ACCENT].toEnum(AccentChoice.THEME),
@@ -83,9 +83,9 @@ class SettingsRepository @Inject constructor(
     suspend fun setShowClock(value: Boolean) = put(CLOCK, value.toString())
     suspend fun setConfirmExit(value: Boolean) = put(CONFIRM_EXIT, value.toString())
     suspend fun setLibrarySort(value: LibrarySort) = put(LIBRARY_SORT, value.name)
+    suspend fun setGridColumns(value: Int) = put(GRID_COLUMNS, value.coerceIn(4, 10).toString())
     suspend fun setChannelSort(value: ChannelSort) = put(CHANNEL_SORT, value.name)
     suspend fun setCategorySort(value: CategorySort) = put(CATEGORY_SORT, value.name)
-    suspend fun setTheme(value: ThemeChoice) = put(THEME, value.name)
     suspend fun setInterfaceStyle(value: InterfaceStyle) = put(INTERFACE_STYLE, value.name)
     suspend fun setVideoScale(value: VideoScale) = put(VIDEO_SCALE, value.name)
     suspend fun setVideoQuality(value: VideoQuality) = put(VIDEO_QUALITY, value.name)
@@ -153,7 +153,6 @@ class SettingsRepository @Inject constructor(
         const val LIBRARY_SORT = "sort.library"
         const val CHANNEL_SORT = "sort.channels"
         const val CATEGORY_SORT = "sort.categories"
-        const val THEME = "appearance.theme"
         const val INTERFACE_STYLE = "appearance.interface_style"
         const val VIDEO_SCALE = "player.video_scale"
         const val VIDEO_QUALITY = "picture.quality"

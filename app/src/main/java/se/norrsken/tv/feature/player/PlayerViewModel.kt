@@ -14,7 +14,7 @@ import se.norrsken.tv.data.db.dao.LibraryDao
 import se.norrsken.tv.data.db.entity.MediaKind
 import se.norrsken.tv.data.epg.NowNext
 import se.norrsken.tv.data.epg.NowPlayingRepository
-import se.norrsken.tv.data.player.PlayerFactory
+import se.norrsken.tv.data.player.PlaybackController
 import se.norrsken.tv.data.repository.WatchHistoryRepository
 import se.norrsken.tv.data.repository.FavoritesRepository
 import se.norrsken.tv.data.settings.SettingsRepository
@@ -40,7 +40,7 @@ class PlayerViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val channelDao: ChannelDao,
     private val libraryDao: LibraryDao,
-    val playerFactory: PlayerFactory,
+    val playback: PlaybackController,
     private val settings: SettingsRepository,
     private val nowPlaying: NowPlayingRepository,
     private val history: WatchHistoryRepository,
@@ -65,9 +65,14 @@ class PlayerViewModel @Inject constructor(
     /** Sant nar raden inte gick att hitta — battre an en tom svart skarm. */
     val missing: StateFlow<Boolean> = _missing.asStateFlow()
 
-    private val kind = savedStateHandle.get<String>("kind")
-        ?.let { runCatching { PlayableKind.valueOf(it) }.getOrNull() }
-    private val id = savedStateHandle.get<String>("id")?.toLongOrNull()
+    private val kindArg = savedStateHandle.get<String>("kind")
+    private val idArg = savedStateHandle.get<String>("id")
+    private val kind = kindArg?.let { runCatching { PlayableKind.valueOf(it) }.getOrNull() }
+    private val id = idArg?.toLongOrNull()
+
+    /** Rutten tillbaka hit, för mini-rutan. */
+    val route: String? =
+        if (kindArg != null && idArg != null) "player/$kindArg/$idArg" else null
 
     /** Serien ett avsnitt hör till — så historiken kan grupperas senare. */
     private var seriesId: Long? = null

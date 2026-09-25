@@ -26,7 +26,6 @@ import se.norrsken.tv.data.settings.DecoderMode
 import se.norrsken.tv.data.settings.SubtitleBackground
 import se.norrsken.tv.data.settings.SubtitleSize
 import se.norrsken.tv.data.settings.TextScale
-import se.norrsken.tv.data.settings.ThemeChoice
 import se.norrsken.tv.data.settings.EffectLevel
 import se.norrsken.tv.data.settings.EpgDays
 import se.norrsken.tv.data.settings.InterfaceStyle
@@ -69,9 +68,9 @@ class PlaylistsViewModel @Inject constructor(
     fun setShowClock(value: Boolean) = edit { settings.setShowClock(value) }
     fun setConfirmExit(value: Boolean) = edit { settings.setConfirmExit(value) }
     fun setLibrarySort(value: LibrarySort) = edit { settings.setLibrarySort(value) }
+    fun setGridColumns(value: Int) = edit { settings.setGridColumns(value) }
     fun setChannelSort(value: ChannelSort) = edit { settings.setChannelSort(value) }
     fun setCategorySort(value: CategorySort) = edit { settings.setCategorySort(value) }
-    fun setTheme(value: ThemeChoice) = edit { settings.setTheme(value) }
     fun setInterfaceStyle(value: InterfaceStyle) = edit { settings.setInterfaceStyle(value) }
     fun setVideoScale(value: VideoScale) = edit { settings.setVideoScale(value) }
     fun setVideoQuality(value: VideoQuality) = edit { settings.setVideoQuality(value) }

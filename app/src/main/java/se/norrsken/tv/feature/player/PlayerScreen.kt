@@ -145,8 +145,14 @@ fun PlayerScreen(
         preferences.subtitleLanguage,
         preferences.autoSubtitles,
     ) {
-        viewModel.playerFactory.create(preferences)
+        // Spelaren ägs av appen, inte av den här skärmen. Annars dog
+        // strömmen i samma sekund man gick till kanallistan.
+        viewModel.playback.player(preferences)
     }
+
+    // Kommer man tillbaka från mini-rutan ska helskärmen ta över samma
+    // ström, inte visa en till.
+    LaunchedEffect(Unit) { viewModel.playback.clearMini() }
 
     // Positionen överlever att spelaren byggs om. Utan det började filmen
     // från noll varje gång en uppspelningsinställning ändrades mitt i.
@@ -179,7 +185,8 @@ fun PlayerScreen(
             resumeAt = at
             viewModel.saveProgress(at, player.duration)
             player.removeListener(listener)
-            player.release()
+            // Släpps inte här. Den som stänger mini-rutan, eller lämnar en
+            // film, släpper den — se leave() nedan.
         }
     }
 
@@ -247,8 +254,12 @@ fun PlayerScreen(
     LaunchedEffect(player, playable?.url, attempt) {
         val url = playable?.url ?: return@LaunchedEffect
         error = null
+        // Är strömmen redan laddad — man kom tillbaka från mini-rutan —
+        // fortsätter den i stället för att kopplas upp på nytt.
+        if (viewModel.playback.currentUrl == url && attempt == 0) return@LaunchedEffect
         player.setMediaItem(MediaItem.fromUri(url))
         player.prepare()
+        viewModel.playback.markLoaded(url)
         // Två fall: ombyggd spelare (positionen ligger i minnet) eller ny
         // uppspelning (positionen kommer ur historiken).
         val start = if (resumeAt >= 0) resumeAt else viewModel.resumePosition()
@@ -313,6 +324,26 @@ fun PlayerScreen(
         controlsVisible = true
         interactions++
     }
+
+    /**
+     * Vägen ut ur spelaren. Live fortsätter i mini-rutan medan man
+     * bläddrar; en film släpps — att titta på en film i en frimärksstor
+     * ruta är ingen som vill.
+     */
+    fun leave() {
+        val playing = playable
+        val route = viewModel.route
+        if (playing != null && playing.isLive && route != null) {
+            viewModel.playback.keepInMini(playing.title, playing.subtitle, route)
+        } else {
+            viewModel.playback.stop()
+        }
+        onBack()
+    }
+
+    // Systemets bakåtknapp måste gå samma väg, annars lämnar man spelaren
+    // utan att någon får veta det och strömmen blir kvar osynlig.
+    BackHandler(enabled = panel == Panel.NONE) { leave() }
 
     fun togglePlayback() {
         if (player.playWhenReady) player.pause() else player.play()
@@ -461,7 +492,7 @@ fun PlayerScreen(
                 timelineFocus = timelineFocus,
                 onAudio = { panel = Panel.AUDIO; touched() },
                 onSubtitles = { panel = Panel.SUBTITLES; touched() },
-                onBack = onBack,
+                onBack = { leave() },
                 isFavorite = isFavorite,
                 onToggleFavorite = viewModel::toggleChannelFavorite,
             )
@@ -492,7 +523,7 @@ fun PlayerScreen(
                 title = "Hittades inte",
                 message = "Innehållet finns inte kvar i biblioteket. Uppdatera spellistan.",
                 onRetry = null,
-                onBack = onBack,
+                onBack = { leave() },
             )
         }
 
@@ -501,7 +532,7 @@ fun PlayerScreen(
                 title = playable?.title.orEmpty().ifEmpty { "Uppspelning" },
                 message = message,
                 onRetry = { attempt++ },
-                onBack = onBack,
+                onBack = { leave() },
             )
         }
     }
