@@ -26,6 +26,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
@@ -892,7 +894,7 @@ private fun SourcesPanel(viewModel: PlaylistsViewModel) {
         importState is ImportState.Saving
 
     LazyColumn(
-        modifier = modifier.fillMaxSize().padding(metrics.screenEdge),
+        modifier = Modifier.fillMaxSize().padding(metrics.screenEdge),
         verticalArrangement = Arrangement.spacedBy(metrics.spaceMd),
     ) {
         item {

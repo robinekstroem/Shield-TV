@@ -169,6 +169,7 @@ class SettingsRepository @Inject constructor(
         const val SUBTITLE_BG = "subtitles.background"
         const val HIDDEN_CATEGORIES = "categories.hidden"
         const val HIDDEN_KEYWORDS = "categories.hidden_keywords"
+        const val GRID_COLUMNS = "library.grid_columns"
         const val LINE = "\n"
         const val TEXT_SCALE = "appearance.text_scale"
         const val ACCENT = "appearance.accent"

@@ -53,6 +53,11 @@ fun NorrskenTheme(
         }
     }
 
+    // Måtten och rörelsebudgeten försvann när jag skrev om paletten.
+    // TV får större mått; avstängd rörelse nollar alla tider.
+    val metrics = remember(resolved.isTv) { if (resolved.isTv) Metrics.Tv else Metrics.Handheld }
+    val motion = remember(reducedMotion) { Motion(reduced = reducedMotion) }
+
     val typography = remember(resolved.isTv, preferences.textScale, style) {
         if (resolved.isTv) {
             tvTypography(preferences.textScale.factor, style.displayWeight, style.displayTrackingDelta)

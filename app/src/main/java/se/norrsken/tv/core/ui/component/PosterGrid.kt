@@ -130,29 +130,33 @@ private fun PosterCard(
                 // backdrop och fakta medan man bläddrar.
                 .onFocusChanged { if (it.isFocused) onFocusItem(item) },
         ) { _ ->
-            if (item.posterUrl != null) {
-                AsyncImage(
-                    model = item.posterUrl,
-                    contentDescription = item.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else {
-                ArtworkPlaceholder(title = item.title)
-            }
-            // Betyget som en liten bricka i hörnet. Syns på avstånd utan
-            // att ta plats från bilden.
-            item.rating?.takeIf { it > 0 }?.let { rating ->
-                Text(
-                    text = "%.1f".format(rating),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = palette.textPrimary,
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(4.dp)
-                        .background(palette.background.copy(alpha = 0.78f), RoundedCornerShape(4.dp))
-                        .padding(horizontal = 5.dp, vertical = 1.dp),
-                )
+            // Box: brickan ska ligga i omslagets hörn. Utan den hamnar den
+            // i en kolumn, och där finns inget "nere till vänster".
+            Box(Modifier.fillMaxSize()) {
+                if (item.posterUrl != null) {
+                    AsyncImage(
+                        model = item.posterUrl,
+                        contentDescription = item.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    ArtworkPlaceholder(title = item.title)
+                }
+                // Betyget som en liten bricka i hörnet. Syns på avstånd utan
+                // att ta plats från bilden.
+                item.rating?.takeIf { it > 0 }?.let { rating ->
+                    Text(
+                        text = "%.1f".format(rating),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = palette.textPrimary,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(4.dp)
+                            .background(palette.background.copy(alpha = 0.78f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 5.dp, vertical = 1.dp),
+                    )
+                }
             }
         }
 
