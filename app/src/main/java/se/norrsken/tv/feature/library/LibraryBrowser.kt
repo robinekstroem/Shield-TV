@@ -24,6 +24,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.State
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.collect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -57,6 +62,7 @@ import se.norrsken.tv.data.db.entity.CategoryEntity
  * Kolumnen kostar bredd. Med den kvar ryms fem till sex omslag per rad på
  * 1080p i stället för åtta; antalet är en inställning.
  */
+@OptIn(FlowPreview::class)
 @Composable
 fun LibraryBrowser(
     items: List<PosterItem>,
@@ -92,23 +98,32 @@ fun LibraryBrowser(
     val isTv = LocalDeviceProfile.current.isTv
     val columns = LocalPreferences.current.gridColumns
 
-    var focusedItem by remember { mutableStateOf<PosterItem?>(null) }
-    // Markeringen kan peka på en titel som filtrerats bort.
-    val highlighted = focusedItem?.takeIf { current -> items.any { it.id == current.id } }
-    val position = highlighted?.let { current -> items.indexOfFirst { it.id == current.id } + 1 } ?: 0
+    // Markeringen ligger i ett tillståndsobjekt som skärmens kropp aldrig
+    // läser. Läste den värdet här skulle varje fokusflytt rita om hela
+    // skärmen — rutnätet, sökfältet och alla rader — bara för att
+    // markeringen flyttat ett steg. Nu ritas bara de delar om som visar den.
+    val focusedState = remember { mutableStateOf<PosterItem?>(null) }
+    val heroState = remember { mutableStateOf<PosterItem?>(null) }
     val categoryName = categories.firstOrNull { it.id == selectedCategory }?.name ?: allLabel
 
-    LaunchedEffect(highlighted?.id) {
-        val id = highlighted?.id ?: return@LaunchedEffect
-        // Paus innan detaljerna hämtas: bläddrar man förbi tjugo filmer ska
-        // inte tjugo anrop gå iväg.
-        delay(400)
-        onFocusHold(id)
+    // Paus innan bilden byts. Utan den startar en ny bildhämtning per
+    // affisch man passerar — åtta i sekunden när man håller höger.
+    LaunchedEffect(Unit) {
+        snapshotFlow { focusedState.value }
+            .debounce(200)
+            .collect { heroState.value = it }
+    }
+
+    // Detaljerna hämtas först när markeringen verkligen stannat.
+    LaunchedEffect(Unit) {
+        snapshotFlow { focusedState.value }
+            .debounce(600)
+            .collect { item -> item?.id?.let(onFocusHold) }
     }
 
     Box(modifier = modifier.fillMaxSize()) {
         Crossfade(
-            targetState = highlighted?.backdropUrl,
+            targetState = heroState.value?.backdropUrl,
             animationSpec = tween(400),
             label = "browserBackdrop",
         ) { url ->
@@ -161,9 +176,9 @@ fun LibraryBrowser(
                         .padding(start = metrics.screenEdge),
                 )
                 Column(Modifier.fillMaxSize()) {
-                    HighlightHeader(highlighted, isSeries, onPlay, onOpen, onTrailer)
-                    GridHeader(categoryName, position, total, filter, onFilterChange, filterLabel)
-                    Content(items, onOpen, onMissingPoster, onNeedMore, { focusedItem = it },
+                    HighlightHeader(heroState, items, isSeries, onPlay, onOpen, onTrailer)
+                    GridHeader(categoryName, heroState, items, total, filter, onFilterChange, filterLabel)
+                    Content(items, onOpen, onMissingPoster, onNeedMore, { focusedState.value = it },
                         emptyTitle, emptyBody, filter, columns)
                 }
             }
@@ -179,9 +194,9 @@ fun LibraryBrowser(
                     onManage = onManageCategories,
                     modifier = Modifier.padding(horizontal = metrics.screenEdge),
                 )
-                HighlightHeader(highlighted, isSeries, onPlay, onOpen, onTrailer)
-                GridHeader(categoryName, position, total, filter, onFilterChange, filterLabel)
-                Content(items, onOpen, onMissingPoster, onNeedMore, { focusedItem = it },
+                HighlightHeader(heroState, items, isSeries, onPlay, onOpen, onTrailer)
+                GridHeader(categoryName, heroState, items, total, filter, onFilterChange, filterLabel)
+                Content(items, onOpen, onMissingPoster, onNeedMore, { focusedState.value = it },
                     emptyTitle, emptyBody, filter, columns)
             }
         }
@@ -197,7 +212,8 @@ fun LibraryBrowser(
  */
 @Composable
 private fun HighlightHeader(
-    item: PosterItem?,
+    heroState: State<PosterItem?>,
+    items: List<PosterItem>,
     isSeries: Boolean,
     onPlay: (PosterItem) -> Unit,
     onOpen: (PosterItem) -> Unit,
@@ -207,6 +223,9 @@ private fun HighlightHeader(
     val metrics = LocalMetrics.current
     val style = LocalThemeStyle.current
     val isTv = LocalDeviceProfile.current.isTv
+
+    // Markeringen kan peka på en titel som filtrerats bort.
+    val item = heroState.value?.takeIf { current -> items.any { it.id == current.id } }
 
     Column(
         modifier = Modifier
@@ -298,7 +317,8 @@ private fun CreditRow(label: String, value: String) {
 @Composable
 private fun GridHeader(
     categoryName: String,
-    position: Int,
+    heroState: State<PosterItem?>,
+    items: List<PosterItem>,
     total: Int,
     filter: String,
     onFilterChange: (String) -> Unit,
@@ -306,6 +326,9 @@ private fun GridHeader(
 ) {
     val palette = LocalPalette.current
     val metrics = LocalMetrics.current
+    val position = heroState.value
+        ?.let { current -> items.indexOfFirst { it.id == current.id } + 1 }
+        ?: 0
 
     Row(
         modifier = Modifier

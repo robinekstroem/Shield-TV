@@ -111,7 +111,10 @@ class EpgCoordinator @Inject constructor(
             } catch (e: PlaylistException) {
                 lastError = e.message
             } catch (e: XmlPullParserException) {
-                lastError = "Tablån gick inte att läsa — filen är trasig."
+                // Radnumret är det enda som skiljer ett avbrutet svar från
+                // en fil som är trasig hela vägen.
+                lastError = "Tablån gick inte att läsa (rad ${e.lineNumber}). " +
+                    "Filen kan vara avbruten under hämtningen."
             } catch (e: Exception) {
                 lastError = "Tablån kunde inte uppdateras."
             }
@@ -151,6 +154,41 @@ class EpgCoordinator @Inject constructor(
             xtream.xmltvUrl(credentialsFactory.forPlaylist(playlist))
         } else {
             null
+        }
+    }
+
+    /** Första halvkilon av svaret, utan att förbruka det. */
+    private fun peek(stream: java.io.BufferedInputStream): String {
+        stream.mark(2048)
+        val buffer = ByteArray(512)
+        val read = stream.read(buffer)
+        stream.reset()
+        return if (read <= 0) "" else String(buffer, 0, read, Charsets.ISO_8859_1)
+    }
+
+    /**
+     * Vad som är fel med svaret, i klartext — eller null när det ser ut som
+     * en tablå.
+     *
+     * "Filen är trasig" var sant men oanvändbart. Nästan alltid är felet
+     * något annat: en inloggningssida, ett tomt svar eller ett konto utan
+     * EPG. Det går att se på de första raderna.
+     */
+    private fun describeBadResponse(head: String): String? {
+        val text = head.trimStart('\uFEFF', ' ', '\n', '\r', '\t')
+        val lower = text.lowercase()
+        return when {
+            text.isEmpty() ->
+                "Leverantören skickade en tom tablå. Kontot kan sakna EPG."
+            lower.startsWith("<!doctype html") || lower.startsWith("<html") ->
+                "Leverantören svarade med en webbsida i stället för en tablå. " +
+                    "Kontrollera tablåadressen och inloggningen."
+            text.startsWith("{") || text.startsWith("[") ->
+                "Leverantören svarade med JSON i stället för XMLTV."
+            !lower.contains("<tv") && !text.startsWith("<?xml") ->
+                "Svaret är inte XMLTV. Det börjar med: " +
+                    text.take(60).replace(Regex("\\s+"), " ")
+            else -> null
         }
     }
 
@@ -204,7 +242,14 @@ class EpgCoordinator @Inject constructor(
         }
 
         _state.value = EpgState.Working("Hämtar tablån")
-        downloader.openStream(url, prefs.userAgent).use { stream ->
+        downloader.openStream(url, prefs.userAgent).use { raw ->
+            val stream = raw.buffered()
+            // Titta på svarets början innan XML-tolken får det. "Filen är
+            // trasig" säger ingenting om varför — och den vanligaste
+            // orsaken är att leverantören svarat med en inloggningssida
+            // eller en tom fil, inte med trasig XML.
+            describeBadResponse(peek(stream))?.let { throw PlaylistException(it) }
+
             val reader = XmltvReader(stream)
             while (true) {
                 currentCoroutineContext().ensureActive()

@@ -232,6 +232,12 @@ private fun AppNavHost(navController: NavHostController) {
                         launchSingleTop = true
                     }
                 },
+                onOpenSearch = { select(Destination.Search) },
+                onOpenLiveTv = { select(Destination.LiveTv) },
+                onOpenMovies = { select(Destination.Movies) },
+                onOpenSeriesSection = { select(Destination.Series) },
+                onOpenGuide = { select(Destination.Guide) },
+                onOpenFavorites = { select(Destination.Favorites) },
             )
         }
         composable(Destination.LiveTv.route) {

@@ -29,6 +29,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.State
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -195,7 +196,9 @@ fun GuideScreen(
     viewModel: GuideViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val now by viewModel.now.collectAsStateWithLifecycle()
+    // Samma skäl som i kanallistan: läses klockan här ritas hela rutnätet
+    // om varje halvminut.
+    val nowState = viewModel.now.collectAsStateWithLifecycle()
     val epgState by viewModel.epgState.collectAsStateWithLifecycle()
 
     if (state.loading) {
@@ -231,14 +234,14 @@ fun GuideScreen(
         // maxValue är noll tills rutnätet mätts; att rulla före det hamnar
         // på noll. Vänta på mätningen, ställ sedan "nu" en halvtimme in.
         snapshotFlow { scroll.maxValue }.first { it > 0 }
-        val target = with(density) { x(now - 30 * MINUTE_MS).toPx() }.toInt()
+        val target = with(density) { x(nowState.value - 30 * MINUTE_MS).toPx() }.toInt()
         scroll.scrollTo(target.coerceIn(0, scroll.maxValue))
     }
 
     var focused by remember { mutableStateOf<Pair<GuideRow, GuideProgramme?>?>(null) }
 
     Column(modifier = modifier.fillMaxSize()) {
-        GuideInfo(selection = focused, now = now)
+        GuideInfo(selection = focused, nowState = nowState)
 
         // Tidslinjen
         Row(Modifier.fillMaxWidth().height(32.dp)) {
@@ -249,7 +252,7 @@ fun GuideScreen(
                         .width(totalWidth)
                         .fillMaxHeight()
                         .drawBehind {
-                            val nowX = x(now).toPx()
+                            val nowX = x(nowState.value).toPx()
                             drawLine(
                                 color = palette.signal,
                                 start = Offset(nowX, size.height * 0.4f),
@@ -284,7 +287,7 @@ fun GuideScreen(
                                 .drawBehind {
                                     // Nu-linjen dras rad för rad och blir en
                                     // obruten linje genom hela rutnätet.
-                                    val nowX = x(now).toPx()
+                                    val nowX = x(nowState.value).toPx()
                                     drawLine(
                                         color = palette.signal.copy(alpha = 0.8f),
                                         start = Offset(nowX, 0f),
@@ -304,7 +307,7 @@ fun GuideScreen(
                                     onClick = { onPlayChannel(row.channel.id) },
                                     onFocus = { focused = row to null },
                                     modifier = Modifier
-                                        .offset(x = x(now - 30 * MINUTE_MS))
+                                        .offset(x = x(nowState.value - 30 * MINUTE_MS))
                                         .width(hourWidth * 2)
                                         .fillMaxHeight(),
                                 )
@@ -313,6 +316,8 @@ fun GuideScreen(
                                 val start = max(programme.start, state.windowStart)
                                 val end = min(programme.end, state.windowEnd)
                                 if (end > start) {
+                                    // Läses per rad: bara synliga rader ritas om.
+                                    val now = nowState.value
                                     val live = programme.start <= now && programme.end > now
                                     ProgrammeBlock(
                                         title = programme.title,
@@ -345,7 +350,8 @@ fun GuideScreen(
  * det handlar om utan att öppna något.
  */
 @Composable
-private fun GuideInfo(selection: Pair<GuideRow, GuideProgramme?>?, now: Long) {
+private fun GuideInfo(selection: Pair<GuideRow, GuideProgramme?>?, nowState: State<Long>) {
+    val now = nowState.value
     val palette = LocalPalette.current
     val metrics = LocalMetrics.current
 

@@ -16,6 +16,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
+import androidx.compose.runtime.State
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,8 +47,11 @@ fun LiveTvScreen(
     val selected by viewModel.selected.collectAsStateWithLifecycle()
     val sortLabel by viewModel.channelSortLabel.collectAsStateWithLifecycle()
     val categorySortLabel by viewModel.categorySortLabel.collectAsStateWithLifecycle()
-    val nowNext by viewModel.nowNext.collectAsStateWithLifecycle()
-    val now by viewModel.now.collectAsStateWithLifecycle()
+    // Klockan och programinfon läses inte här. Gjorde de det skulle hela
+    // kanallistan ritas om var trettionde sekund, bara för att minutsiffran
+    // ändrats. Nu läser varje rad själv — och bara de synliga finns.
+    val nowNextState = viewModel.nowNext.collectAsStateWithLifecycle()
+    val nowState = viewModel.now.collectAsStateWithLifecycle()
     val profile = LocalDeviceProfile.current
     val metrics = LocalMetrics.current
 
@@ -79,8 +83,8 @@ fun LiveTvScreen(
             )
             ChannelList(
                 channels = channels,
-                nowNext = nowNext,
-                now = now,
+                nowNextState = nowNextState,
+                nowState = nowState,
                 onOpenChannel = onOpenChannel,
                 modifier = Modifier.padding(start = metrics.spaceLg),
             )
@@ -98,8 +102,8 @@ fun LiveTvScreen(
             )
             ChannelList(
                 channels = channels,
-                nowNext = nowNext,
-                now = now,
+                nowNextState = nowNextState,
+                nowState = nowState,
                 onOpenChannel = onOpenChannel,
                 modifier = Modifier.padding(top = metrics.spaceMd),
             )
@@ -110,8 +114,8 @@ fun LiveTvScreen(
 @Composable
 private fun ChannelList(
     channels: List<ChannelEntity>,
-    nowNext: Map<Long, NowNext>,
-    now: Long,
+    nowNextState: State<Map<Long, NowNext>>,
+    nowState: State<Long>,
     onOpenChannel: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -123,8 +127,8 @@ private fun ChannelList(
         items(channels, key = { it.id }) { channel ->
             ChannelRow(
                 channel = channel,
-                nowNext = nowNext[channel.id],
-                now = now,
+                nowNextState = nowNextState,
+                nowState = nowState,
                 onClick = { onOpenChannel(channel.id) },
             )
         }
@@ -154,10 +158,14 @@ private fun ListTruncated() {
 @Composable
 private fun ChannelRow(
     channel: ChannelEntity,
-    nowNext: NowNext?,
-    now: Long,
+    nowNextState: State<Map<Long, NowNext>>,
+    nowState: State<Long>,
     onClick: () -> Unit,
 ) {
+    // Läsningen sker här, i raden. Bara synliga rader finns i minnet, så
+    // bara de ritas om när minuten byts.
+    val nowNext = nowNextState.value[channel.id]
+    val now = nowState.value
     val palette = LocalPalette.current
     val metrics = LocalMetrics.current
 

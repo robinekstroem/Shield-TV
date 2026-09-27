@@ -70,7 +70,10 @@ fun NavigationRail(
     val metrics = LocalMetrics.current
     val motion = LocalMotion.current
 
-    var expanded by remember { mutableStateOf(false) }
+    // TV: alltid utfälld, som i mockupen. Ikoner utan text kräver att man
+    // lär sig dem; en fjärrkontroll har gott om plats åt vänster.
+    val isTv = LocalDeviceProfile.current.isTv
+    var expanded by remember { mutableStateOf(isTv) }
 
     // Utan det har har ingenting fokus nar appen startar pa en TV, och
     // fjarrkontrollen gor ingenting forran anvandaren racker ratt riktning.
@@ -90,8 +93,6 @@ fun NavigationRail(
     //
     // verticalScroll rullar automatiskt fram det val som far fokus.
     val scroll = rememberScrollState()
-    val isTv = LocalDeviceProfile.current.isTv
-
     Column(
         modifier = modifier
             .fillMaxHeight()
@@ -195,7 +196,7 @@ private fun RailItem(
         background = false,
         focusScale = 1f,
         cornerRadius = metrics.radiusCard,
-        modifier = modifier.padding(horizontal = metrics.spaceSm),
+        modifier = modifier.padding(horizontal = metrics.spaceXs),
     ) { focused ->
         val surface by animateColorAsState(
             targetValue = when {
@@ -207,6 +208,32 @@ private fun RailItem(
             label = "railSurface",
         )
 
+        if (!expanded) {
+            // Hopfälld: bara ikonen, centrerad. Tidigare låg här även ett
+            // markeringsstreck och mellanrum för texten — tillsammans
+            // behövde raden 91 dp i en kolumn som är 64. Ikonen kläms då
+            // ihop till en prick, vilket var precis vad som hände.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(surface, RoundedCornerShape(metrics.radiusCard))
+                    .padding(vertical = metrics.spaceSm),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = destination.icon,
+                    contentDescription = stringResource(destination.label),
+                    tint = when {
+                        focused -> palette.focus
+                        selected -> palette.signal
+                        else -> palette.textSecondary
+                    },
+                    modifier = Modifier.size(26.dp),
+                )
+            }
+            return@FocusableSurface
+        }
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -215,13 +242,14 @@ private fun RailItem(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(metrics.spaceMd),
         ) {
-            // Lodrat streck till vanster om vald post, som i mockupen.
+            // Lodrätt streck vid vald post. Bara i utfällt läge, där det
+            // finns bredd över.
             Box(
                 Modifier
                     .width(3.dp)
                     .height(28.dp)
                     .background(
-                        if (selected) palette.focus.copy(alpha = 0.92f) else Color.Transparent,
+                        if (selected) palette.signal else Color.Transparent,
                         RoundedCornerShape(2.dp),
                     )
             )
@@ -230,39 +258,34 @@ private fun RailItem(
                 imageVector = destination.icon,
                 contentDescription = null,
                 tint = when {
-                    focused || selected -> palette.textPrimary
-                    else -> palette.textTertiary
+                    focused -> palette.focus
+                    selected -> palette.signal
+                    else -> palette.textSecondary
                 },
-                modifier = Modifier.size(24.dp),
+                modifier = Modifier.size(26.dp),
             )
 
-            AnimatedVisibility(visible = expanded) {
-                Column {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(destination.label),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (focused || selected) palette.textPrimary else palette.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                // I minimalt läge står bara namnet. "Live TV /
+                // Direktsändning" säger samma sak två gånger.
+                if (!LocalThemeStyle.current.minimal) {
                     Text(
-                        text = stringResource(destination.label),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = if (focused || selected) {
-                            palette.textPrimary
-                        } else {
-                            palette.textSecondary
-                        },
+                        // Riktig siffra nar det finns en, annars beskrivningen.
+                        // Aldrig en pahittad mangd.
+                        text = count?.let { destination.countLabel(it) }
+                            ?: stringResource(destination.sublabel),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = palette.textTertiary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    // I minimalt läge står bara namnet. "Live TV /
-                    // Direktsändning" säger samma sak två gånger.
-                    if (!LocalThemeStyle.current.minimal) {
-                        Text(
-                            // Riktig siffra nar det finns en, annars beskrivningen.
-                            // Aldrig en pahittad mangd.
-                            text = count?.let { destination.countLabel(it) }
-                                ?: stringResource(destination.sublabel),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = palette.textTertiary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
                 }
             }
         }

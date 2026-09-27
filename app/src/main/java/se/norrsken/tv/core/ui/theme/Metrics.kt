@@ -56,7 +56,7 @@ data class Metrics(
             railSpacing = 20.dp,
             heroHeight = 420.dp,
             wideCardWidth = 260.dp,
-            railCollapsed = 72.dp,
+            railCollapsed = 76.dp,
             railExpanded = 256.dp,
         )
 
@@ -78,7 +78,7 @@ data class Metrics(
             railSpacing = 12.dp,
             heroHeight = 280.dp,
             wideCardWidth = 200.dp,
-            railCollapsed = 58.dp,
+            railCollapsed = 64.dp,
             railExpanded = 232.dp,
         )
     }

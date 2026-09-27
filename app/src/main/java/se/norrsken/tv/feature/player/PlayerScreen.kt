@@ -36,6 +36,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.MutableLongState
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -121,8 +122,12 @@ fun PlayerScreen(
     // playWhenReady, inte isPlaying: under buffring ar isPlaying falskt,
     // och da visade knappen "Spela" och startade om i stallet for att pausa.
     var playing by remember { mutableStateOf(true) }
-    var position by remember { mutableLongStateOf(0L) }
-    var duration by remember { mutableLongStateOf(0L) }
+    // Positionen ligger i tillståndsobjekt som skärmens kropp aldrig läser.
+    // Läste den värdet skulle hela spelarskärmen ritas om två gånger i
+    // sekunden — och AndroidView-blocket med den, som då kopplar om
+    // videovyn och bygger om undertextstilen lika ofta.
+    val positionState = remember { mutableLongStateOf(0L) }
+    val durationState = remember { mutableLongStateOf(0L) }
     var tracks by remember { mutableStateOf(Tracks.EMPTY) }
     var panel by remember { mutableStateOf(Panel.NONE) }
 
@@ -281,8 +286,8 @@ fun PlayerScreen(
     LaunchedEffect(player, isLive, playable?.url) {
         if (isLive) return@LaunchedEffect
         while (true) {
-            position = max(0L, player.currentPosition)
-            duration = max(0L, player.duration)
+            positionState.longValue = max(0L, player.currentPosition)
+            durationState.longValue = max(0L, player.duration)
             delay(500)
         }
     }
@@ -469,8 +474,8 @@ fun PlayerScreen(
                 subtitle = playable?.subtitle,
                 isLive = isLive,
                 playing = playing,
-                position = position,
-                duration = duration,
+                positionState = positionState,
+                durationState = durationState,
                 showClock = preferences.showClock,
                 hasAudioChoice = audio.size > 1,
                 hasSubtitles = subtitles.size > 1,
@@ -544,8 +549,8 @@ private fun Controls(
     subtitle: String?,
     isLive: Boolean,
     playing: Boolean,
-    position: Long,
-    duration: Long,
+    positionState: MutableLongState,
+    durationState: MutableLongState,
     showClock: Boolean,
     hasAudioChoice: Boolean,
     hasSubtitles: Boolean,
@@ -698,55 +703,18 @@ private fun Controls(
                 )
             }
 
-            // Tidslinjen finns bara nar det finns en tid. Live har ingen.
-            if (!isLive && duration > 0) {
-                var timelineFocused by remember { mutableStateOf(false) }
-                Row(
-                    modifier = Modifier
-                        .padding(top = metrics.spaceMd)
-                        .focusRequester(timelineFocus)
-                        .onFocusChanged { timelineFocused = it.isFocused }
-                        .focusable()
-                        // Tidslinjen äger pilarna när den har fokus. Utan det
-                        // flyttade vänster och höger bara fokus mellan
-                        // knapparna, och spolningen försvann just när man
-                        // tittade på tidslinjen.
-                        .onKeyEvent { event ->
-                            if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
-                            when (event.key) {
-                                Key.DirectionLeft -> { onSeekBack(); true }
-                                Key.DirectionRight -> { onSeekForward(); true }
-                                else -> false
-                            }
-                        },
-                    horizontalArrangement = Arrangement.spacedBy(metrics.spaceSm),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = formatTime(position),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (timelineFocused) palette.focus else palette.textSecondary,
-                    )
-                    AuroraProgress(
-                        fraction = position.toFloat() / duration,
-                        // Tjockare när den har fokus — så det syns vilket
-                        // element pilarna styr.
-                        height = if (timelineFocused) 8.dp else 4.dp,
-                        modifier = Modifier
-                            .weight(1f)
-                            // Tryck var som helst på linjen hoppar dit.
-                            .pointerInput(duration) {
-                                detectTapGestures { offset ->
-                                    onSeekTo((offset.x / size.width).coerceIn(0f, 1f))
-                                }
-                            },
-                    )
-                    Text(
-                        text = formatTime(duration),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (timelineFocused) palette.focus else palette.textSecondary,
-                    )
-                }
+            // Tidslinjen är egen komponent. Den läser positionen — och är
+            // därmed det enda som ritas om två gånger i sekunden. Låg
+            // läsningen kvar här ritades hela kontrollpanelen om lika ofta.
+            if (!isLive) {
+                Timeline(
+                    positionState = positionState,
+                    durationState = durationState,
+                    focusRequester = timelineFocus,
+                    onSeekBack = onSeekBack,
+                    onSeekForward = onSeekForward,
+                    onSeekTo = onSeekTo,
+                )
             }
 
             Row(
@@ -952,6 +920,69 @@ private fun captionStyle(background: SubtitleBackground): CaptionStyleCompat {
         )
         SubtitleBackground.BOX -> CaptionStyleCompat(
             white, 0xB3000000.toInt(), clear, CaptionStyleCompat.EDGE_TYPE_NONE, clear, null,
+        )
+    }
+}
+
+@Composable
+private fun Timeline(
+    positionState: MutableLongState,
+    durationState: MutableLongState,
+    focusRequester: FocusRequester,
+    onSeekBack: () -> Unit,
+    onSeekForward: () -> Unit,
+    onSeekTo: (Float) -> Unit,
+) {
+    val palette = LocalPalette.current
+    val metrics = LocalMetrics.current
+    val position = positionState.longValue
+    val duration = durationState.longValue
+    if (duration <= 0) return
+
+    var timelineFocused by remember { mutableStateOf(false) }
+    Row(
+        modifier = Modifier
+            .padding(top = metrics.spaceMd)
+            .focusRequester(focusRequester)
+            .onFocusChanged { timelineFocused = it.isFocused }
+            .focusable()
+            // Tidslinjen äger pilarna när den har fokus. Utan det flyttade
+            // vänster och höger bara fokus mellan knapparna, och spolningen
+            // försvann just när man tittade på tidslinjen.
+            .onKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                when (event.key) {
+                    Key.DirectionLeft -> { onSeekBack(); true }
+                    Key.DirectionRight -> { onSeekForward(); true }
+                    else -> false
+                }
+            },
+        horizontalArrangement = Arrangement.spacedBy(metrics.spaceSm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = formatTime(position),
+            style = MaterialTheme.typography.labelMedium,
+            color = if (timelineFocused) palette.focus else palette.textSecondary,
+        )
+        AuroraProgress(
+            fraction = position.toFloat() / duration,
+            // Tjockare när den har fokus — så det syns vilket element
+            // pilarna styr.
+            height = if (timelineFocused) 8.dp else 4.dp,
+            modifier = Modifier
+                .weight(1f)
+                // Tryck var som helst på linjen hoppar dit.
+                .pointerInput(duration) {
+                    detectTapGestures { offset ->
+                        onSeekTo((offset.x / size.width).coerceIn(0f, 1f))
+                    }
+                },
+        )
+        Text(
+            text = formatTime(duration),
+            style = MaterialTheme.typography.labelMedium,
+            color = if (timelineFocused) palette.focus else palette.textSecondary,
         )
     }
 }
