@@ -170,7 +170,7 @@ private fun Brand(expanded: Boolean) {
         // något alls än en avhuggen rad.
         if (!expanded) return@Column
         Text(
-            text = "CiTV",
+            text = "Tv",
             style = MaterialTheme.typography.titleMedium,
             color = palette.textPrimary,
             maxLines = 1,

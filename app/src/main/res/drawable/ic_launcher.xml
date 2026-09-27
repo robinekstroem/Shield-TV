@@ -1,9 +1,9 @@
 <!--
-  CiTV.
+  Tv.
 
-  Märket är två öppna bågar med en punkt i mitten. Bågarna läser som ett C,
-  punkten som i:ets prick — och tillsammans som en lins, eller som en signal
-  som går ut. Två element, inga detaljer som försvinner i 48 dp.
+  En VHS-kassett i orange mot svart. Formen känns igen på en halv sekund
+  även i 48 dp: bred kropp, mörkt fönster, två spolar. Detaljerna stannar
+  vid det — allt finare försvinner ändå när ikonen krymper.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -12,28 +12,35 @@
     android:viewportHeight="108">
 
     <path
-        android:fillColor="#03070A"
+        android:fillColor="#000000"
         android:pathData="M0,0h108v108h-108z" />
 
-    <!-- Yttre båge: den svagare, som en våg som redan gått ut. -->
+    <!-- Kassettens kropp -->
     <path
-        android:pathData="M71.2,29.4 A30,30 0 1 0 71.2,78.6"
-        android:strokeColor="#56F0B4"
-        android:strokeWidth="4.5"
-        android:strokeAlpha="0.55"
-        android:strokeLineCap="round"
-        android:fillColor="#00000000" />
+        android:fillColor="#F57C1F"
+        android:pathData="M22,28 H86 A8,8 0 0 1 94,36 V72 A8,8 0 0 1 86,80 H22 A8,8 0 0 1 14,72 V36 A8,8 0 0 1 22,28 Z" />
 
-    <!-- Inre båge: själva C:et. -->
+    <!-- Fönstret: här syns svärtan igenom -->
     <path
-        android:pathData="M64.9,38.4 A19,19 0 1 0 64.9,69.6"
-        android:strokeColor="#57E6F2"
-        android:strokeWidth="8"
-        android:strokeLineCap="round"
-        android:fillColor="#00000000" />
+        android:fillColor="#0A0A0A"
+        android:pathData="M30,38 H78 A4,4 0 0 1 82,42 V60 A4,4 0 0 1 78,64 H30 A4,4 0 0 1 26,60 V42 A4,4 0 0 1 30,38 Z" />
 
-    <!-- Punkten. Ljusast i märket, så blicken landar i mitten. -->
+    <!-- Spolarna -->
     <path
-        android:fillColor="#F5F8FA"
-        android:pathData="M54,48.5 a5.5,5.5 0 1 0 0.01,0 z" />
+        android:fillColor="#FFB265"
+        android:pathData="M41,44 a7,7 0 1 0 0.01,0 z" />
+    <path
+        android:fillColor="#FFB265"
+        android:pathData="M67,44 a7,7 0 1 0 0.01,0 z" />
+    <path
+        android:fillColor="#0A0A0A"
+        android:pathData="M41,48.8 a2.2,2.2 0 1 0 0.01,0 z" />
+    <path
+        android:fillColor="#0A0A0A"
+        android:pathData="M67,48.8 a2.2,2.2 0 1 0 0.01,0 z" />
+
+    <!-- Etiketten -->
+    <path
+        android:fillColor="#FFC078"
+        android:pathData="M26,68 H82 A2,2 0 0 1 84,70 V74 A2,2 0 0 1 82,76 H26 A2,2 0 0 1 24,74 V70 A2,2 0 0 1 26,68 Z" />
 </vector>

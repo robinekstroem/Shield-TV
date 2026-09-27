@@ -1,7 +1,6 @@
 <!--
-  Banner för Android TV-menyn. Märket till vänster, ordbilden till höger.
-  Bokstäverna är ritade som streck, inte som text: en vektorfil kan inte
-  bära ett typsnitt, och geometriska former håller ihop med märket.
+  Banner för Android TV-menyn: kassetten till vänster, ordbilden till höger.
+  Bokstäverna är ritade som streck — en vektorfil kan inte bära ett typsnitt.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="320dp"
@@ -10,59 +9,45 @@
     android:viewportHeight="180">
 
     <path
-        android:fillColor="#03070A"
+        android:fillColor="#000000"
         android:pathData="M0,0h320v180h-320z" />
 
-    <!-- Märket -->
+    <!-- Kassetten -->
     <path
-        android:pathData="M94.7,71.3 A26,26 0 1 0 94.7,108.7"
-        android:strokeColor="#56F0B4"
-        android:strokeWidth="4"
-        android:strokeAlpha="0.5"
-        android:strokeLineCap="round"
-        android:fillColor="#00000000" />
+        android:fillColor="#F57C1F"
+        android:pathData="M60,62 H156 A12,12 0 0 1 168,74 V122 A12,12 0 0 1 156,134 H60 A12,12 0 0 1 48,122 V74 A12,12 0 0 1 60,62 Z" />
     <path
-        android:pathData="M88.3,79.7 A16,16 0 1 0 88.3,100.3"
-        android:strokeColor="#57E6F2"
-        android:strokeWidth="6.5"
-        android:strokeLineCap="round"
-        android:fillColor="#00000000" />
+        android:fillColor="#0A0A0A"
+        android:pathData="M72,76 H144 A6,6 0 0 1 150,82 V108 A6,6 0 0 1 144,114 H72 A6,6 0 0 1 66,108 V82 A6,6 0 0 1 72,76 Z" />
     <path
-        android:fillColor="#F5F8FA"
-        android:pathData="M78,85 a5,5 0 1 0 0.01,0 z" />
-
-    <!-- C -->
+        android:fillColor="#FFB265"
+        android:pathData="M88,85 a10,10 0 1 0 0.01,0 z" />
     <path
-        android:pathData="M160.1,73.1 A22,22 0 1 0 160.1,106.9"
-        android:strokeColor="#57E6F2"
-        android:strokeWidth="8"
-        android:strokeLineCap="round"
-        android:fillColor="#00000000" />
-
-    <!-- i -->
+        android:fillColor="#FFB265"
+        android:pathData="M128,85 a10,10 0 1 0 0.01,0 z" />
     <path
-        android:pathData="M184,80 L184,112"
-        android:strokeColor="#F5F8FA"
-        android:strokeWidth="8"
-        android:strokeLineCap="round"
-        android:fillColor="#00000000" />
+        android:fillColor="#0A0A0A"
+        android:pathData="M88,92 a3,3 0 1 0 0.01,0 z" />
     <path
-        android:fillColor="#57E6F2"
-        android:pathData="M184,62 a4.5,4.5 0 1 0 0.01,0 z" />
+        android:fillColor="#0A0A0A"
+        android:pathData="M128,92 a3,3 0 1 0 0.01,0 z" />
+    <path
+        android:fillColor="#FFC078"
+        android:pathData="M64,118 H152 A3,3 0 0 1 155,121 V127 A3,3 0 0 1 152,130 H64 A3,3 0 0 1 61,127 V121 A3,3 0 0 1 64,118 Z" />
 
     <!-- T -->
     <path
-        android:pathData="M202,72 L238,72 M220,72 L220,112"
-        android:strokeColor="#F5F8FA"
-        android:strokeWidth="8"
+        android:pathData="M196,66 L240,66 M218,66 L218,120"
+        android:strokeColor="#F2F5F7"
+        android:strokeWidth="10"
         android:strokeLineCap="round"
         android:fillColor="#00000000" />
 
-    <!-- V -->
+    <!-- v -->
     <path
-        android:pathData="M250,72 L264,112 L278,72"
-        android:strokeColor="#F5F8FA"
-        android:strokeWidth="8"
+        android:pathData="M252,84 L266,120 L280,84"
+        android:strokeColor="#F57C1F"
+        android:strokeWidth="10"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:fillColor="#00000000" />
