@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
+import se.norrsken.tv.core.device.LocalDeviceProfile
 import se.norrsken.tv.core.ui.component.ArtworkPlaceholder
 import se.norrsken.tv.core.ui.component.AuroraProgress
 import se.norrsken.tv.core.ui.component.FocusableSurface
@@ -77,7 +78,9 @@ private fun QuickTileCard(tile: QuickTile, onClick: () -> Unit) {
         onClick = onClick,
         cornerRadius = metrics.radiusCard,
         background = false,
-        modifier = Modifier.width(232.dp).height(92.dp),
+        modifier = Modifier
+            .width(if (LocalDeviceProfile.current.isTv) 232.dp else 168.dp)
+            .height(if (LocalDeviceProfile.current.isTv) 92.dp else 74.dp),
     ) { focused ->
         Box(
             Modifier
@@ -200,7 +203,9 @@ fun ContinueRow(items: List<RailItem>, onOpen: (RailItem) -> Unit) {
             FocusableSurface(
                 onClick = { onOpen(item) },
                 cornerRadius = metrics.radiusCard,
-                modifier = Modifier.width(320.dp).height(96.dp),
+                modifier = Modifier
+            .width(if (LocalDeviceProfile.current.isTv) 320.dp else 260.dp)
+            .height(96.dp),
             ) { _ ->
                 Row(
                     modifier = Modifier.fillMaxSize().padding(metrics.spaceSm),
@@ -276,7 +281,9 @@ fun HomeTopBar(onSearch: () -> Unit) {
             onClick = onSearch,
             focusScale = 1f,
             cornerRadius = 24.dp,
-            modifier = Modifier.width(420.dp),
+            // weight, inte fast bredd: 420 dp är bredare än en telefon, och
+            // då fick klockan noll kvar och sattes en bokstav per rad.
+            modifier = Modifier.weight(1f),
         ) { focused ->
             Text(
                 text = "Sök efter kanaler, filmer, serier…",
@@ -287,17 +294,20 @@ fun HomeTopBar(onSearch: () -> Unit) {
                 modifier = Modifier.padding(horizontal = metrics.spaceLg, vertical = metrics.spaceSm),
             )
         }
-        Box(Modifier.weight(1f))
         Column(horizontalAlignment = Alignment.End) {
             Text(
                 text = clock.format(Date(now)),
                 style = MaterialTheme.typography.titleMedium,
                 color = palette.textPrimary,
+                maxLines = 1,
+                softWrap = false,
             )
             Text(
                 text = day.format(Date(now)),
                 style = MaterialTheme.typography.labelMedium,
                 color = palette.textTertiary,
+                maxLines = 1,
+                softWrap = false,
             )
         }
     }

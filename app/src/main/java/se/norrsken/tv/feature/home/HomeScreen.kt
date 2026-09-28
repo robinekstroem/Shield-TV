@@ -287,6 +287,7 @@ fun HomeScreen(
     }
 
     val palette = LocalPalette.current
+    val isTv = LocalDeviceProfile.current.isTv
     val quickTiles = remember(palette) {
         listOf(
             QuickTile("Live TV", "Direktsändning", Icons.Filled.PlayArrow, Color(0xFFD9534F)),
@@ -323,8 +324,10 @@ fun HomeScreen(
                 // i bildens nedre halva — resten av skärmen är artwork.
                 Box(
                     modifier = Modifier
-                        .fillParentMaxHeight(0.54f)
-                        .fillMaxWidth(0.52f),
+                        .fillParentMaxHeight(if (isTv) 0.54f else 0.46f)
+                        // Halva bredden är rätt på en TV, där resten är
+                        // artwork. På en telefon blir det en smal spalt.
+                        .fillMaxWidth(if (isTv) 0.52f else 1f),
                     contentAlignment = Alignment.BottomStart,
                 ) {
                     HeroText(

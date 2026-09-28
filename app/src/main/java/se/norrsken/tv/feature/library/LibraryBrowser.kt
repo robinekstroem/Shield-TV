@@ -227,6 +227,12 @@ private fun HighlightHeader(
     // Markeringen kan peka på en titel som filtrerats bort.
     val item = heroState.value?.takeIf { current -> items.any { it.id == current.id } }
 
+    // Fast höjd på TV: där finns alltid en markering, och utan fast höjd
+    // hoppar rutnätet mellan titlar med och utan beskrivning. På en telefon
+    // finns ingen markering alls — då ska ytan inte finnas, i stället för
+    // att stå tom och skjuta ner allt annat.
+    if (!isTv && item == null) return
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -326,41 +332,64 @@ private fun GridHeader(
 ) {
     val palette = LocalPalette.current
     val metrics = LocalMetrics.current
+    val isTv = LocalDeviceProfile.current.isTv
     val position = heroState.value
         ?.let { current -> items.indexOfFirst { it.id == current.id } + 1 }
         ?: 0
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = metrics.screenEdge),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(metrics.spaceMd),
-    ) {
-        Text(
-            text = categoryName,
-            style = MaterialTheme.typography.titleMedium,
-            color = palette.textPrimary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        OutlinedTextField(
-            value = filter,
-            onValueChange = onFilterChange,
-            label = { Text(filterLabel) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            modifier = Modifier.widthIn(max = 320.dp),
-        )
-        if (total > 0) {
+    // På en telefon får namn, filter och räknare inte plats bredvid
+    // varandra — räknaren pressades till fyra tecken per rad. Filtret får
+    // en egen rad där.
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = metrics.screenEdge)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(metrics.spaceMd),
+        ) {
             Text(
-                text = if (position > 0) "$position / $total" else "$total",
-                style = MaterialTheme.typography.labelMedium,
-                color = palette.textTertiary,
+                text = categoryName,
+                style = MaterialTheme.typography.titleMedium,
+                color = palette.textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (isTv) {
+                SearchField(filter, onFilterChange, filterLabel, Modifier.widthIn(max = 320.dp))
+            }
+            if (total > 0) {
+                Text(
+                    text = if (position > 0) "$position / $total" else "$total",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = palette.textTertiary,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+        }
+        if (!isTv) {
+            SearchField(
+                filter, onFilterChange, filterLabel,
+                Modifier.fillMaxWidth().padding(top = metrics.spaceXs),
             )
         }
     }
+}
+
+@Composable
+private fun SearchField(
+    value: String,
+    onChange: (String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        label = { Text(label) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        modifier = modifier,
+    )
 }
 
 @Composable

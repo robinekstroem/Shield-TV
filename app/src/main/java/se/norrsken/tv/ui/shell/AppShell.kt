@@ -109,8 +109,11 @@ fun AppShell(
                 Box(
                     Modifier
                         .fillMaxSize()
+                        // Full bredd bara på TV, där bilden ska gå ut i
+                        // kanten bakom menyn. På en telefon är menyn en smal
+                        // kolumn som annars lägger sig över innehållet.
                         .padding(
-                            start = if (current == Destination.Home) {
+                            start = if (current == Destination.Home && profile.isTv) {
                                 0.dp
                             } else {
                                 LocalMetrics.current.railCollapsed
