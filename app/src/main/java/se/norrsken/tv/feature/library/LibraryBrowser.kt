@@ -236,7 +236,7 @@ private fun HighlightHeader(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(if (isTv) 236.dp else 168.dp)
+            .height(if (isTv) 170.dp else 168.dp)
             .padding(horizontal = metrics.screenEdge, vertical = metrics.spaceMd)
             .widthIn(max = 820.dp),
         verticalArrangement = Arrangement.spacedBy(metrics.spaceXs, Alignment.Bottom),
@@ -277,7 +277,8 @@ private fun HighlightHeader(
                 text = it,
                 style = MaterialTheme.typography.bodyLarge,
                 color = palette.textSecondary,
-                maxLines = 3,
+                // Två rader, inte tre: höjden går till rutnätet i stället.
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }

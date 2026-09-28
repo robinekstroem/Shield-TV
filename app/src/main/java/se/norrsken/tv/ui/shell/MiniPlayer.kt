@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
@@ -73,7 +72,10 @@ fun MiniPlayer(
         FocusableSurface(
             onClick = onOpen,
             cornerRadius = metrics.radiusCard,
-            modifier = Modifier.fillMaxSize(),
+            // fillMaxWidth, inte fillMaxSize: i en kolumn utan höjdgräns
+            // svällde ytan ut över halva skärmen medan videon bara fyllde
+            // sin sextondelsdel. Det var den grå lådan.
+            modifier = Modifier.fillMaxWidth(),
         ) { _ ->
             AndroidView(
                 factory = { context ->

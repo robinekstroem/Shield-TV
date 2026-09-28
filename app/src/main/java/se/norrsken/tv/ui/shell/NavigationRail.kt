@@ -70,10 +70,10 @@ fun NavigationRail(
     val metrics = LocalMetrics.current
     val motion = LocalMotion.current
 
-    // TV: alltid utfälld, som i mockupen. Ikoner utan text kräver att man
-    // lär sig dem; en fjärrkontroll har gott om plats åt vänster.
+    // Hopfälld tills den får fokus. Alltid utfälld tog 260 dp av en
+    // TV-skärm som är 960 dp bred — den bredden behöver innehållet.
     val isTv = LocalDeviceProfile.current.isTv
-    var expanded by remember { mutableStateOf(isTv) }
+    var expanded by remember { mutableStateOf(false) }
 
     // Utan det har har ingenting fokus nar appen startar pa en TV, och
     // fjarrkontrollen gor ingenting forran anvandaren racker ratt riktning.
@@ -102,13 +102,25 @@ fun NavigationRail(
             // Utfälld täcker menyn innehållet under sig och måste vara
             // tätare. Kollapsad får atmosfären lysa igenom.
             .background(
+                // Utfälld måste menyn täcka helt. Halvgenomskinlig lät
+                // texten bakom lysa igenom, och då låg två texter i
+                // varandra — oläsbart i båda.
                 Brush.horizontalGradient(
-                    listOf(
-                        palette.background.copy(alpha = if (expanded) 0.88f else 0.72f),
-                        palette.surface.copy(alpha = if (expanded) 0.66f else 0.28f),
-                        palette.signal.copy(alpha = if (expanded) 0.055f else 0.025f),
-                        Color.Transparent,
-                    )
+                    if (expanded) {
+                        listOf(
+                            palette.background,
+                            palette.background,
+                            palette.background.copy(alpha = 0.97f),
+                            palette.background.copy(alpha = 0.90f),
+                        )
+                    } else {
+                        listOf(
+                            palette.background.copy(alpha = 0.72f),
+                            palette.surface.copy(alpha = 0.28f),
+                            palette.signal.copy(alpha = 0.025f),
+                            Color.Transparent,
+                        )
+                    }
                 )
             )
             // Fokus finns med fjärrkontroll, inte med finger. På TV styr

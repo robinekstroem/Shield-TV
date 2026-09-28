@@ -287,7 +287,6 @@ fun HomeScreen(
     }
 
     val palette = LocalPalette.current
-    val isTv = LocalDeviceProfile.current.isTv
     val quickTiles = remember(palette) {
         listOf(
             QuickTile("Live TV", "Direktsändning", Icons.Filled.PlayArrow, Color(0xFFD9534F)),
@@ -314,7 +313,11 @@ fun HomeScreen(
         HeroScrim()
 
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            // Bilden bakom går ut i kanten, innehållet gör det inte —
+            // annars hamnar hero-texten under menyn och båda blir oläsbara.
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = metrics.railCollapsed),
             verticalArrangement = Arrangement.spacedBy(metrics.spaceLg),
         ) {
             item { HomeTopBar(onSearch = onOpenSearch) }
