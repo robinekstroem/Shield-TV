@@ -71,13 +71,7 @@ fun AppShell(
 
     // Ingen jamforelse mot current: star man pa en underrutt ar current
     // huvudavdelningen, och ett likhetstest hade da gjort menyvalet dott.
-    val select: (Destination) -> Unit = { destination ->
-        navController.navigate(destination.route) {
-            popUpTo(Destination.Home.route) { saveState = true }
-            launchSingleTop = true
-            restoreState = true
-        }
-    }
+    val select: (Destination) -> Unit = { destination -> navController.switchTo(destination) }
 
     // movableContentOf: utan den raknas de tva AppNavHost-anropen nedan som
     // skilda anropsplatser, och Compose river och bygger om hela
@@ -232,12 +226,14 @@ private fun AppNavHost(navController: NavHostController) {
                         launchSingleTop = true
                     }
                 },
-                onOpenSearch = { select(Destination.Search) },
-                onOpenLiveTv = { select(Destination.LiveTv) },
-                onOpenMovies = { select(Destination.Movies) },
-                onOpenSeriesSection = { select(Destination.Series) },
-                onOpenGuide = { select(Destination.Guide) },
-                onOpenFavorites = { select(Destination.Favorites) },
+                // Samma navigering som menyn gör: tillbaka till Start i
+                // historiken, en instans, och sparat läge återställt.
+                onOpenSearch = { navController.switchTo(Destination.Search) },
+                onOpenLiveTv = { navController.switchTo(Destination.LiveTv) },
+                onOpenMovies = { navController.switchTo(Destination.Movies) },
+                onOpenSeriesSection = { navController.switchTo(Destination.Series) },
+                onOpenGuide = { navController.switchTo(Destination.Guide) },
+                onOpenFavorites = { navController.switchTo(Destination.Favorites) },
             )
         }
         composable(Destination.LiveTv.route) {
@@ -342,6 +338,19 @@ private fun NavHostController.play(kind: PlayableKind, id: Long) {
 }
 
 private const val PLAYER_ROUTE = "player/"
+/**
+ * Byte av avdelning. Ett ställe, så menyn och genvägarna på startsidan gör
+ * exakt samma sak — bakåtknappen ska leda tillbaka till Start oavsett hur
+ * man tog sig dit.
+ */
+private fun NavHostController.switchTo(destination: Destination) {
+    navigate(destination.route) {
+        popUpTo(Destination.Home.route) { saveState = true }
+        launchSingleTop = true
+        restoreState = true
+    }
+}
+
 private const val SERIES_ROUTE = "series-detail/"
 private const val MOVIE_ROUTE = "movie-detail/"
 private const val CATEGORIES_ROUTE = "categories/"

@@ -30,6 +30,9 @@ import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.collect
+import androidx.compose.material.icons.Icons
+import androidx.compose.material3.MaterialTheme
+import se.norrsken.tv.core.ui.theme.LocalPalette
 import androidx.compose.ui.Alignment
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
