@@ -126,7 +126,7 @@ private fun SortChip(label: String?, value: String, onClick: () -> Unit) {
     FocusableSurface(
         onClick = onClick,
         focusScale = 1f,
-        cornerRadius = metrics.radiusPill,
+        cornerRadius = metrics.radiusCard,
     ) { focused ->
         Column(
             modifier = Modifier.padding(
