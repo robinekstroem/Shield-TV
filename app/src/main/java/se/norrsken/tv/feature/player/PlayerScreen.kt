@@ -1,5 +1,6 @@
 package se.norrsken.tv.feature.player
 
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.focus.onFocusChanged
 import android.content.pm.ActivityInfo
 import android.media.audiofx.LoudnessEnhancer
@@ -940,6 +941,15 @@ private fun Timeline(
     if (duration <= 0) return
 
     var timelineFocused by remember { mutableStateOf(false) }
+
+    // Under dragningen visas målet, inte det som spelas. Annars hoppar
+    // siffran tillbaka mellan varje uppdatering från spelaren och man kan
+    // inte sikta.
+    var scrubbing by remember { mutableStateOf(false) }
+    var scrubMs by remember { mutableLongStateOf(0L) }
+    var fine by remember { mutableStateOf(false) }
+    val shown = if (scrubbing) scrubMs else position
+
     Row(
         modifier = Modifier
             .padding(top = metrics.spaceMd)
@@ -961,24 +971,68 @@ private fun Timeline(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = formatTime(position),
+            text = formatTime(shown),
             style = MaterialTheme.typography.labelMedium,
-            color = if (timelineFocused) palette.focus else palette.textSecondary,
+            color = when {
+                fine -> palette.secondary
+                scrubbing || timelineFocused -> palette.focus
+                else -> palette.textSecondary
+            },
         )
-        AuroraProgress(
-            fraction = position.toFloat() / duration,
-            // Tjockare när den har fokus — så det syns vilket element
-            // pilarna styr.
-            height = if (timelineFocused) 8.dp else 4.dp,
+        Box(
             modifier = Modifier
                 .weight(1f)
-                // Tryck var som helst på linjen hoppar dit.
+                // Fingret behöver något att ta i. Linjen är fyra punkter
+                // hög; träffytan är trettiotvå, med linjen i mitten.
+                .height(32.dp)
                 .pointerInput(duration) {
                     detectTapGestures { offset ->
                         onSeekTo((offset.x / size.width).coerceIn(0f, 1f))
                     }
+                }
+                .pointerInput(duration) {
+                    detectHorizontalDragGestures(
+                        onDragStart = {
+                            scrubbing = true
+                            scrubMs = positionState.longValue
+                        },
+                        onDragEnd = {
+                            scrubbing = false
+                            fine = false
+                            onSeekTo((scrubMs.toFloat() / duration).coerceIn(0f, 1f))
+                        },
+                        onDragCancel = {
+                            scrubbing = false
+                            fine = false
+                        },
+                    ) { change, dragAmount ->
+                        // Hela linjens bredd motsvarar hela filmen. På en
+                        // telefon blir det åtta sekunder per punkt — omöjligt
+                        // att träffa en enskild sekund.
+                        //
+                        // Drar man ner fingret under linjen växlar den till
+                        // finläge: en åttondel av farten, ungefär en sekund
+                        // per punkt. Samma grepp som i telefonens egna
+                        // spelare, och det enda sättet att komma åt sekunder.
+                        val below = change.position.y - size.height / 2f
+                        fine = below > 60.dp.toPx()
+                        val factor = if (fine) 0.125f else 1f
+                        val perPixel = duration.toFloat() / size.width
+                        scrubMs = (scrubMs + (dragAmount * perPixel * factor).toLong())
+                            .coerceIn(0L, duration)
+                        change.consume()
+                    }
                 },
-        )
+            contentAlignment = Alignment.Center,
+        ) {
+            AuroraProgress(
+                fraction = shown.toFloat() / duration,
+                // Tjockare när den styrs — så det syns vad pilarna eller
+                // fingret påverkar.
+                height = if (scrubbing || timelineFocused) 8.dp else 4.dp,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         Text(
             text = formatTime(duration),
             style = MaterialTheme.typography.labelMedium,

@@ -346,14 +346,21 @@ private fun GridHeader(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(metrics.spaceMd),
         ) {
-            Text(
-                text = categoryName,
-                style = MaterialTheme.typography.titleMedium,
-                color = palette.textPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
+            // På TV står kategorierna i kolumnen till vänster och namnet
+            // behövs här. På telefonen står det redan som markerad knapp i
+            // raden ovanför — samma ord två gånger på två rader.
+            if (isTv) {
+                Text(
+                    text = categoryName,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = palette.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            } else {
+                Box(Modifier.weight(1f))
+            }
             if (isTv) {
                 SearchField(filter, onFilterChange, filterLabel, Modifier.widthIn(max = 320.dp))
             }

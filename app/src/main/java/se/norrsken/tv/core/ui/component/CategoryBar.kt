@@ -97,11 +97,13 @@ fun CategoryRow(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(metrics.spaceSm),
     ) {
+        // Etiketten ovanför värdet gjorde varje knapp dubbelt så hög och
+        // sa samma sak två gånger — "Sortering / A–Ö" är bara "A–Ö".
         if (sortLabel != null && onCycleSort != null) {
-            item { SortChip("Sortering", sortLabel, onCycleSort) }
+            item { SortChip(label = null, value = sortLabel, onClick = onCycleSort) }
         }
         if (onManage != null) {
-            item { SortChip("Visa och dölj", "Hantera", onManage) }
+            item { SortChip(label = null, value = "Hantera", onClick = onManage) }
         }
         item { CategoryChip(allLabel, selected == null) { onSelect(null) } }
         items(categories, key = { it.id }) { category ->
@@ -118,23 +120,23 @@ fun CategoryRow(
  * valjas i och stangas.
  */
 @Composable
-private fun SortChip(prefix: String, value: String, onClick: () -> Unit) {
+private fun SortChip(label: String?, value: String, onClick: () -> Unit) {
     val palette = LocalPalette.current
     val metrics = LocalMetrics.current
-
-    FocusableSurface(onClick = onClick, focusScale = 1f) { focused ->
+    FocusableSurface(
+        onClick = onClick,
+        focusScale = 1f,
+        cornerRadius = metrics.radiusPill,
+    ) { focused ->
         Column(
             modifier = Modifier.padding(
                 horizontal = metrics.spaceMd,
-                vertical = metrics.spaceSm,
+                vertical = metrics.spaceXs,
             ),
         ) {
-            // Etiketten ovanför värdet försvinner i minimalt läge. Att det
-            // står "Senast tillagda" i kategorilistan räcker för att förstå
-            // att det handlar om sortering.
-            if (!LocalThemeStyle.current.minimal) {
+            if (label != null) {
                 Text(
-                    text = prefix,
+                    text = label,
                     style = MaterialTheme.typography.labelMedium,
                     color = palette.textTertiary,
                     maxLines = 1,
