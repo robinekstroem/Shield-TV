@@ -30,6 +30,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.State
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.Icon
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+import androidx.annotation.OptIn
+import se.norrsken.tv.feature.player.PlayableKind
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -71,6 +83,7 @@ import se.norrsken.tv.data.db.dao.EpgDao
 import se.norrsken.tv.data.db.entity.ChannelEntity
 import se.norrsken.tv.data.db.entity.ContentKind
 import se.norrsken.tv.data.epg.EpgCoordinator
+import se.norrsken.tv.data.player.PlaybackController
 import se.norrsken.tv.data.epg.EpgState
 import se.norrsken.tv.data.repository.CategoryVisibility
 import se.norrsken.tv.data.settings.SettingsRepository
@@ -115,7 +128,26 @@ class GuideViewModel @Inject constructor(
     settings: SettingsRepository,
     visibility: CategoryVisibility,
     private val epg: EpgCoordinator,
+    private val playback: PlaybackController,
 ) : ViewModel() {
+
+    /** Spelaren som redan är igång, för förhandsbilden i tablån. */
+    fun heldPlayer() = playback.heldPlayer()
+
+    /**
+     * Kanalen som spelar just nu, om någon gör det. Rutten tillbaka till
+     * helskärm bär både sort och id — "player/CHANNEL/123".
+     */
+    val playing: StateFlow<Long?> = playback.mini
+        .map { mini ->
+            val parts = mini?.route?.split('/') ?: return@map null
+            if (parts.getOrNull(1) == PlayableKind.CHANNEL.name) {
+                parts.getOrNull(2)?.toLongOrNull()
+            } else {
+                null
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /**
      * Fönstret börjar en timme före nuvarande timme och sträcker sig ett
@@ -199,6 +231,8 @@ fun GuideScreen(
     // Samma skäl som i kanallistan: läses klockan här ritas hela rutnätet
     // om varje halvminut.
     val nowState = viewModel.now.collectAsStateWithLifecycle()
+    // Läses per rad, inte här: bara synliga rader ritas om när kanalen byts.
+    val playingState = viewModel.playing.collectAsStateWithLifecycle()
     val epgState by viewModel.epgState.collectAsStateWithLifecycle()
 
     if (state.loading) {
@@ -241,7 +275,7 @@ fun GuideScreen(
     var focused by remember { mutableStateOf<Pair<GuideRow, GuideProgramme?>?>(null) }
 
     Column(modifier = modifier.fillMaxSize()) {
-        GuideInfo(selection = focused, nowState = nowState)
+        GuideInfo(selection = focused, nowState = nowState, player = viewModel.heldPlayer())
 
         // Tidslinjen
         Row(Modifier.fillMaxWidth().height(32.dp)) {
@@ -276,9 +310,14 @@ fun GuideScreen(
         }
 
         LazyColumn(Modifier.weight(1f)) {
-            items(state.rows, key = { it.channel.id }) { row ->
+            itemsIndexed(state.rows, key = { _, row -> row.channel.id }) { index, row ->
                 Row(Modifier.fillMaxWidth().height(rowHeight)) {
-                    ChannelLabel(row.channel, Modifier.width(labelWidth).fillMaxHeight())
+                    ChannelLabel(
+                        channel = row.channel,
+                        number = index + 1,
+                        playing = row.channel.id == playingState.value,
+                        modifier = Modifier.width(labelWidth).fillMaxHeight(),
+                    )
                     Box(Modifier.weight(1f).horizontalScroll(scroll)) {
                         Box(
                             Modifier
@@ -349,65 +388,139 @@ fun GuideScreen(
  * Informationsytan överst. Följer det markerade programmet — man ser vad
  * det handlar om utan att öppna något.
  */
+/**
+ * Tablåns topp: den kanal som spelar till vänster, det markerade programmet
+ * till höger.
+ *
+ * Förhandsbilden är samma ström som redan är igång — ingen ny anslutning.
+ * Spelar ingenting visas kanalens logotyp i stället, inte en tom ruta.
+ */
+@OptIn(UnstableApi::class)
 @Composable
-private fun GuideInfo(selection: Pair<GuideRow, GuideProgramme?>?, nowState: State<Long>) {
+private fun GuideInfo(
+    selection: Pair<GuideRow, GuideProgramme?>?,
+    nowState: State<Long>,
+    player: ExoPlayer?,
+) {
     val now = nowState.value
     val palette = LocalPalette.current
     val metrics = LocalMetrics.current
+    val isTv = LocalDeviceProfile.current.isTv
 
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(128.dp)
-            .padding(horizontal = metrics.screenEdge, vertical = metrics.spaceMd),
-        verticalArrangement = Arrangement.spacedBy(metrics.spaceXs),
+            .height(if (isTv) 176.dp else 132.dp)
+            .padding(horizontal = metrics.screenEdge, vertical = metrics.spaceSm),
+        horizontalArrangement = Arrangement.spacedBy(metrics.spaceLg),
     ) {
         val (row, programme) = selection ?: run {
-            SectionHeading(title = "Tablå")
-            Text(
-                text = "Markera ett program för att se mer. OK startar kanalen.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = palette.textTertiary,
-            )
-            return@Column
+            Column(verticalArrangement = Arrangement.spacedBy(metrics.spaceXs)) {
+                SectionHeading(title = "Tablå")
+                Text(
+                    text = "Markera ett program för att se mer. OK startar kanalen.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = palette.textTertiary,
+                )
+            }
+            return@Row
         }
-        Text(
-            text = programme?.title ?: row.channel.name,
-            style = MaterialTheme.typography.headlineMedium,
-            color = palette.textPrimary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        val facts = listOfNotNull(
-            row.channel.name.takeIf { programme != null },
-            programme?.let { "${time(it.start)}–${time(it.end)}" },
-            programme?.episode,
-            programme?.category,
-            programme?.takeIf { it.start <= now && it.end > now }?.let {
-                "${((it.end - now) / MINUTE_MS).coerceAtLeast(1)} min kvar"
-            },
-        )
-        if (facts.isNotEmpty()) {
-            Text(
-                text = facts.joinToString("  ·  "),
-                style = MaterialTheme.typography.labelMedium,
-                color = palette.signal,
-            )
+
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(metrics.radiusCard))
+                .background(palette.ambient),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (player != null) {
+                AndroidView(
+                    factory = { context ->
+                        PlayerView(context).apply {
+                            useController = false
+                            setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                        }
+                    },
+                    update = { it.player = player },
+                    onRelease = { it.player = null },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else if (row.channel.logoUrl != null) {
+                AsyncImage(
+                    model = row.channel.logoUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize().padding(metrics.spaceLg),
+                )
+            }
         }
-        programme?.description?.let {
+
+        Column(
+            modifier = Modifier.fillMaxHeight(),
+            verticalArrangement = Arrangement.spacedBy(metrics.spaceXs),
+        ) {
             Text(
-                text = it,
-                style = MaterialTheme.typography.bodyLarge,
-                color = palette.textSecondary,
-                maxLines = 2,
+                text = programme?.title ?: row.channel.name,
+                style = MaterialTheme.typography.headlineMedium,
+                color = palette.textPrimary,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+
+            // Tid, förlopp och återstående minuter på en rad, som i en tablå
+            // ska se ut: man vill veta hur långt in i programmet man är.
+            if (programme != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(metrics.spaceSm),
+                ) {
+                    Text(
+                        text = "${time(programme.start)} – ${time(programme.end)}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = palette.textSecondary,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                    val live = programme.start <= now && programme.end > now
+                    if (live) {
+                        val span = (programme.end - programme.start).coerceAtLeast(1L)
+                        AuroraProgress(
+                            fraction = ((now - programme.start).toFloat() / span).coerceIn(0f, 1f),
+                            height = 3.dp,
+                            modifier = Modifier.width(120.dp),
+                        )
+                        Text(
+                            text = "${((programme.end - now) / MINUTE_MS).coerceAtLeast(1)} min",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = palette.signal,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
+                }
+            }
+
+            programme?.description?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = palette.textSecondary,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun ChannelLabel(channel: ChannelEntity, modifier: Modifier = Modifier) {
+private fun ChannelLabel(
+    channel: ChannelEntity,
+    number: Int,
+    playing: Boolean,
+    modifier: Modifier = Modifier,
+) {
     val palette = LocalPalette.current
     val metrics = LocalMetrics.current
     Row(
@@ -417,6 +530,14 @@ private fun ChannelLabel(channel: ChannelEntity, modifier: Modifier = Modifier) 
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(metrics.spaceSm),
     ) {
+        // Numret gör kanalen sökbar med ögat — man minns 22, inte namnet.
+        Text(
+            text = "$number",
+            style = MaterialTheme.typography.labelMedium,
+            color = if (playing) palette.signal else palette.textTertiary,
+            maxLines = 1,
+            modifier = Modifier.width(28.dp),
+        )
         Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
             if (channel.logoUrl != null) {
                 AsyncImage(
@@ -430,10 +551,20 @@ private fun ChannelLabel(channel: ChannelEntity, modifier: Modifier = Modifier) 
         Text(
             text = channel.name,
             style = MaterialTheme.typography.labelMedium,
-            color = palette.textPrimary,
+            color = if (playing) palette.signal else palette.textPrimary,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
         )
+        // Pilen markerar kanalen som faktiskt spelar just nu.
+        if (playing) {
+            Icon(
+                imageVector = Icons.Filled.PlayArrow,
+                contentDescription = null,
+                tint = palette.signal,
+                modifier = Modifier.size(16.dp),
+            )
+        }
     }
 }
 
