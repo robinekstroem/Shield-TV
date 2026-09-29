@@ -1,5 +1,6 @@
 package se.norrsken.tv.ui.shell
 
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
