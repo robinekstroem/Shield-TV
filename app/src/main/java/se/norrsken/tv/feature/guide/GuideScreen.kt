@@ -40,7 +40,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
-import androidx.annotation.OptIn
 import se.norrsken.tv.feature.player.PlayableKind
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -395,7 +394,7 @@ fun GuideScreen(
  * Förhandsbilden är samma ström som redan är igång — ingen ny anslutning.
  * Spelar ingenting visas kanalens logotyp i stället, inte en tom ruta.
  */
-@OptIn(UnstableApi::class)
+@androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 private fun GuideInfo(
     selection: Pair<GuideRow, GuideProgramme?>?,
