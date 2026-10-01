@@ -36,6 +36,9 @@ val sharedFromAndroid = listOf(
     "se/norrsken/tv/data/security/UrlSanitizer.kt",
 )
 
+/** Dit den delade koden kopieras före varje bygge. */
+val sharedDir: File = layout.buildDirectory.dir("shared/kotlin").get().asFile
+
 val syncSharedSources by tasks.registering(Sync::class) {
     description = "Hämtar Windows-appens gemensamma kod och den delade koden från telefonappen."
     from(windowsSources) {
@@ -44,7 +47,7 @@ val syncSharedSources by tasks.registering(Sync::class) {
     from(androidSources) {
         include(sharedFromAndroid)
     }
-    into(layout.buildDirectory.dir("shared/kotlin"))
+    into(sharedDir)
 }
 
 android {
@@ -93,7 +96,9 @@ android {
 
     sourceSets {
         getByName("main") {
-            kotlin.srcDir(layout.buildDirectory.dir("shared/kotlin"))
+            // En vanlig sökväg: AGP 9 tar inte emot Providers här. Att koden
+            // finns på plats före kompileringen ordnar preBuild längre ned.
+            kotlin.srcDir(sharedDir)
         }
     }
 }
