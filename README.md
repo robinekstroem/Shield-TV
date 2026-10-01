@@ -300,3 +300,12 @@ Fas 3: Media3-spelaren och kanalbyte.
 
 Innan du går vidare — bygg det här, importera din riktiga spellista och se
 att kanalerna dyker upp på både telefon och TV.
+
+## Windows
+
+Appen finns också som Windows-program, i mappen `windows/`. Dubbelklicka på
+**Installera Tv** i projektmappen på en Windows-dator: den hämtar det som
+behövs, bygger Tv och installerar den. Inget annat behöver installeras och
+GitHub behövs inte. Bygget påverkar inte APK:n. Windows-versionen delar
+M3U-parsern, Xtream-klienten och nedladdningen med Android-appen, ordagrant.
+Se `windows/README.md`.

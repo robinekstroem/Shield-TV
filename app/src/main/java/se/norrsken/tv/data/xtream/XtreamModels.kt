@@ -1,3 +1,6 @@
+// Delas med Windows-versionen (se windows/build.gradle.kts). Håll filen fri
+// från android.*-importer, annars slutar Windows-bygget att kompilera.
+
 package se.norrsken.tv.data.xtream
 
 data class XtreamAccount(
@@ -46,6 +49,8 @@ data class XtreamSeries(
     val rating: Double?,
     val categoryId: String?,
     val trailer: String?,
+    /** När leverantören senast ändrade serien, t.ex. ett nytt avsnitt. 0: okänt. */
+    val lastModifiedUtc: Long = 0L,
 )
 
 data class XtreamEpisode(

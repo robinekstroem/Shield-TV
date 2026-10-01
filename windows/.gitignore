@@ -1,0 +1,5 @@
+build/
+.gradle/
+.kotlin/
+# VLC hämtas av CI-bygget och ska inte committas (över 100 MB).
+app-resources/windows-x64/

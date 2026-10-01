@@ -1,3 +1,6 @@
+// Delas med Windows-versionen (se windows/build.gradle.kts). Håll filen fri
+// från android.*-importer, annars slutar Windows-bygget att kompilera.
+
 package se.norrsken.tv.data.xtream
 
 import org.json.JSONArray
@@ -256,4 +259,5 @@ private fun parseSeries(o: JSONObject) = XtreamSeries(
     rating = o.optString("rating").toDoubleOrNull(),
     categoryId = o.optString("category_id").ifEmpty { null },
     trailer = o.optString("youtube_trailer").ifEmpty { null },
+    lastModifiedUtc = o.optString("last_modified").toLongOrNull()?.times(1000) ?: 0L,
 )

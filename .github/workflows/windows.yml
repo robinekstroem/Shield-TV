@@ -1,0 +1,153 @@
+name: Build Windows
+
+# Valfritt. Den vanliga vägen är "Installera Tv" i projektmappen, som bygger
+# och installerar på den egna datorn utan GitHub.
+#
+# Den här bygger i stället en installationsfil, Tv.msi, med allt inuti
+# (appen, Java och VLC) och lägger den under Releases som "Tv för Windows".
+# Startar bara för hand: Actions → Build Windows → Run workflow.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Två pushar tätt efter varandra: den senaste vinner.
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: current
+
+      # Spelarmotorn. Packas med så att ingen behöver installera VLC själv.
+      # Misslyckas hämtningen byggs appen ändå — den använder då en
+      # installerad VLC, eller säger hur man skaffar en.
+      - name: Hämta VLC
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $target = Join-Path $PWD 'windows/app-resources/windows-x64/vlc'
+          $done = $false
+          foreach ($version in @('3.0.23', '3.0.21')) {
+            $url = "https://download.videolan.org/pub/videolan/vlc/$version/win64/vlc-$version-win64.zip"
+            try {
+              Write-Host "Hämtar VLC $version"
+              Invoke-WebRequest -Uri $url -OutFile vlc.zip -MaximumRetryCount 3 -RetryIntervalSec 5
+              Expand-Archive -Path vlc.zip -DestinationPath vlc-unpacked -Force
+              $root = (Get-ChildItem vlc-unpacked -Directory | Select-Object -First 1).FullName
+              New-Item -ItemType Directory -Force -Path $target | Out-Null
+              Copy-Item (Join-Path $root 'libvlc.dll'), (Join-Path $root 'libvlccore.dll') -Destination $target
+              Copy-Item (Join-Path $root 'plugins') -Destination $target -Recurse
+              # VLC:s egna fönster och visualiseringar används aldrig här.
+              foreach ($unused in @('gui', 'visualization')) {
+                $dir = Join-Path $target "plugins/$unused"
+                if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
+              }
+              # Förbyggd plugin-katalog: snabbare första start.
+              try {
+                & (Join-Path $root 'vlc-cache-gen.exe') (Join-Path $target 'plugins')
+              } catch {
+                Write-Host "vlc-cache-gen kördes inte: $($_.Exception.Message)"
+              }
+              Write-Host "VLC $version packas med i appen."
+              $done = $true
+              break
+            } catch {
+              Write-Host "::warning::VLC $version gick inte att hämta: $($_.Exception.Message)"
+              Remove-Item vlc.zip, vlc-unpacked -Recurse -Force -ErrorAction SilentlyContinue
+              Remove-Item $target -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
+          if (-not $done) {
+            Write-Host "::warning::Bygger utan inbyggd VLC. Appen använder då en installerad VLC (64-bit)."
+          }
+
+      - name: Bygg installationsfilen
+        id: build
+        shell: bash
+        working-directory: windows
+        run: |
+          set -o pipefail
+          status=0
+          gradle packageMsi --stacktrace 2>&1 | tee build.log || status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      # Samma idé som i Android-bygget: felet ska gå att läsa utan att
+      # gräva i tusen rader logg. Kopiera sammanfattningen och klistra in.
+      - name: Sammanfatta felet
+        if: steps.build.outputs.status != '0'
+        shell: bash
+        working-directory: windows
+        run: |
+          {
+            echo "## Windows-bygget misslyckades"
+            echo
+            echo "Kopiera allt i rutan nedan och klistra in det i chatten."
+            echo
+            echo '```'
+            if grep -q '^e: ' build.log; then
+              grep '^e: ' build.log | head -n 60
+            else
+              grep -n -A 12 -E 'What went wrong|FAILURE:|Could not (find|resolve)|error:' build.log | head -n 100
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Bygget misslyckades. Se sammanfattningen för workflow-körningen."
+          exit 1
+
+      # Fast filnamn, så att direktlänken är densamma för varje ny version.
+      - name: Döp om till Tv.msi
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp windows/build/compose/binaries/main/msi/*.msi dist/Tv.msi
+          ls -la dist
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: tv-windows
+          path: dist/Tv.msi
+          if-no-files-found: error
+          retention-days: 30
+
+      # En enda release, "windows-senaste", som byts ut vid varje bygge.
+      # Markerad som förhandsversion: den blir aldrig "Latest", så APK:ns
+      # releaser och direktlänkar påverkas inte.
+      - name: Publicera Tv.msi
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="1.0.${GITHUB_RUN_NUMBER}"
+          link="https://github.com/${GITHUB_REPOSITORY}/releases/download/windows-senaste/Tv.msi"
+          gh release delete windows-senaste --yes --cleanup-tag >/dev/null 2>&1 || true
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/windows-senaste" >/dev/null 2>&1 || true
+          notes=$(printf 'Version %s, byggd från %s.\n\nLadda ner **Tv.msi** och dubbelklicka. Allt som behövs följer med, även Java och VLC.\n\nEn ny version installeras ovanpå den gamla. Källor och bibliotek ligger kvar.\n\nDirektlänk: %s\n' "$version" "${GITHUB_SHA::7}" "$link")
+          gh release create windows-senaste dist/Tv.msi \
+            --title "Tv för Windows ${version}" \
+            --notes "$notes" \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --latest=false
+          {
+            echo "## Tv för Windows ${version}"
+            echo
+            echo "Installationsfil: ${link}"
+          } >> "$GITHUB_STEP_SUMMARY"

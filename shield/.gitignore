@@ -1,0 +1,8 @@
+build/
+.gradle/
+.kotlin/
+local.properties
+
+# Rotens .gitignore utesluter alla *.keystore. Shields nyckel ska med:
+# utan den kan bygget på GitHub inte signera appen.
+!debug.keystore

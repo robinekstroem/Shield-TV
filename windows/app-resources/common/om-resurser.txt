@@ -1,0 +1,2 @@
+Filer i den här mappen följer med Windows-appen.
+VLC (spelarmotorn) läggs i app-resources/windows-x64/vlc av CI-bygget.

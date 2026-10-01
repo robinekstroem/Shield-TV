@@ -1,3 +1,6 @@
+// Delas med Windows-versionen (se windows/build.gradle.kts). Håll filen fri
+// från android.*-importer, annars slutar Windows-bygget att kompilera.
+
 package se.norrsken.tv.data.security
 
 /**
