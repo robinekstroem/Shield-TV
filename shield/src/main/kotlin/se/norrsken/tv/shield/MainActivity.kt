@@ -1,7 +1,5 @@
 package se.norrsken.tv.shield
 
-import se.norrsken.tv.desktop.Screen
-import androidx.compose.ui.platform.LocalConfiguration
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
@@ -20,12 +18,15 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import se.norrsken.tv.desktop.AppState
+import se.norrsken.tv.desktop.Screen
 import se.norrsken.tv.desktop.data.AppDirs
 import se.norrsken.tv.desktop.platform.WindowsIntegration
 import se.norrsken.tv.desktop.ui.AppRoot
+import se.norrsken.tv.desktop.ui.AppTheme
 import se.norrsken.tv.desktop.ui.TvTheme
 
 /**
@@ -41,7 +42,7 @@ import se.norrsken.tv.desktop.ui.TvTheme
  * - Play/paus: paus. I minispelaren: tillbaka till helskärm.
  * - ≡: ljud och undertext.
  * - Tillbaka: stänger listan eller panelen, krymper sedan bilden till
- *   hörnet, och stänger den till sist.
+ *   hörnet, stänger den, och leder till startsidan innan appen stängs.
  */
 class MainActivity : ComponentActivity() {
     private lateinit var state: AppState
@@ -49,11 +50,20 @@ class MainActivity : ComponentActivity() {
     /** Kanallistan ovanpå bilden. */
     private var channelsOpen by mutableStateOf(false)
 
+    /** Felet från förra gången, visas före allt annat. */
+    private var crashReport by mutableStateOf<String?>(null)
+
+    private val ready: Boolean get() = ::state.isInitialized
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CrashReport.install(applicationContext)
         AppDirs.init(applicationContext)
         WindowsIntegration.attach(this)
-        state = AppState()
+        // Sitter felet i själva starten ska rapporten ändå gå att se: appen
+        // startas först när man tryckt Fortsätt.
+        crashReport = CrashReport.take(applicationContext)
+        if (crashReport == null) state = AppState()
 
         setContent {
             // Tv:n ger 960 dp i bredd. Windows-layouten får i stället den bredd
@@ -68,12 +78,22 @@ class MainActivity : ComponentActivity() {
                 Density(density = scale, fontScale = textPx / scale * base.fontScale)
             }
             CompositionLocalProvider(LocalDensity provides density) {
-                TvTheme(state.theme, translucent = state.backgrounds.isNotEmpty()) {
-                    Box(Modifier.fillMaxSize().onPreviewKeyEvent { handleRemote(it) }) {
-                        AppRoot(state)
-                        val playing = state.nowPlaying
-                        if (channelsOpen && playing != null && playing.live && !state.miniPlayer) {
-                            ChannelOverlay(state, onClose = { channelsOpen = false })
+                val report = crashReport
+                if (report != null) {
+                    TvTheme(AppTheme.GRAPHITE, translucent = false) {
+                        CrashScreen(report, onContinue = {
+                            if (!ready) state = AppState()
+                            crashReport = null
+                        })
+                    }
+                } else {
+                    TvTheme(state.theme, translucent = state.backgrounds.isNotEmpty()) {
+                        Box(Modifier.fillMaxSize().onPreviewKeyEvent { handleRemote(it) }) {
+                            AppRoot(state)
+                            val playing = state.nowPlaying
+                            if (channelsOpen && playing != null && playing.live && !state.miniPlayer) {
+                                ChannelOverlay(state, onClose = { channelsOpen = false })
+                            }
                         }
                     }
                 }
@@ -84,6 +104,11 @@ class MainActivity : ComponentActivity() {
             this,
             object : OnBackPressedCallback(true) {
                 override fun handleOnBackPressed() {
+                    if (!ready || crashReport != null) {
+                        isEnabled = false
+                        onBackPressedDispatcher.onBackPressed()
+                        return
+                    }
                     val playing = state.nowPlaying
                     when {
                         channelsOpen -> channelsOpen = false
@@ -107,7 +132,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleRemote(event: KeyEvent): Boolean {
-        if (event.type != KeyEventType.KeyDown) return false
+        if (!ready || event.type != KeyEventType.KeyDown) return false
         val playing = state.nowPlaying ?: return false
 
         // Minispelaren: fjärrkontrollen styr appen bakom; play tar tillbaka bilden.
@@ -167,13 +192,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         // Hem-knappen eller en annan app: positionen sparas och bilden pausas.
-        state.saveProgressNow()
-        state.pausePlayback()
+        if (ready) {
+            state.saveProgressNow()
+            state.pausePlayback()
+        }
         super.onStop()
     }
 
     override fun onDestroy() {
-        if (isFinishing) state.shutdown()
+        if (ready && isFinishing) state.shutdown()
         WindowsIntegration.attach(null)
         super.onDestroy()
     }

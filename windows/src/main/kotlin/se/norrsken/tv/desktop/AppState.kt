@@ -40,6 +40,7 @@ import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -134,7 +135,14 @@ data class NowPlaying(
  * Dispatchers.IO och resultatet skrivs tillbaka här.
  */
 class AppState {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    // Ett fel i en bakgrundsuppgift ska aldrig stänga appen. På Android gör ett
+    // ofångat fel det, på Windows inte; här blir det ett meddelande i stället.
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Main + CoroutineExceptionHandler { _, error ->
+            error.printStackTrace()
+            notice = "Något gick fel: ${error.message ?: error.javaClass.simpleName}"
+        },
+    )
     private val storage = Storage()
     private val downloader = PlaylistDownloader()
     private val xtream = XtreamClient(downloader)

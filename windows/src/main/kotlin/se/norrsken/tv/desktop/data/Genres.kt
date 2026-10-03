@@ -34,8 +34,13 @@ enum class Genre(val label: String, pattern: String) {
     REALITY("Reality", """reality"""),
     ;
 
-    /** Skiftlägesokänsligt, och Unicode-medvetet så att å, ä och ö räknas som bokstäver. */
-    internal val regex = Regex("""(?iuU)\b(?:$pattern)\b""")
+    /**
+     * Skiftlägesokänsligt, och Unicode-medvetet så att å, ä och ö räknas som
+     * bokstäver. Java på Windows behöver flaggan U för det. Android är
+     * Unicode-medvetet redan och vägrar flaggan, så där byggs mönstret utan.
+     */
+    internal val regex = runCatching { Regex("""(?iuU)\b(?:$pattern)\b""") }
+        .getOrElse { Regex("""(?iu)\b(?:$pattern)\b""") }
 }
 
 /** Vilka genrer ett kategorinamn eller en genretext pekar på. */
