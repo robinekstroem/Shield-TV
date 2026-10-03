@@ -22,7 +22,6 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import se.norrsken.tv.desktop.AppState
-import se.norrsken.tv.desktop.Screen
 import se.norrsken.tv.desktop.data.AppDirs
 import se.norrsken.tv.desktop.platform.WindowsIntegration
 import se.norrsken.tv.desktop.ui.AppRoot
@@ -42,7 +41,7 @@ import se.norrsken.tv.desktop.ui.TvTheme
  * - Play/paus: paus. I minispelaren: tillbaka till helskärm.
  * - ≡: ljud och undertext.
  * - Tillbaka: stänger listan eller panelen, krymper sedan bilden till
- *   hörnet, stänger den, och leder till startsidan innan appen stängs.
+ *   hörnet och stänger den till sist.
  */
 class MainActivity : ComponentActivity() {
     private lateinit var state: AppState
@@ -118,8 +117,6 @@ class MainActivity : ComponentActivity() {
                         state.selectedMovie != null -> state.closeMovie()
                         state.selectedSeries != null -> state.closeSeries()
                         playing != null -> state.closePlayer()
-                        // Som på andra tv-appar: Tillbaka leder till startsidan innan appen stängs.
-                        state.screen != Screen.HOME -> state.screen = Screen.HOME
                         else -> {
                             // Ingenting kvar att stänga: lämna appen som vanligt.
                             isEnabled = false
@@ -188,15 +185,6 @@ class MainActivity : ComponentActivity() {
             }
         }
         return state.handleKey(event)
-    }
-
-    override fun onStop() {
-        // Hem-knappen eller en annan app: positionen sparas och bilden pausas.
-        if (ready) {
-            state.saveProgressNow()
-            state.pausePlayback()
-        }
-        super.onStop()
     }
 
     override fun onDestroy() {
