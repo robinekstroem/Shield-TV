@@ -47,7 +47,8 @@ fun weightedScore(rating: Double?, votes: Int): Double? {
  */
 object TitleCleaner {
     private val quality = Regex("""(?i)\b(?:4k|uhd|fhd|hdr|hevc|h\.?26[45]|x26[45]|2160p|1080p|720p|multi[- ]?subs?|dubbed|dubbad)\b""")
-    private val bracketed = Regex("""\[[^\]]*]|\{[^}]*}|\((?:19|20)\d{2}\)""")
+    // ] och } som tecken skrivs \] och \}: Androids reguljära uttryck kräver det.
+    private val bracketed = Regex("""\[[^\]]*\]|\{[^}]*\}|\((?:19|20)\d{2}\)""")
     private val prefix = Regex("""^\s*[A-Z]{2,4}\s*[-|:]\s+""")
     private val bareYear = Regex("""[\s\-–|]+(?:19|20)\d{2}\s*$""")
     private val spaces = Regex("""\s{2,}""")

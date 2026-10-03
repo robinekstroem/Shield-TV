@@ -1,5 +1,15 @@
 package se.norrsken.tv.desktop.ui
 
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.unit.lerp
 import androidx.compose.foundation.layout.offset
@@ -71,7 +81,7 @@ private val idleStatus = MutableStateFlow(VideoPlayer.Status())
 private val clockFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
 @Composable
-fun PlayerScreen(state: AppState, collapse: Float = 0f) {
+fun PlayerScreen(state: AppState, collapse: Float = 0f, highlighted: Boolean = false) {
     val palette = LocalPalette.current
     val playing = state.nowPlaying ?: return
     val player = state.videoPlayer
@@ -183,7 +193,7 @@ fun PlayerScreen(state: AppState, collapse: Float = 0f) {
         }
 
         if (mini) {
-            MiniOverlay(state, playing, status, visible = hovered, now = now, modifier = Modifier.fillMaxSize())
+            MiniOverlay(state, playing, status, visible = hovered || highlighted, now = now, modifier = Modifier.fillMaxSize())
         }
     }
 }
@@ -323,6 +333,14 @@ private fun TracksPanel(state: AppState, status: VideoPlayer.Status, modifier: M
     val shape = RoundedCornerShape(16.dp)
     val audio = status.audioTracks.filter { it.id >= 0 }
     val subtitles = status.subtitleTracks.filter { it.id >= 0 }
+    // Tv: markeringen hamnar på ljudspåret som spelar när panelen öppnas.
+    val entry = remember { FocusRequester() }
+    if (tvLayout) {
+        LaunchedEffect(Unit) {
+            withFrameNanos { }
+            runCatching { entry.requestFocus() }
+        }
+    }
     Row(
         modifier
             .widthIn(max = 640.dp)
@@ -345,6 +363,7 @@ private fun TracksPanel(state: AppState, status: VideoPlayer.Status, modifier: M
             },
             onSelect = { state.selectAudio(it) },
             modifier = Modifier.weight(1f),
+            focus = if (audio.isNotEmpty()) entry else null,
         )
         TrackList(
             title = "Undertext",
@@ -353,6 +372,7 @@ private fun TracksPanel(state: AppState, status: VideoPlayer.Status, modifier: M
             note = if (subtitles.isEmpty()) "Strömmen har inga undertexter." else null,
             onSelect = { state.selectSubtitle(it) },
             modifier = Modifier.weight(1f),
+            focus = if (audio.isEmpty()) entry else null,
         )
     }
 }
@@ -365,8 +385,11 @@ private fun TrackList(
     note: String?,
     onSelect: (VideoPlayer.Track) -> Unit,
     modifier: Modifier,
+    /** Läggs på spåret som är valt (eller det första), så att markeringen kan hamna där. */
+    focus: FocusRequester? = null,
 ) {
     val palette = LocalPalette.current
+    val focusIndex = tracks.indexOfFirst { it.id == selected }.takeIf { it >= 0 } ?: 0
     Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(
             title.uppercase(),
@@ -375,9 +398,10 @@ private fun TrackList(
             modifier = Modifier.padding(start = 10.dp, bottom = 6.dp),
         )
         Column(Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState())) {
-            tracks.forEach { track ->
+            tracks.forEachIndexed { index, track ->
                 val isSelected = track.id == selected
-                Pressable(onClick = { onSelect(track) }, selected = isSelected, modifier = Modifier.fillMaxWidth()) {
+                val target = if (focus != null && index == focusIndex) Modifier.focusRequester(focus) else Modifier
+                Pressable(onClick = { onSelect(track) }, selected = isSelected, modifier = target.fillMaxWidth()) {
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 9.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -537,6 +561,20 @@ fun PlayerHost(state: AppState) {
         targetValue = if (state.miniPlayer) 1f else 0f,
         animationSpec = tween(durationMillis = 460, easing = FastOutSlowInEasing),
     )
+    // Fjärrkontroll och tangentbord: rutan i hörnet går att markera, och OK
+    // tar bilden till helskärm igen. I helskärm står markeringen på bilden,
+    // så att fjärrkontrollen alltid svarar direkt.
+    val focusSource = remember { MutableInteractionSource() }
+    val focused by focusSource.collectIsFocusedAsState()
+    val requester = remember { FocusRequester() }
+    if (tvLayout) {
+        LaunchedEffect(state.nowPlaying, state.miniPlayer, state.trackPanelOpen, state.playerFocusTick) {
+            if (!state.miniPlayer && !state.trackPanelOpen) {
+                withFrameNanos { }
+                runCatching { requester.requestFocus() }
+            }
+        }
+    }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val miniWidth = (maxWidth * 0.27f).coerceIn(300.dp, 480.dp)
         val miniHeight = miniWidth * (9f / 16f)
@@ -552,11 +590,23 @@ fun PlayerHost(state: AppState) {
                     width = lerp(maxWidth, miniWidth, collapse),
                     height = lerp(maxHeight, miniHeight, collapse),
                 )
-                .glow(palette.glowOf(0.55f * collapse), shape, 30.dp)
+                .glow(palette.glowOf((if (focused) 1f else 0.55f) * collapse), shape, 30.dp)
                 .shadow(lerp(0.dp, 24.dp, collapse), shape)
-                .clip(shape),
+                .clip(shape)
+                .then(if (focused && collapse > 0.5f) Modifier.border(3.dp, palette.focus, shape) else Modifier)
+                .focusRequester(requester)
+                .onKeyEvent { event ->
+                    val ok = event.key == Key.Enter || event.key == Key.NumPadEnter || event.key == Key.DirectionCenter
+                    if (ok && state.miniPlayer && event.type == KeyEventType.KeyDown) {
+                        state.expandPlayer()
+                        true
+                    } else {
+                        false
+                    }
+                }
+                .focusable(interactionSource = focusSource),
         ) {
-            PlayerScreen(state, collapse)
+            PlayerScreen(state, collapse, highlighted = focused)
         }
     }
 }

@@ -302,6 +302,15 @@ class AppState {
         private set
     /** Senaste mus- eller tangentaktivitet i spelaren; styr när kontrollerna tonar bort. */
     var lastActivity by mutableStateOf(0L)
+
+    /** Ökar när bilden ska få markeringen igen, till exempel när en lista över den stängs. */
+    var playerFocusTick by mutableStateOf(0)
+        private set
+
+    /** Ger bilden markeringen igen, så att fjärrkontrollen styr spelaren direkt. */
+    fun focusPlayer() {
+        playerFocusTick++
+    }
         private set
 
     // --- Tablå -------------------------------------------------------------------

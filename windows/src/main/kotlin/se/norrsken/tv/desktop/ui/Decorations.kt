@@ -136,7 +136,7 @@ private fun Snowfall(running: Boolean, modifier: Modifier) {
             )
         }
     }
-    val seconds = rememberSeconds(running, fps = 60)
+    val seconds = rememberSeconds(running, fps = 30)
     Canvas(modifier) {
         val t = seconds.floatValue
         // Vindens förskjutning: summan av en vind som byter riktning sakta.
@@ -201,7 +201,7 @@ private fun WinterNight(running: Boolean, modifier: Modifier) {
         val random = Random(7)
         List(28) { Pine(random.nextFloat(), 0.6f + random.nextFloat() * 0.8f, front = it % 3 == 0) }
     }
-    val seconds = rememberSeconds(running, fps = 24)
+    val seconds = rememberSeconds(running, fps = 20)
     Spacer(
         modifier.drawWithCache {
             val w = size.width
@@ -509,7 +509,7 @@ private fun AuroraSky(running: Boolean, modifier: Modifier) {
         val random = Random(77)
         List(110) { Star(random.nextFloat(), random.nextFloat() * 0.7f, 0.4f + random.nextFloat() * 1.0f, 0.2f + random.nextFloat() * 0.6f) }
     }
-    val seconds = rememberSeconds(running, fps = 24)
+    val seconds = rememberSeconds(running, fps = 20)
     Spacer(
         modifier.drawWithCache {
             val w = size.width

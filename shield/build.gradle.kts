@@ -60,7 +60,14 @@ android {
         // Shield kör Android 11. 26 räcker för java.time och java.nio.file i den delade koden.
         minSdk = 26
         targetSdk = 37
-        versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
+        // Alltid högre än förra versionen, så att en ny version installeras ovanpå
+        // den gamla utan att något behöver raderas: minuter sedan 2024 när GitHub
+        // bygger. Samma fasta nyckel (debug.keystore) gör resten.
+        versionCode = if (System.getenv("GITHUB_ACTIONS") == "true") {
+            (System.currentTimeMillis() / 60_000L - 28_401_120L).toInt()
+        } else {
+            1
+        }
         versionName = "1.0." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
     }
 
@@ -77,7 +84,13 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // Den riktiga versionen: optimerad, och märkbart snabbare än en
+            // felsökningsversion. Samma nyckel som förut, så den installeras
+            // ovanpå den gamla. Namnen behålls, så att felrapporten går att läsa.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

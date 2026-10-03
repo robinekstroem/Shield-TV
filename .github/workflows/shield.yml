@@ -54,7 +54,7 @@ jobs:
         run: |
           set -o pipefail
           status=0
-          gradle assembleDebug --stacktrace 2>&1 | tee build.log || status=$?
+          gradle assembleRelease --stacktrace 2>&1 | tee build.log || status=$?
           echo "status=$status" >> "$GITHUB_OUTPUT"
 
       # Felet ska gå att läsa utan att gräva i tusen rader logg.
@@ -81,7 +81,7 @@ jobs:
       - name: Döp om till Tv-Shield.apk
         run: |
           mkdir -p dist
-          cp shield/build/outputs/apk/debug/*.apk dist/Tv-Shield.apk
+          cp shield/build/outputs/apk/release/*.apk dist/Tv-Shield.apk
           ls -la dist
 
       - uses: actions/upload-artifact@v6

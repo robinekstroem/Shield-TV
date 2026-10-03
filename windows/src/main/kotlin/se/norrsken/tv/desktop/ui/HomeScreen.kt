@@ -1,5 +1,7 @@
 package se.norrsken.tv.desktop.ui
 
+import androidx.compose.runtime.mutableLongStateOf
+import kotlinx.coroutines.CancellationException
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.CompositingStrategy
@@ -142,15 +144,38 @@ fun HomeScreen(state: AppState) {
     }
     val tmdb = state.tmdbFacts
     val facts = state.movieFacts
+    var catalogError by remember { mutableStateOf<String?>(null) }
+    var lastBuild by remember { mutableLongStateOf(0L) }
     val catalog by produceState<HomeCatalog?>(null, library, tmdb, facts) {
-        // TMDB fylls på i omgångar. Vänta tills det lugnat sig innan allt räknas om.
-        if (value != null) delay(1_500)
-        value = withContext(Dispatchers.Default) { buildCatalog(library, tmdb, facts) }
+        // TMDB fylls på i omgångar. Medan hämtningen pågår räknas raderna om
+        // högst var trettionde sekund, annars en kort stund efter sista ändringen:
+        // omräkningen ska aldrig ta kraft från menyerna.
+        if (value != null) {
+            val busy = state.tmdbProgress != null || state.factsProgress != null
+            val wait = if (busy) (30_000L - (System.currentTimeMillis() - lastBuild)).coerceAtLeast(1_500L) else 1_500L
+            delay(wait)
+        }
+        // Ett fel här ska synas på startsidan, inte stänga appen.
+        try {
+            value = withContext(Dispatchers.Default) { buildCatalog(library, tmdb, facts) }
+            lastBuild = System.currentTimeMillis()
+            catalogError = null
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            val cause = generateSequence(error) { it.cause }.last()
+            catalogError = "${cause.javaClass.simpleName}: ${cause.message.orEmpty()}"
+        }
     }
     val current = catalog
     if (current == null) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Startsidan ordnas…", style = MaterialTheme.typography.bodyLarge, color = LocalPalette.current.textTertiary)
+        Box(Modifier.fillMaxSize().padding(48.dp), contentAlignment = Alignment.Center) {
+            val error = catalogError
+            Text(
+                if (error == null) "Startsidan ordnas…" else "Startsidan gick inte att ordna. Ta ett foto och skicka det i chatten.\n\n$error",
+                style = MaterialTheme.typography.bodyLarge,
+                color = LocalPalette.current.textTertiary,
+            )
         }
         return
     }
@@ -229,7 +254,8 @@ private fun HeroBackdrop(url: String?, height: Dp) {
                 RemoteImage(
                     url = current,
                     modifier = Modifier.fillMaxSize(),
-                    maxSide = 1920,
+                    // TMDB:s bakgrunder är 1 280 bildpunkter breda: större gör bara minnet fullt.
+                    maxSide = 1280,
                     contentScale = ContentScale.Crop,
                     alignment = Alignment.TopCenter,
                 )

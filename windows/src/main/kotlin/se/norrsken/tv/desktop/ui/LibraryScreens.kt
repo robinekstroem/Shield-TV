@@ -837,7 +837,7 @@ private fun SpotlightBackdrop(url: String?) {
                 RemoteImage(
                     url = current,
                     modifier = Modifier.fillMaxSize(),
-                    maxSide = 1600,
+                    maxSide = 1280,
                     contentScale = ContentScale.Crop,
                     alignment = Alignment.TopCenter,
                 )

@@ -58,6 +58,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         CrashReport.install(applicationContext)
+        // "Om appen" visar versionen, så att man ser att uppdateringen gick in.
+        runCatching {
+            @Suppress("DEPRECATION")
+            val info = packageManager.getPackageInfo(packageName, 0)
+            System.setProperty("tv.version", info.versionName.orEmpty())
+        }
         AppDirs.init(applicationContext)
         WindowsIntegration.attach(this)
         // Sitter felet i själva starten ska rapporten ändå gå att se: appen
@@ -92,7 +98,10 @@ class MainActivity : ComponentActivity() {
                             AppRoot(state)
                             val playing = state.nowPlaying
                             if (channelsOpen && playing != null && playing.live && !state.miniPlayer) {
-                                ChannelOverlay(state, onClose = { channelsOpen = false })
+                                ChannelOverlay(state, onClose = {
+                                    channelsOpen = false
+                                    state.focusPlayer()
+                                })
                             }
                         }
                     }
@@ -111,7 +120,10 @@ class MainActivity : ComponentActivity() {
                     }
                     val playing = state.nowPlaying
                     when {
-                        channelsOpen -> channelsOpen = false
+                        channelsOpen -> {
+                            channelsOpen = false
+                            state.focusPlayer()
+                        }
                         state.trackPanelOpen -> state.trackPanelOpen = false
                         // Som Esc i Windows: bilden krymper till hörnet och fortsätter där.
                         playing != null && !state.miniPlayer -> state.minimizePlayer()
