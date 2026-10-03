@@ -43,7 +43,7 @@ import androidx.compose.ui.unit.dp
 import java.awt.Cursor
 import java.awt.Desktop
 import java.awt.FileDialog
-import java.awt.Frame
+import java.awt.Frame as AwtFrame
 import java.awt.Point
 import java.awt.Toolkit
 import java.awt.image.BufferedImage
@@ -153,7 +153,7 @@ internal fun openInBrowser(url: String) {
 
 /** Windows egen fildialog, flera bilder åt gången. Tom lista om man avbryter. */
 internal fun pickImages(): List<File> {
-    val dialog = FileDialog(null as Frame?, "Välj bakgrundsbilder", FileDialog.LOAD)
+    val dialog = FileDialog(null as AwtFrame?, "Välj bakgrundsbilder", FileDialog.LOAD)
     dialog.isMultipleMode = true
     // Filtret i Windows fildialog sätts via filnamnet.
     dialog.file = "*.jpg;*.jpeg;*.png;*.webp;*.bmp"
