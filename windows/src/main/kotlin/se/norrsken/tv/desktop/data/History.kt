@@ -30,6 +30,8 @@ data class WatchEntry(
     val season: Int? = null,
     val episode: Int? = null,
     val extension: String? = null,
+    /** Nästa avsnitt, föreslaget när det förra var slut. */
+    val upNext: Boolean = false,
 ) {
     /** Samma sak, oavsett när den sågs. */
     val identity: String get() = "${kind.name}:$sourceId:$itemId"
@@ -74,6 +76,7 @@ class HistoryStore {
         .put("season", season)
         .put("episode", episode)
         .put("extension", extension)
+        .put("upNext", upNext)
 
     private fun entryFrom(o: JSONObject): WatchEntry? {
         val kind = runCatching { WatchKind.valueOf(o.optString("kind", "")) }.getOrNull() ?: return null
@@ -93,6 +96,7 @@ class HistoryStore {
             season = if (o.has("season")) o.optInt("season") else null,
             episode = if (o.has("episode")) o.optInt("episode") else null,
             extension = o.optString("extension", "").ifEmpty { null },
+            upNext = o.optBoolean("upNext", false),
         )
     }
 }

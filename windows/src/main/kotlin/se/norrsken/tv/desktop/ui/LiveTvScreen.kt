@@ -1,5 +1,6 @@
 package se.norrsken.tv.desktop.ui
 
+import se.norrsken.tv.desktop.data.ListKind
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -81,14 +82,21 @@ fun LiveTvScreen(state: AppState) {
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
                         items(channels, key = { it.key }) { channel ->
-                            ChannelRow(
-                                channel = channel,
-                                showGroup = group == null,
-                                now = guide.current(channel, clock),
-                                next = guide.next(channel, clock),
-                                clock = clock,
-                                onClick = { state.playChannel(channel, channels) },
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                ChannelRow(
+                                    channel = channel,
+                                    showGroup = group == null,
+                                    now = guide.current(channel, clock),
+                                    next = guide.next(channel, clock),
+                                    clock = clock,
+                                    onClick = { state.playChannel(channel, channels) },
+                                    modifier = Modifier.weight(1f),
+                                )
+                                FavoriteStar(
+                                    saved = state.inMyList(channel.key),
+                                    onClick = { state.toggleMyList(ListKind.CHANNEL, channel.key) },
+                                )
+                            }
                         }
                     }
                     Scrollbar(listState, modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(end = 6.dp, bottom = 12.dp))
@@ -106,9 +114,10 @@ private fun ChannelRow(
     next: Programme?,
     clock: Long,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val palette = LocalPalette.current
-    Pressable(onClick = onClick, modifier = Modifier.fillMaxWidth()) { hovered ->
+    Pressable(onClick = onClick, modifier = modifier.fillMaxWidth()) { hovered ->
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,

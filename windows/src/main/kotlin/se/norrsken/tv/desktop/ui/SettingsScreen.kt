@@ -82,6 +82,13 @@ fun SettingsScreen(state: AppState) {
                     state.sources.forEach { source -> SourceCard(state, source) }
                 }
 
+                // Shield: källor och bilder skickas från telefonen. Windows visar inget här.
+                if (remoteInputAvailable) {
+                    Section("Lägg till från telefonen") {
+                        Card { RemoteInputPanel(state) }
+                    }
+                }
+
                 Section("Lägg till spellista") {
                     AddSourceForm(state)
                 }
@@ -95,6 +102,8 @@ fun SettingsScreen(state: AppState) {
                             }
                         }
                     }
+                    // Shield: menyernas upplösning. Windows visar inget här.
+                    DisplayOptions()
                 }
 
                 Section("Egna bakgrundsbilder") {
@@ -540,7 +549,7 @@ private fun BackgroundsCard(state: AppState) {
                     )
                 }
             }
-            if (state.backgrounds.size < 3) {
+            if (state.backgrounds.size < 3 && canPickFiles) {
                 val shape = RoundedCornerShape(10.dp)
                 Pressable(
                     onClick = { state.addBackgrounds(pickImages()) },

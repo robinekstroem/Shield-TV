@@ -63,7 +63,7 @@ fun HistoryScreen(state: AppState) {
             confirmClear = false
         }
     }
-    val entries = state.history
+    val entries = state.history.filterNot { it.upNext }
     val days = remember(entries, kindFilter) {
         entries.filter { kindFilter == null || it.kind == kindFilter }.groupBy { dayLabel(it.watchedAtUtc) }
     }

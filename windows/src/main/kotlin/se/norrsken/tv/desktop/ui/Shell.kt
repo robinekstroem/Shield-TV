@@ -49,6 +49,7 @@ fun AppRoot(state: AppState) {
                     Spinner(Modifier.align(Alignment.Center))
                 } else {
                     when (state.screen) {
+                        Screen.HOME -> HomeScreen(state)
                         Screen.LIVE -> LiveTvScreen(state)
                         Screen.GUIDE -> GuideScreen(state)
                         Screen.MOVIES -> MoviesScreen(state)
@@ -95,10 +96,13 @@ private fun Sidebar(state: AppState) {
             Spacer(Modifier.width(12.dp))
             Column {
                 Text("Tv", style = MaterialTheme.typography.titleLarge)
-                Text("för Windows", style = MaterialTheme.typography.labelSmall, color = palette.textTertiary)
+                Text("för $platformName", style = MaterialTheme.typography.labelSmall, color = palette.textTertiary)
             }
         }
 
+        NavItem(Glyphs.Home, "Hem", "Fortsätt titta & tips", null, state.screen == Screen.HOME) {
+            state.screen = Screen.HOME
+        }
         NavItem(Glyphs.Live, "Live TV", "Direktsändning", library.channels.size, state.screen == Screen.LIVE) {
             state.screen = Screen.LIVE
         }

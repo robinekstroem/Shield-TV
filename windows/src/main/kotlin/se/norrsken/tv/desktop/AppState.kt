@@ -1,5 +1,8 @@
 package se.norrsken.tv.desktop
 
+import se.norrsken.tv.desktop.data.MyListStore
+import se.norrsken.tv.desktop.data.ListKind
+import se.norrsken.tv.desktop.data.ListEntry
 import se.norrsken.tv.desktop.ui.Images
 import se.norrsken.tv.desktop.data.AppDirs
 import java.io.File
@@ -80,7 +83,7 @@ import java.text.Collator
 import java.util.UUID
 import javax.net.ssl.SSLException
 
-enum class Screen { LIVE, GUIDE, MOVIES, SERIES, GENRES, HISTORY, SETTINGS }
+enum class Screen { HOME, LIVE, GUIDE, MOVIES, SERIES, GENRES, HISTORY, SETTINGS }
 
 enum class SortOrder(val label: String) {
     PROVIDER("Standard"),
@@ -150,7 +153,7 @@ class AppState {
 
     // --- Navigering och bibliotek -------------------------------------------
 
-    var screen by mutableStateOf(Screen.LIVE)
+    var screen by mutableStateOf(Screen.HOME)
     var loading by mutableStateOf(true)
         private set
     var sources by mutableStateOf<List<Source>>(emptyList())
@@ -178,6 +181,14 @@ class AppState {
     var historyMessage by mutableStateOf<String?>(null)
         private set
     private val historyStore = HistoryStore()
+
+    /** Min lista: filmer, serier och favoritkanaler. */
+    var myList by mutableStateOf<List<ListEntry>>(emptyList())
+        private set
+    private val myListStore = MyListStore()
+
+    /** Avsnitt vars nästa avsnitt redan är föreslaget, så att det görs en gång. */
+    private val nextQueued = HashSet<String>()
     private var historyJob: Job? = null
 
     // --- Genre och år per film, hämtade i bakgrunden --------------------------
@@ -348,6 +359,7 @@ class AppState {
         loading = false
         loadGuides()
         history = withContext(Dispatchers.IO) { historyStore.load() }
+        myList = withContext(Dispatchers.IO) { myListStore.load() }
         movieFacts = withContext(Dispatchers.IO) { factsStore.load() }
         tmdbFacts = withContext(Dispatchers.IO) { tmdbStore.load() }
         factsLoaded = true
@@ -1131,7 +1143,7 @@ class AppState {
                     title = entry.title,
                     subtitle = entry.subtitle,
                     live = false,
-                    entry = entry.copy(watchedAtUtc = System.currentTimeMillis()),
+                    entry = entry.copy(watchedAtUtc = System.currentTimeMillis(), upNext = false),
                     startMs = start,
                 )
                 launchPlayback(item) {
@@ -1180,10 +1192,85 @@ class AppState {
             if (it.identity == entry.identity) it.copy(positionMs = status.timeMs, durationMs = maxOf(status.lengthMs, it.durationMs)) else it
         }
         persistHistory()
+        // Nästan slut på ett avsnitt: nästa avsnitt föreslås i Fortsätt titta.
+        if (entry.kind == WatchKind.EPISODE && status.lengthMs > 0 && status.timeMs >= status.lengthMs * 0.95) queueNextEpisode(entry)
     }
 
     private fun persistHistory() {
         historyStore.save(history)
+    }
+
+    /** Sparar positionen direkt, till exempel när appen läggs undan. */
+    fun saveProgressNow() = savePosition()
+
+    /** Pausar när appen läggs undan, så att ljudet inte fortsätter i bakgrunden. */
+    fun pausePlayback() {
+        val player = videoPlayer ?: return
+        if (player.status.value.phase == VideoPlayer.Phase.PLAYING) player.togglePause()
+    }
+
+    // --- Min lista -------------------------------------------------------------------
+
+    fun inMyList(key: String): Boolean = myList.any { it.key == key }
+
+    fun toggleMyList(kind: ListKind, key: String) {
+        myList = if (inMyList(key)) {
+            myList.filterNot { it.key == key }
+        } else {
+            listOf(ListEntry(kind, key, System.currentTimeMillis())) + myList
+        }
+        val snapshot = myList
+        scope.launch(Dispatchers.IO) { myListStore.save(snapshot) }
+    }
+
+    // --- Nästa avsnitt -----------------------------------------------------------------
+
+    /**
+     * Ett avsnitt är nästan slut: nästa avsnitt hämtas ur seriens lista och
+     * läggs först i Fortsätt titta, redo att startas direkt.
+     */
+    private fun queueNextEpisode(entry: WatchEntry) {
+        if (entry.kind != WatchKind.EPISODE || !nextQueued.add(entry.identity)) return
+        val seriesId = entry.seriesId ?: return
+        val season = entry.season ?: return
+        val number = entry.episode ?: return
+        val series = library.series.firstOrNull { it.sourceId == entry.sourceId && it.seriesId == seriesId } ?: return
+        scope.launch {
+            val account = credentials(entry.sourceId) ?: return@launch
+            val list = withContext(Dispatchers.IO) {
+                runCatching { xtream.episodes(account.second, seriesId) }.getOrNull()
+            } ?: return@launch
+            val ordered = list.sortedWith(compareBy({ it.season }, { it.episode }))
+            val index = ordered.indexOfFirst { it.season == season && it.episode == number }
+            val next = (if (index >= 0) ordered.getOrNull(index + 1) else null)
+                ?: ordered.firstOrNull { it.season > season || (it.season == season && it.episode > number) }
+                ?: return@launch
+            // Redan påbörjat: det står redan i Fortsätt titta med sin position.
+            val earlier = history.firstOrNull { it.kind == WatchKind.EPISODE && it.sourceId == entry.sourceId && it.itemId == next.id }
+            if (earlier?.resumable == true) return@launch
+            val subtitle = buildString {
+                append("Säsong ").append(next.season).append(" · Avsnitt ").append(next.episode)
+                if (next.title.isNotBlank()) append(" · ").append(next.title)
+            }
+            recordWatch(
+                WatchEntry(
+                    kind = WatchKind.EPISODE,
+                    sourceId = entry.sourceId,
+                    itemId = next.id,
+                    title = series.name,
+                    subtitle = subtitle,
+                    image = next.thumbnail ?: series.cover,
+                    watchedAtUtc = System.currentTimeMillis(),
+                    positionMs = 0L,
+                    durationMs = (next.durationSeconds ?: 0) * 1_000L,
+                    seriesId = seriesId,
+                    season = next.season,
+                    episode = next.episode,
+                    extension = next.containerExtension,
+                    upNext = true,
+                ),
+            )
+        }
     }
 
     // --- Genre och år per film ---------------------------------------------------

@@ -1,5 +1,6 @@
 package se.norrsken.tv.desktop.player
 
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import android.os.Handler
 import android.os.Looper
 import android.view.SurfaceView
@@ -126,7 +127,11 @@ class VideoPlayer(@Suppress("UNUSED_PARAMETER") engine: PlayerEngine) {
         if (Looper.myLooper() == Looper.getMainLooper()) block() else main.post(block)
     }
 
-    private fun player(): ExoPlayer = exo ?: ExoPlayer.Builder(AppDirs.context)
+    private fun player(): ExoPlayer = exo ?: ExoPlayer.Builder(
+        AppDirs.context,
+        // Klarar inte Shields första avkodare en ström provas nästa, i stället för en svart bild.
+        DefaultRenderersFactory(AppDirs.context).setEnableDecoderFallback(true),
+    )
         .setLooper(Looper.getMainLooper())
         .build()
         .also { created ->
@@ -169,6 +174,11 @@ class VideoPlayer(@Suppress("UNUSED_PARAMETER") engine: PlayerEngine) {
             p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
                 .clearOverrides()
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                // Som "adaptive-logic=highest" i Windows-spelaren: bästa kvaliteten
+                // direkt, i stället för en försiktig start som klättrar uppåt.
+                .setForceHighestSupportedBitrate(true)
+                // Ingen gräns vid menyernas 1080p: en 4K-ström spelas i 4K.
+                .clearViewportSizeConstraints()
                 .build()
             p.setMediaSource(source, startMs.coerceAtLeast(0L))
             p.prepare()

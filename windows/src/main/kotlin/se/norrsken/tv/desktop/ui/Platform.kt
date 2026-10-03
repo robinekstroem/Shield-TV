@@ -281,3 +281,20 @@ private class FrameHolder : AutoCloseable {
 
     override fun close() = release()
 }
+
+/** Windows har tangentbord och fildialog; inmatningen från telefonen finns bara på Shield. */
+internal const val remoteInputAvailable = false
+internal const val canPickFiles = true
+
+@Composable
+internal fun RemoteInputPanel(state: AppState) = Unit
+
+/** Menyernas upplösning väljs bara på Shield; i Windows bestämmer fönstret. */
+@Composable
+internal fun DisplayOptions() = Unit
+
+/** Windows styrs med mus: omslagen förstoras lite vid hovring, ingen titel överst. */
+internal const val tvLayout = false
+
+/** Under appens namn i sidomenyn. */
+internal const val platformName = "Windows"

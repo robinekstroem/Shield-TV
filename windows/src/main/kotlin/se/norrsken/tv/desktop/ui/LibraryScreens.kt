@@ -1,5 +1,17 @@
 package se.norrsken.tv.desktop.ui
 
+import se.norrsken.tv.desktop.data.WatchKind
+import se.norrsken.tv.desktop.data.ListKind
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.zIndex
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -84,6 +96,10 @@ fun MoviesScreen(state: AppState) {
     val group = state.movieGroup
     val query = state.movieQuery
     LaunchedEffect(group, query, state.movieSort) { gridState.scrollToItem(0) }
+    // Tv: omslaget som är markerat, och det man senast öppnade, så att
+    // markeringen hamnar där igen när man backar ur filmen.
+    var focusedKey by remember { mutableStateOf<String?>(null) }
+    var openedKey by remember { mutableStateOf<String?>(null) }
 
     val selected = state.selectedMovie
     if (selected != null) {
@@ -96,6 +112,26 @@ fun MoviesScreen(state: AppState) {
         return
     }
     val movies = remember(library, group, query, state.movieSort, state.tmdbFacts) { state.filteredMovies() }
+    // Tv: filmen överst följer markeringen, med en kort fördröjning så att
+    // snabbt bläddrande inte hämtar en bakgrundsbild per omslag man passerar.
+    var spotlightKey by remember(movies) { mutableStateOf(movies.firstOrNull()?.key) }
+    if (tvLayout) {
+        LaunchedEffect(focusedKey) {
+            val key = focusedKey ?: return@LaunchedEffect
+            delay(180)
+            spotlightKey = key
+        }
+    }
+    val spotlight = remember(movies, spotlightKey) { movies.firstOrNull { it.key == spotlightKey } }
+    val restore = remember { FocusRequester() }
+    if (tvLayout) {
+        LaunchedEffect(Unit) {
+            if (openedKey != null) {
+                withFrameNanos { }
+                runCatching { restore.requestFocus() }
+            }
+        }
+    }
 
     Row(Modifier.fillMaxSize()) {
         GroupColumn(
@@ -106,36 +142,68 @@ fun MoviesScreen(state: AppState) {
             selected = group,
             onSelect = { state.movieGroup = it },
         )
-        Column(Modifier.weight(1f).fillMaxHeight()) {
-            ScreenHeader(
-                title = group ?: "Alla filmer",
-                subtitle = "${movies.size.grouped()} filmer",
-                query = query,
-                onQuery = { state.movieQuery = it },
-                placeholder = "Sök film",
-            )
-            SortRow(state.movieSort, series = false, onSelect = { state.sortMovies(it) })
-            if (movies.isEmpty()) {
-                EmptyState(title = "Inga träffar", body = "Ingen film matchar sökningen.")
-            } else {
-                Box(Modifier.weight(1f).fillMaxWidth()) {
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(152.dp),
-                        state = gridState,
-                        contentPadding = PaddingValues(start = 20.dp, end = 28.dp, bottom = 28.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        gridItems(movies, key = { it.key }) { movie ->
-                            PosterCard(
-                                title = movie.name,
-                                imageUrl = movie.poster ?: state.tmdbFor(movie)?.poster,
-                                meta = formatRating(state.tmdbFor(movie)?.rating ?: movie.rating),
-                                onClick = { state.showMovie(movie) },
-                            )
+        Box(Modifier.weight(1f).fillMaxHeight()) {
+            if (tvLayout && spotlight != null) {
+                val tmdb = state.tmdbFor(spotlight)
+                SpotlightBackdrop(tmdb?.backdrop ?: spotlight.poster ?: tmdb?.poster)
+            }
+            Column(Modifier.fillMaxSize()) {
+                ScreenHeader(
+                    title = group ?: "Alla filmer",
+                    subtitle = "${movies.size.grouped()} filmer",
+                    query = query,
+                    onQuery = { state.movieQuery = it },
+                    placeholder = "Sök film",
+                )
+                SortRow(state.movieSort, series = false, onSelect = { state.sortMovies(it) })
+                if (tvLayout && spotlight != null) {
+                    val tmdb = state.tmdbFor(spotlight)
+                    val facts = state.movieFacts[spotlight.key]
+                    SpotlightInfo(
+                        title = spotlight.name,
+                        meta = listOfNotNull(
+                            (tmdb?.year ?: facts?.year)?.toString(),
+                            formatRating(tmdb?.rating ?: spotlight.rating),
+                            tmdb?.genres?.ifBlank { null } ?: facts?.genre?.ifBlank { null },
+                        ).joinToString("  ·  ").ifEmpty { null },
+                        overview = tmdb?.overview?.ifBlank { null },
+                    )
+                }
+                if (movies.isEmpty()) {
+                    EmptyState(title = "Inga träffar", body = "Ingen film matchar sökningen.")
+                } else {
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(if (tvLayout) 164.dp else 152.dp),
+                            state = gridState,
+                            // Tv: luft runt omslagen, så att det markerade har plats att växa.
+                            contentPadding = if (tvLayout) {
+                                PaddingValues(start = 24.dp, end = 32.dp, top = 14.dp, bottom = 40.dp)
+                            } else {
+                                PaddingValues(start = 20.dp, end = 28.dp, bottom = 28.dp)
+                            },
+                            horizontalArrangement = Arrangement.spacedBy(if (tvLayout) 14.dp else 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(if (tvLayout) 18.dp else 12.dp),
+                        ) {
+                            gridItems(movies, key = { it.key }) { movie ->
+                                PosterCard(
+                                    title = movie.name,
+                                    imageUrl = movie.poster ?: state.tmdbFor(movie)?.poster,
+                                    meta = formatRating(state.tmdbFor(movie)?.rating ?: movie.rating),
+                                    onClick = {
+                                        openedKey = movie.key
+                                        state.showMovie(movie)
+                                    },
+                                    modifier = if (movie.key == openedKey) Modifier.focusRequester(restore) else Modifier,
+                                    dimmed = tvLayout && focusedKey != null && focusedKey != movie.key,
+                                    onFocusChange = { has ->
+                                        if (has) focusedKey = movie.key else if (focusedKey == movie.key) focusedKey = null
+                                    },
+                                )
+                            }
                         }
+                        Scrollbar(gridState, modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(end = 6.dp, bottom = 12.dp))
                     }
-                    Scrollbar(gridState, modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(end = 6.dp, bottom = 12.dp))
                 }
             }
         }
@@ -206,10 +274,14 @@ internal fun MovieDetail(state: AppState, movie: Movie) {
                         Modifier.padding(vertical = 6.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        PrimaryButton("Spela", onClick = { state.playMovie(movie) }, icon = Glyphs.Play)
+                        val resumable = state.history.any {
+                            it.kind == WatchKind.MOVIE && it.sourceId == movie.sourceId && it.itemId == movie.streamId.toString() && it.resumable
+                        }
+                        PrimaryButton(if (resumable) "Fortsätt" else "Spela", onClick = { state.playMovie(movie) }, icon = Glyphs.Play)
                         trailerUrl(info?.trailer)?.let { url ->
                             SecondaryButton("Trailer", onClick = { openInBrowser(url) }, icon = Glyphs.Movies)
                         }
+                        MyListButton(state, ListKind.MOVIE, movie.key)
                     }
                     when (infoState) {
                         MovieInfoState.Loading -> Row(
@@ -294,6 +366,9 @@ fun SeriesScreen(state: AppState) {
     val gridState = rememberLazyGridState()
     // Här, före förgreningen: att backa ur en serie ska inte hoppa till början.
     LaunchedEffect(state.seriesGroup, state.seriesQuery, state.seriesSort) { gridState.scrollToItem(0) }
+    // Tv: omslaget som är markerat, och det man senast öppnade.
+    var focusedKey by remember { mutableStateOf<String?>(null) }
+    var openedKey by remember { mutableStateOf<String?>(null) }
     val selected = state.selectedSeries
     if (selected != null) {
         SeriesDetail(state, selected)
@@ -307,6 +382,24 @@ fun SeriesScreen(state: AppState) {
     val group = state.seriesGroup
     val query = state.seriesQuery
     val series = remember(library, group, query, state.seriesSort, state.tmdbFacts) { state.filteredSeries() }
+    var spotlightKey by remember(series) { mutableStateOf(series.firstOrNull()?.key) }
+    if (tvLayout) {
+        LaunchedEffect(focusedKey) {
+            val key = focusedKey ?: return@LaunchedEffect
+            delay(180)
+            spotlightKey = key
+        }
+    }
+    val spotlight = remember(series, spotlightKey) { series.firstOrNull { it.key == spotlightKey } }
+    val restore = remember { FocusRequester() }
+    if (tvLayout) {
+        LaunchedEffect(Unit) {
+            if (openedKey != null) {
+                withFrameNanos { }
+                runCatching { restore.requestFocus() }
+            }
+        }
+    }
 
     Row(Modifier.fillMaxSize()) {
         GroupColumn(
@@ -317,36 +410,66 @@ fun SeriesScreen(state: AppState) {
             selected = group,
             onSelect = { state.seriesGroup = it },
         )
-        Column(Modifier.weight(1f).fillMaxHeight()) {
-            ScreenHeader(
-                title = group ?: "Alla serier",
-                subtitle = "${series.size.grouped()} serier",
-                query = query,
-                onQuery = { state.seriesQuery = it },
-                placeholder = "Sök serie",
-            )
-            SortRow(state.seriesSort, series = true, onSelect = { state.sortSeries(it) })
-            if (series.isEmpty()) {
-                EmptyState(title = "Inga träffar", body = "Ingen serie matchar sökningen.")
-            } else {
-                Box(Modifier.weight(1f).fillMaxWidth()) {
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(152.dp),
-                        state = gridState,
-                        contentPadding = PaddingValues(start = 20.dp, end = 28.dp, bottom = 28.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        gridItems(series, key = { it.key }) { item ->
-                            PosterCard(
-                                title = item.name,
-                                imageUrl = item.cover ?: state.tmdbFor(item)?.poster,
-                                meta = listOfNotNull(item.year, formatRating(state.tmdbFor(item)?.rating ?: item.rating)).joinToString("  ").ifEmpty { null },
-                                onClick = { state.showSeries(item) },
-                            )
+        Box(Modifier.weight(1f).fillMaxHeight()) {
+            if (tvLayout && spotlight != null) {
+                val tmdb = state.tmdbFor(spotlight)
+                SpotlightBackdrop(spotlight.backdrop ?: tmdb?.backdrop ?: spotlight.cover ?: tmdb?.poster)
+            }
+            Column(Modifier.fillMaxSize()) {
+                ScreenHeader(
+                    title = group ?: "Alla serier",
+                    subtitle = "${series.size.grouped()} serier",
+                    query = query,
+                    onQuery = { state.seriesQuery = it },
+                    placeholder = "Sök serie",
+                )
+                SortRow(state.seriesSort, series = true, onSelect = { state.sortSeries(it) })
+                if (tvLayout && spotlight != null) {
+                    val tmdb = state.tmdbFor(spotlight)
+                    SpotlightInfo(
+                        title = spotlight.name,
+                        meta = listOfNotNull(
+                            spotlight.year,
+                            formatRating(tmdb?.rating ?: spotlight.rating),
+                            tmdb?.genres?.ifBlank { null } ?: spotlight.genre?.ifBlank { null },
+                        ).joinToString("  ·  ").ifEmpty { null },
+                        overview = tmdb?.overview?.ifBlank { null } ?: spotlight.plot?.ifBlank { null },
+                    )
+                }
+                if (series.isEmpty()) {
+                    EmptyState(title = "Inga träffar", body = "Ingen serie matchar sökningen.")
+                } else {
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(if (tvLayout) 164.dp else 152.dp),
+                            state = gridState,
+                            contentPadding = if (tvLayout) {
+                                PaddingValues(start = 24.dp, end = 32.dp, top = 14.dp, bottom = 40.dp)
+                            } else {
+                                PaddingValues(start = 20.dp, end = 28.dp, bottom = 28.dp)
+                            },
+                            horizontalArrangement = Arrangement.spacedBy(if (tvLayout) 14.dp else 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(if (tvLayout) 18.dp else 12.dp),
+                        ) {
+                            gridItems(series, key = { it.key }) { item ->
+                                PosterCard(
+                                    title = item.name,
+                                    imageUrl = item.cover ?: state.tmdbFor(item)?.poster,
+                                    meta = listOfNotNull(item.year, formatRating(state.tmdbFor(item)?.rating ?: item.rating)).joinToString("  ").ifEmpty { null },
+                                    onClick = {
+                                        openedKey = item.key
+                                        state.showSeries(item)
+                                    },
+                                    modifier = if (item.key == openedKey) Modifier.focusRequester(restore) else Modifier,
+                                    dimmed = tvLayout && focusedKey != null && focusedKey != item.key,
+                                    onFocusChange = { has ->
+                                        if (has) focusedKey = item.key else if (focusedKey == item.key) focusedKey = null
+                                    },
+                                )
+                            }
                         }
+                        Scrollbar(gridState, modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(end = 6.dp, bottom = 12.dp))
                     }
-                    Scrollbar(gridState, modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(end = 6.dp, bottom = 12.dp))
                 }
             }
         }
@@ -405,8 +528,18 @@ internal fun SeriesDetail(state: AppState, series: Series) {
                             modifier = Modifier.widthIn(max = 780.dp),
                         )
                     }
-                    trailerUrl(series.trailer)?.let { url ->
-                        SecondaryButton("Trailer", onClick = { openInBrowser(url) }, icon = Glyphs.Movies)
+                    Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        latestEpisode(state.history, series)?.let { resume ->
+                            PrimaryButton(
+                                if (resume.upNext) "Spela S${resume.season} E${resume.episode}" else "Fortsätt S${resume.season} E${resume.episode}",
+                                onClick = { state.playFromHistory(resume) },
+                                icon = Glyphs.Play,
+                            )
+                        }
+                        trailerUrl(series.trailer)?.let { url ->
+                            SecondaryButton("Trailer", onClick = { openInBrowser(url) }, icon = Glyphs.Movies)
+                        }
+                        MyListButton(state, ListKind.SERIES, series.key)
                     }
                 }
             }
@@ -535,19 +668,57 @@ private fun EpisodeRow(episode: XtreamEpisode, series: Series, onClick: () -> Un
 // --- Gemensamt ---------------------------------------------------------------------
 
 @Composable
-internal fun PosterCard(title: String, imageUrl: String?, meta: String?, onClick: () -> Unit, rank: Int? = null) {
+internal fun PosterCard(
+    title: String,
+    imageUrl: String?,
+    meta: String?,
+    onClick: () -> Unit,
+    rank: Int? = null,
+    modifier: Modifier = Modifier,
+    /** Tv: tonas ner medan ett annat omslag är markerat. */
+    dimmed: Boolean = false,
+    /** När markeringen kommer till omslaget eller lämnar det. */
+    onFocusChange: (Boolean) -> Unit = {},
+    /** När musen eller markeringen kommer till omslaget. */
+    onActive: () -> Unit = {},
+) {
     val palette = LocalPalette.current
-    Pressable(onClick = onClick, shape = RoundedCornerShape(12.dp), hoverScale = 1.03f, glowing = false) { hovered ->
+    var focused by remember { mutableStateOf(false) }
+    val fade by animateFloatAsState(if (dimmed) 0.45f else 1f, tween(220), label = "omslag")
+    // På tv:n är markeringen det enda man ser av fjärrkontrollen: omslaget växer
+    // tydligt, får en hel ram och glöder. Med mus räcker en antydan.
+    val scale = if (tvLayout) 1.10f else 1.03f
+    val ring = if (tvLayout) 3.dp else 1.dp
+    val ringAlpha = if (tvLayout) 1f else 0.55f
+    val glowAlpha = if (tvLayout) 1f else 0.75f
+    val glowRadius = if (tvLayout) 36.dp else 26.dp
+    Pressable(
+        onClick = onClick,
+        // Ovanpå grannarna medan det är markerat, så att det inte hamnar under dem när det växer.
+        modifier = modifier
+            .zIndex(if (focused) 1f else 0f)
+            .graphicsLayer { alpha = fade }
+            .onFocusChanged { change ->
+                if (change.hasFocus != focused) {
+                    focused = change.hasFocus
+                    onFocusChange(change.hasFocus)
+                }
+            },
+        shape = RoundedCornerShape(12.dp),
+        hoverScale = scale,
+        glowing = false,
+    ) { hovered ->
+        LaunchedEffect(hovered) { if (hovered) onActive() }
         Column(Modifier.fillMaxWidth().padding(6.dp)) {
             Box(
                 Modifier
                     .fillMaxWidth()
                     .aspectRatio(2f / 3f)
-                    // Glöden och en tunn kant visar vilken titel musen står på.
-                    .glow(if (hovered) palette.glowOf(0.75f) else Color.Transparent, RoundedCornerShape(10.dp), 26.dp)
+                    // Glöden och kanten visar vilken titel man står på.
+                    .glow(if (hovered) palette.glowOf(glowAlpha) else Color.Transparent, RoundedCornerShape(10.dp), glowRadius)
                     .clip(RoundedCornerShape(10.dp))
                     .background(palette.surfaceRaised)
-                    .then(if (hovered) Modifier.border(1.dp, palette.focus.copy(alpha = 0.55f), RoundedCornerShape(10.dp)) else Modifier),
+                    .then(if (hovered) Modifier.border(ring, palette.focus.copy(alpha = ringAlpha), RoundedCornerShape(10.dp)) else Modifier),
                 contentAlignment = Alignment.Center,
             ) {
                 RemoteImage(
@@ -629,6 +800,72 @@ private fun SortRow(current: SortOrder, series: Boolean, onSelect: (SortOrder) -
             // Leverantören anger när en serie senast ändrades, inte när den lades till.
             val label = if (series && order == SortOrder.ADDED) "Senast uppdaterade" else order.label
             Chip(label, selected = order == current, onClick = { onSelect(order) })
+        }
+    }
+}
+
+
+/**
+ * Tv: bakgrunden bakom film- och seriesidan är titeln man står på, nedtonad
+ * mot vänster och nedåt så att text och omslag syns tydligt ovanpå.
+ */
+@Composable
+private fun SpotlightBackdrop(url: String?) {
+    val palette = LocalPalette.current
+    Box(Modifier.fillMaxSize()) {
+        Crossfade(targetState = url, animationSpec = tween(450), label = "bakgrund") { current ->
+            RemoteImage(
+                url = current,
+                modifier = Modifier.fillMaxSize(),
+                maxSide = 1600,
+                contentScale = ContentScale.Crop,
+                alignment = Alignment.TopCenter,
+            )
+        }
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.verticalGradient(
+                    0f to palette.background.copy(alpha = 0.50f),
+                    0.42f to palette.background.copy(alpha = 0.80f),
+                    1f to palette.background.copy(alpha = 0.97f),
+                ),
+            ),
+        )
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.horizontalGradient(
+                    0f to palette.background.copy(alpha = 0.85f),
+                    0.6f to Color.Transparent,
+                ),
+            ),
+        )
+    }
+}
+
+/** Tv: titeln man står på, med år, betyg, genrer och handling. Fast höjd, så att omslagen inte hoppar. */
+@Composable
+private fun SpotlightInfo(title: String, meta: String?, overview: String?) {
+    val palette = LocalPalette.current
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .height(196.dp)
+            .padding(start = 24.dp, end = 36.dp, top = 6.dp, bottom = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(title, style = MaterialTheme.typography.headlineMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (meta != null) {
+            Text(meta, style = MaterialTheme.typography.titleSmall, color = palette.focus, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (overview != null) {
+            Text(
+                overview,
+                style = MaterialTheme.typography.bodyLarge,
+                color = palette.textSecondary,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(0.72f),
+            )
         }
     }
 }

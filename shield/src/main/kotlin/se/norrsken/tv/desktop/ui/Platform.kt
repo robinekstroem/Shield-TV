@@ -1,5 +1,14 @@
 package se.norrsken.tv.desktop.ui
 
+import se.norrsken.tv.shield.TvResolution
+import se.norrsken.tv.shield.TvDisplay
+import se.norrsken.tv.shield.RemoteInputServer
+import se.norrsken.tv.desktop.AppState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
 import android.content.Intent
 import android.graphics.BlurMaskFilter
 import android.net.Uri
@@ -144,3 +153,77 @@ internal fun VideoSurface(player: VideoPlayer, sampleAspect: Float, sharp: Boole
         }
     }
 }
+
+/** Shield: källor och bilder skickas från telefonen i stället för med fjärrkontrollen. */
+internal const val remoteInputAvailable = true
+internal const val canPickFiles = false
+
+/**
+ * Adressen och koden för webbsidan där källor och bakgrundsbilder skickas
+ * från telefonen. Sidan finns bara så länge den här panelen visas.
+ */
+@Composable
+internal fun RemoteInputPanel(state: AppState) {
+    val palette = LocalPalette.current
+    val server = remember { RemoteInputServer(state) }
+    DisposableEffect(server) {
+        server.start()
+        onDispose { server.stop() }
+    }
+    val big = MaterialTheme.typography.headlineSmall.copy(
+        fontFamily = FontFamily.Monospace,
+        fontStyle = FontStyle.Normal,
+        fontWeight = FontWeight.SemiBold,
+        shadow = null,
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            "Slipp skriva långa adresser med fjärrkontrollen. Öppna adressen i webbläsaren på telefonen eller " +
+                "datorn, på samma wifi som Shield, och klistra in spellistan där. Bakgrundsbilder skickas samma väg.",
+            style = MaterialTheme.typography.bodyLarge,
+            color = palette.textSecondary,
+        )
+        val address = server.address
+        val problem = server.problem
+        when {
+            address != null -> {
+                Text(address, style = big, color = palette.focus)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Kod", style = MaterialTheme.typography.titleMedium, color = palette.textSecondary)
+                    Text(server.pin, style = big, color = palette.textPrimary)
+                }
+            }
+            problem != null -> Text(problem, style = MaterialTheme.typography.bodyLarge, color = palette.alert)
+            else -> Text("Startar…", style = MaterialTheme.typography.bodyLarge, color = palette.textTertiary)
+        }
+        server.lastMessage?.let { Text(it, style = MaterialTheme.typography.bodyLarge, color = palette.signal) }
+    }
+}
+
+/**
+ * Menyernas upplösning. Högre får plats med mer, som en datorskärm; texten
+ * växer med så att den går att läsa från soffan.
+ */
+@Composable
+internal fun DisplayOptions() {
+    val palette = LocalPalette.current
+    Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("Upplösning för menyerna", style = MaterialTheme.typography.titleMedium, color = palette.textPrimary)
+        Text(
+            "Högre upplösning får plats med mer på skärmen, som på en datorskärm. Texten följer med och går att läsa från soffan.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = palette.textSecondary,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            TvResolution.entries.forEach { option ->
+                Chip(option.label, selected = TvDisplay.resolution == option, onClick = { TvDisplay.select(option) })
+            }
+        }
+    }
+}
+
+/** Shield styrs med fjärrkontroll: tydlig markering och titeln man står på överst. */
+internal const val tvLayout = true
+
+/** Under appens namn i sidomenyn. */
+internal const val platformName = "Shield"
