@@ -201,8 +201,11 @@ try {
     if (Test-Path $appMapp) { Remove-Item $appMapp -Recurse -Force }
     Remove-Item $logg, $loggFel -Force -ErrorAction SilentlyContinue
 
+    # Gradles tillfälliga filer (.gradle) i TvBygg, inte i mappen man packat upp:
+    # där kan de vara låsta medan bygget pågår och stoppa en kopiering till repot.
     $bygge = Start-Process -FilePath $gradle.FullName `
-        -ArgumentList 'createDistributable', '--console=plain', '--no-daemon', '--stacktrace' `
+        -ArgumentList 'createDistributable', '--console=plain', '--no-daemon', '--stacktrace', `
+            '--project-cache-dir', ('"' + (Join-Path $verktyg 'projektcache') + '"') `
         -WorkingDirectory $projekt -NoNewWindow -PassThru `
         -RedirectStandardOutput $logg -RedirectStandardError $loggFel
     $null = $bygge.Handle
