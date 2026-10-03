@@ -522,6 +522,8 @@ private fun BackgroundsCard(state: AppState) {
             style = MaterialTheme.typography.bodyMedium,
             color = palette.textSecondary,
         )
+        // Shield: bilderna skickas från telefonen eller datorn. Windows visar inget här.
+        BackgroundUploadHint(state)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             for (path in state.backgrounds) {
                 Box(

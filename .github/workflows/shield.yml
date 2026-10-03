@@ -3,14 +3,15 @@ name: Build Shield
 # Shield-appen (Android TV). Bygger en APK och lägger den under Releases som
 # "Tv för Shield", med en fast direktlänk som Downloader på Shield kan hämta.
 #
-# Körs när Shield-koden (med sin låsta kopia av Windows-koden) eller koden
-# som delas med telefonappen ändras. Går också att starta för hand: Actions →
+# Körs när Shield-koden, Windows-koden (som Shield bygger på) eller koden som
+# delas med telefonappen ändras. Går också att starta för hand: Actions →
 # Build Shield → Run workflow.
 on:
   push:
     branches: [ main ]
     paths:
       - 'shield/**'
+      - 'windows/src/**'
       - '.github/workflows/shield.yml'
       - 'gradle/libs.versions.toml'
       - 'app/src/main/java/se/norrsken/tv/data/playlist/M3uParser.kt'

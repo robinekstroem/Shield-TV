@@ -23,6 +23,31 @@ import java.util.concurrent.Executors
 import kotlin.random.Random
 
 /**
+ * En sida i taget, delad av rutorna i inställningarna (spellistor och
+ * bakgrundsbilder): samma adress och samma kod. Stängs när ingen ruta visas.
+ */
+object RemoteInputHost {
+    private var server: RemoteInputServer? = null
+    private var users = 0
+
+    fun acquire(state: AppState): RemoteInputServer {
+        users++
+        return server ?: RemoteInputServer(state).also {
+            server = it
+            it.start()
+        }
+    }
+
+    fun release() {
+        users = (users - 1).coerceAtLeast(0)
+        if (users == 0) {
+            server?.stop()
+            server = null
+        }
+    }
+}
+
+/**
  * En liten webbsida på Shield: spellistor och bakgrundsbilder skickas från
  * telefonens eller datorns webbläsare i stället för att skrivas med
  * fjärrkontrollen. Sidan finns bara medan inställningarna är öppna, bara på
@@ -305,9 +330,9 @@ button{width:100%;margin-top:16px;padding:14px;border:0;border-radius:12px;backg
 </section>
 <section>
 <h2>Bakgrundsbild</h2>
-<p>Högst tre bilder. De visas bakom appen, en i taget.</p>
-<input id="bild" type="file" accept="image/*">
-<button id="skicka-bild" type="button">Skicka bilden</button>
+<p>Högst tre bilder. De visas bakom appen och byter av varandra. Du kan välja flera på en gång.</p>
+<input id="bild" type="file" accept="image/*" multiple>
+<button id="skicka-bild" type="button">Skicka bilderna</button>
 <div class="svar" id="svar-bild"></div>
 </section>
 </main>
@@ -335,14 +360,24 @@ el('kalla').addEventListener('submit', function (e) {
     .catch(function () { visa(el('svar-kalla'), false, fel); });
 });
 el('skicka-bild').addEventListener('click', function () {
-  var fil = el('bild').files[0];
-  if (!fil) { visa(el('svar-bild'), false, 'Välj en bild först.'); return; }
-  visa(el('svar-bild'), true, 'Skickar…');
-  fetch('/bild?kod=' + encodeURIComponent(el('kod').value.trim()), {
-    method: 'POST', headers: { 'Content-Type': fil.type || 'application/octet-stream' }, body: fil
-  })
-    .then(function (svar) { return svar.text().then(function (t) { visa(el('svar-bild'), svar.ok, t); }); })
-    .catch(function () { visa(el('svar-bild'), false, fel); });
+  var filer = Array.prototype.slice.call(el('bild').files);
+  if (!filer.length) { visa(el('svar-bild'), false, 'Välj en eller flera bilder först.'); return; }
+  var kod = encodeURIComponent(el('kod').value.trim());
+  var klara = 0;
+  var nasta = function (i) {
+    if (i >= filer.length) {
+      visa(el('svar-bild'), true, klara === 1 ? 'Bilden är skickad till tv:n.' : klara + ' bilder är skickade till tv:n.');
+      return;
+    }
+    visa(el('svar-bild'), true, 'Skickar ' + (i + 1) + ' av ' + filer.length + '…');
+    var fil = filer[i];
+    fetch('/bild?kod=' + kod, { method: 'POST', headers: { 'Content-Type': fil.type || 'application/octet-stream' }, body: fil })
+      .then(function (svar) { return svar.text().then(function (t) {
+        if (svar.ok) { klara++; nasta(i + 1); } else { visa(el('svar-bild'), false, t); }
+      }); })
+      .catch(function () { visa(el('svar-bild'), false, fel); });
+  };
+  nasta(0);
 });
 </script>
 </body></html>

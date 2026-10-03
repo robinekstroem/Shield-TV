@@ -298,3 +298,7 @@ internal const val tvLayout = false
 
 /** Under appens namn i sidomenyn. */
 internal const val platformName = "Windows"
+
+/** Bilder läggs till med fildialogen i Windows; på Shield skickas de från telefonen. */
+@Composable
+internal fun BackgroundUploadHint(state: AppState) = Unit

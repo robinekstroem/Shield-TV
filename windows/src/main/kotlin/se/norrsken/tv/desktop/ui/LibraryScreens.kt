@@ -1,5 +1,8 @@
 package se.norrsken.tv.desktop.ui
 
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.draw.drawWithContent
 import se.norrsken.tv.desktop.data.WatchKind
 import se.norrsken.tv.desktop.data.ListKind
 import kotlinx.coroutines.delay
@@ -145,7 +148,7 @@ fun MoviesScreen(state: AppState) {
         Box(Modifier.weight(1f).fillMaxHeight()) {
             if (tvLayout && spotlight != null) {
                 val tmdb = state.tmdbFor(spotlight)
-                SpotlightBackdrop(tmdb?.backdrop ?: spotlight.poster ?: tmdb?.poster)
+                SpotlightBackdrop(tmdb?.backdrop)
             }
             Column(Modifier.fillMaxSize()) {
                 ScreenHeader(
@@ -413,7 +416,7 @@ fun SeriesScreen(state: AppState) {
         Box(Modifier.weight(1f).fillMaxHeight()) {
             if (tvLayout && spotlight != null) {
                 val tmdb = state.tmdbFor(spotlight)
-                SpotlightBackdrop(spotlight.backdrop ?: tmdb?.backdrop ?: spotlight.cover ?: tmdb?.poster)
+                SpotlightBackdrop(spotlight.backdrop ?: tmdb?.backdrop)
             }
             Column(Modifier.fillMaxSize()) {
                 ScreenHeader(
@@ -806,39 +809,40 @@ private fun SortRow(current: SortOrder, series: Boolean, onSelect: (SortOrder) -
 
 
 /**
- * Tv: bakgrunden bakom film- och seriesidan är titeln man står på, nedtonad
- * mot vänster och nedåt så att text och omslag syns tydligt ovanpå.
+ * Tv: titeln man står på som bakgrundsbild upptill, utan att täcka appens
+ * vanliga bakgrund: bilden tonar ut mot vänster och nedåt. Utan en riktig
+ * bakgrundsbild visas ingen.
  */
 @Composable
 private fun SpotlightBackdrop(url: String?) {
-    val palette = LocalPalette.current
-    Box(Modifier.fillMaxSize()) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(440.dp)
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .drawWithContent {
+                drawContent()
+                drawRect(
+                    Brush.verticalGradient(0f to Color.Black, 0.5f to Color.Black, 1f to Color.Transparent),
+                    blendMode = BlendMode.DstIn,
+                )
+                drawRect(
+                    Brush.horizontalGradient(0f to Color.Black.copy(alpha = 0.22f), 0.5f to Color.Black, 1f to Color.Black),
+                    blendMode = BlendMode.DstIn,
+                )
+            },
+    ) {
         Crossfade(targetState = url, animationSpec = tween(450), label = "bakgrund") { current ->
-            RemoteImage(
-                url = current,
-                modifier = Modifier.fillMaxSize(),
-                maxSide = 1600,
-                contentScale = ContentScale.Crop,
-                alignment = Alignment.TopCenter,
-            )
+            if (current != null) {
+                RemoteImage(
+                    url = current,
+                    modifier = Modifier.fillMaxSize(),
+                    maxSide = 1600,
+                    contentScale = ContentScale.Crop,
+                    alignment = Alignment.TopCenter,
+                )
+            }
         }
-        Box(
-            Modifier.fillMaxSize().background(
-                Brush.verticalGradient(
-                    0f to palette.background.copy(alpha = 0.50f),
-                    0.42f to palette.background.copy(alpha = 0.80f),
-                    1f to palette.background.copy(alpha = 0.97f),
-                ),
-            ),
-        )
-        Box(
-            Modifier.fillMaxSize().background(
-                Brush.horizontalGradient(
-                    0f to palette.background.copy(alpha = 0.85f),
-                    0.6f to Color.Transparent,
-                ),
-            ),
-        )
     }
 }
 

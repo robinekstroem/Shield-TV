@@ -1,5 +1,11 @@
 package se.norrsken.tv.desktop.ui
 
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -154,21 +160,23 @@ fun HomeScreen(state: AppState) {
     val shown = hero?.takeIf { item -> rows.any { row -> row.items.any { it.key == item.key } } }
         ?: rows.firstNotNullOfOrNull { row -> row.items.firstOrNull { it !is ChannelItem } }
 
-    // Tillbaka från en titel: markeringen hamnar på kortet man öppnade.
+    // Tv: markeringen börjar på Spela, så att man ser var man är. Backar man
+    // ur en titel hamnar den på kortet man öppnade.
+    val firstFocus = remember { FocusRequester() }
     val restore = remember { FocusRequester() }
     if (tvLayout) {
         LaunchedEffect(Unit) {
-            if (openedKey != null) {
-                withFrameNanos { }
-                runCatching { restore.requestFocus() }
-            }
+            withFrameNanos { }
+            val restored = openedKey != null && runCatching { restore.requestFocus() }.isSuccess
+            if (!restored) runCatching { firstFocus.requestFocus() }
         }
     }
+    val heroHeight = if (tvLayout) 340.dp else 320.dp
 
     Box(Modifier.fillMaxSize()) {
-        HeroBackdrop(backdropOf(state, current, shown))
+        HeroBackdrop(backdropOf(state, current, shown), heroHeight + 160.dp)
         Column(Modifier.fillMaxSize()) {
-            HeroInfo(state, current, shown, onOpen = { openedKey = it })
+            HeroInfo(state, current, shown, heroHeight, firstFocus, onOpen = { openedKey = it })
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -192,44 +200,41 @@ fun HomeScreen(state: AppState) {
 
 // --- Bakgrund och information ------------------------------------------------------
 
-/** Titelns bakgrund över hela sidan, mörk mot vänster och nedåt så att text och rader syns. */
+/**
+ * Titelns bakgrundsbild upptill. Den tonar ut mot vänster och nedåt till
+ * appens vanliga bakgrund — temat och egna bakgrundsbilder syns under — i
+ * stället för att täcka sidan. Utan en riktig bakgrundsbild visas ingen.
+ */
 @Composable
-private fun HeroBackdrop(url: String?) {
-    val palette = LocalPalette.current
-    // Kanaler har ingen bakgrund: den förra står kvar.
-    val last = remember { mutableStateOf<String?>(null) }
-    SideEffect { if (url != null) last.value = url }
-    Box(Modifier.fillMaxSize()) {
-        Crossfade(targetState = url ?: last.value, animationSpec = tween(500), label = "startbakgrund") { current ->
+private fun HeroBackdrop(url: String?, height: Dp) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(height)
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .drawWithContent {
+                drawContent()
+                drawRect(
+                    Brush.verticalGradient(0f to Color.Black, 0.55f to Color.Black, 1f to Color.Transparent),
+                    blendMode = BlendMode.DstIn,
+                )
+                drawRect(
+                    Brush.horizontalGradient(0f to Color.Black.copy(alpha = 0.22f), 0.5f to Color.Black, 1f to Color.Black),
+                    blendMode = BlendMode.DstIn,
+                )
+            },
+    ) {
+        Crossfade(targetState = url, animationSpec = tween(500), label = "startbakgrund") { current ->
             if (current != null) {
                 RemoteImage(
                     url = current,
                     modifier = Modifier.fillMaxSize(),
                     maxSide = 1920,
                     contentScale = ContentScale.Crop,
-                    alignment = Alignment.TopEnd,
+                    alignment = Alignment.TopCenter,
                 )
             }
         }
-        Box(
-            Modifier.fillMaxSize().background(
-                Brush.verticalGradient(
-                    0f to palette.background.copy(alpha = 0.10f),
-                    0.40f to palette.background.copy(alpha = 0.45f),
-                    0.60f to palette.background.copy(alpha = 0.90f),
-                    1f to palette.background.copy(alpha = 0.98f),
-                ),
-            ),
-        )
-        Box(
-            Modifier.fillMaxSize().background(
-                Brush.horizontalGradient(
-                    0f to palette.background.copy(alpha = 0.92f),
-                    0.45f to palette.background.copy(alpha = 0.40f),
-                    0.80f to Color.Transparent,
-                ),
-            ),
-        )
     }
 }
 
@@ -249,61 +254,98 @@ private class Hero(
 )
 
 @Composable
-private fun HeroInfo(state: AppState, catalog: HomeCatalog, item: HomeItem?, onOpen: (String) -> Unit) {
+private fun HeroInfo(
+    state: AppState,
+    catalog: HomeCatalog,
+    item: HomeItem?,
+    height: Dp,
+    firstFocus: FocusRequester,
+    onOpen: (String) -> Unit,
+) {
     val palette = LocalPalette.current
-    Column(
+    Row(
         Modifier
             .fillMaxWidth()
-            .height(if (tvLayout) 360.dp else 330.dp)
-            .padding(start = 40.dp, end = 40.dp, top = 36.dp, bottom = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .height(height)
+            .padding(start = 40.dp, end = 40.dp, top = 26.dp, bottom = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(28.dp),
     ) {
-        if (item == null) return@Column
+        if (item == null) return@Row
         val hero = heroOf(state, catalog, item)
-        if (hero.kicker != null) {
-            Text(hero.kicker.uppercase(), style = MaterialTheme.typography.labelLarge, color = palette.focus)
-        }
-        Text(
-            hero.title,
-            style = MaterialTheme.typography.displaySmall,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.widthIn(max = 860.dp),
-        )
-        if (hero.meta != null) {
-            Text(hero.meta, style = MaterialTheme.typography.titleMedium, color = palette.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        if (hero.overview != null) {
-            Text(
-                hero.overview,
-                style = MaterialTheme.typography.bodyLarge,
-                color = palette.textSecondary,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = 740.dp),
+        val channel = item is ChannelItem
+        // Omslaget skarpt bredvid texten: det man väljer syns alltid, även utan bakgrundsbild.
+        Box(
+            Modifier
+                .fillMaxHeight()
+                .aspectRatio(if (channel) 16f / 9f else 2f / 3f, matchHeightConstraintsFirst = true)
+                .shadow(16.dp, RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(12.dp))
+                .background(palette.surfaceRaised),
+            contentAlignment = Alignment.Center,
+        ) {
+            RemoteImage(
+                url = posterOf(state, catalog, item),
+                modifier = Modifier.fillMaxSize().then(if (channel) Modifier.padding(24.dp) else Modifier),
+                maxSide = 600,
+                contentScale = if (channel) ContentScale.Fit else ContentScale.Crop,
+                placeholder = {
+                    Text(
+                        hero.title,
+                        modifier = Modifier.padding(14.dp),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = palette.textTertiary,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
             )
         }
-        Spacer(Modifier.weight(1f))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            PrimaryButton(hero.playLabel, onClick = hero.play, icon = Glyphs.Play)
-            hero.more?.let { more ->
-                SecondaryButton("Mer info", onClick = {
-                    onOpen(item.key)
-                    more()
-                }, icon = Glyphs.Info)
+        Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (hero.kicker != null) {
+                Text(hero.kicker.uppercase(), style = MaterialTheme.typography.labelLarge, color = palette.focus)
             }
-            hero.saved?.let { saved ->
-                val label = when {
-                    hero.channel && saved -> "Favorit"
-                    hero.channel -> "Lägg till favorit"
-                    saved -> "I min lista"
-                    else -> "Min lista"
+            Text(
+                hero.title,
+                style = MaterialTheme.typography.headlineLarge,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 820.dp),
+            )
+            if (hero.meta != null) {
+                Text(hero.meta, style = MaterialTheme.typography.titleSmall, color = palette.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (hero.overview != null) {
+                Text(
+                    hero.overview,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = palette.textSecondary,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 720.dp),
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                PrimaryButton(hero.playLabel, onClick = hero.play, modifier = Modifier.focusRequester(firstFocus), icon = Glyphs.Play)
+                hero.more?.let { more ->
+                    SecondaryButton("Mer info", onClick = {
+                        onOpen(item.key)
+                        more()
+                    }, icon = Glyphs.Info)
                 }
-                val icon = when {
-                    hero.channel -> if (saved) Glyphs.Star else Glyphs.StarOutline
-                    else -> if (saved) Glyphs.Check else Glyphs.Add
+                hero.saved?.let { saved ->
+                    val label = when {
+                        hero.channel && saved -> "Favorit"
+                        hero.channel -> "Lägg till favorit"
+                        saved -> "I min lista"
+                        else -> "Min lista"
+                    }
+                    val icon = when {
+                        hero.channel -> if (saved) Glyphs.Star else Glyphs.StarOutline
+                        else -> if (saved) Glyphs.Check else Glyphs.Add
+                    }
+                    SecondaryButton(label, onClick = hero.toggle, icon = icon)
                 }
-                SecondaryButton(label, onClick = hero.toggle, icon = icon)
             }
         }
     }
@@ -424,18 +466,33 @@ private val homeClock: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 private fun clockOf(ms: Long): String = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalTime().format(homeClock)
 
 private fun backdropOf(state: AppState, catalog: HomeCatalog, item: HomeItem?): String? = when (item) {
-    is MovieItem -> state.tmdbFor(item.movie)?.backdrop ?: item.movie.poster
-    is SeriesItem -> item.series.backdrop ?: state.tmdbFor(item.series)?.backdrop ?: item.series.cover
+    is MovieItem -> state.tmdbFor(item.movie)?.backdrop
+    is SeriesItem -> item.series.backdrop ?: state.tmdbFor(item.series)?.backdrop
     is ResumeItem -> {
         val entry = item.entry
         when (entry.kind) {
-            WatchKind.MOVIE -> catalog.movieByStream["${entry.sourceId}|${entry.itemId}"]?.let { state.tmdbFor(it)?.backdrop ?: it.poster }
-            WatchKind.EPISODE -> catalog.seriesById["${entry.sourceId}|${entry.seriesId}"]?.let { it.backdrop ?: state.tmdbFor(it)?.backdrop ?: it.cover }
+            WatchKind.MOVIE -> catalog.movieByStream["${entry.sourceId}|${entry.itemId}"]?.let { state.tmdbFor(it)?.backdrop }
+            WatchKind.EPISODE -> catalog.seriesById["${entry.sourceId}|${entry.seriesId}"]?.let { it.backdrop ?: state.tmdbFor(it)?.backdrop }
             else -> null
-        } ?: entry.image
+        }
     }
     is ChannelItem -> null
     null -> null
+}
+
+/** Omslaget (eller kanalens logga) som visas skarpt bredvid texten överst. */
+private fun posterOf(state: AppState, catalog: HomeCatalog, item: HomeItem): String? = when (item) {
+    is MovieItem -> item.movie.poster ?: state.tmdbFor(item.movie)?.poster
+    is SeriesItem -> item.series.cover ?: state.tmdbFor(item.series)?.poster
+    is ResumeItem -> {
+        val entry = item.entry
+        when (entry.kind) {
+            WatchKind.MOVIE -> catalog.movieByStream["${entry.sourceId}|${entry.itemId}"]?.let { it.poster ?: state.tmdbFor(it)?.poster }
+            WatchKind.EPISODE -> catalog.seriesById["${entry.sourceId}|${entry.seriesId}"]?.let { it.cover ?: state.tmdbFor(it)?.poster }
+            else -> null
+        } ?: entry.image
+    }
+    is ChannelItem -> item.channel.logo
 }
 
 // --- Raderna ----------------------------------------------------------------------------

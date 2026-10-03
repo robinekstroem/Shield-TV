@@ -4,16 +4,13 @@ plugins {
 }
 
 /**
- * Shield-appen bygger på Windows-appens kod, men på en låst kopia i
- * fryst/kotlin: versionen med de förstorade omslagen och filmen överst,
- * från innan den nya startsidan. Windows kan ändras utan att Shield
- * påverkas. När Shield ska få det nya byts kopian ut mot windows/ igen.
- *
- * Bara filerna nedan har egna Android-versioner i src/main/kotlin, med samma
- * namn och samma funktioner: spelaren, bildytan, lagringen och det som rör
- * Windows själv.
+ * Shield-appen är Windows-appen. Skärmar, teman, tablå, genrer, historik och
+ * TMDB tas ordagrant från windows/ vid varje bygge, så det som byggs in i
+ * Windows följer med hit. Bara filerna nedan har egna Android-versioner i
+ * src/main/kotlin, med samma namn och samma funktioner: spelaren, bildytan,
+ * lagringen och det som rör Windows själv.
  */
-val windowsSources: File = file("fryst/kotlin")
+val windowsSources: File = file("../windows/src/main/kotlin")
 val platformFiles = listOf(
     "se/norrsken/tv/desktop/Main.kt",
     "se/norrsken/tv/desktop/data/AppDirs.kt",

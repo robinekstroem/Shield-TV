@@ -1,5 +1,6 @@
 package se.norrsken.tv.desktop.ui
 
+import se.norrsken.tv.shield.RemoteInputHost
 import se.norrsken.tv.shield.TvResolution
 import se.norrsken.tv.shield.TvDisplay
 import se.norrsken.tv.shield.RemoteInputServer
@@ -165,11 +166,7 @@ internal const val canPickFiles = false
 @Composable
 internal fun RemoteInputPanel(state: AppState) {
     val palette = LocalPalette.current
-    val server = remember { RemoteInputServer(state) }
-    DisposableEffect(server) {
-        server.start()
-        onDispose { server.stop() }
-    }
+    val server = rememberRemoteInput(state)
     val big = MaterialTheme.typography.headlineSmall.copy(
         fontFamily = FontFamily.Monospace,
         fontStyle = FontStyle.Normal,
@@ -227,3 +224,44 @@ internal const val tvLayout = true
 
 /** Under appens namn i sidomenyn. */
 internal const val platformName = "Shield"
+
+/** Sidan för inmatning från telefonen, delad av rutorna och stängd när ingen visas. */
+@Composable
+private fun rememberRemoteInput(state: AppState): RemoteInputServer {
+    val server = remember { RemoteInputHost.acquire(state) }
+    DisposableEffect(server) {
+        onDispose { RemoteInputHost.release() }
+    }
+    return server
+}
+
+/** Egna bakgrundsbilder på Shield: skickas från telefonen eller datorn, till samma sida som spellistorna. */
+@Composable
+internal fun BackgroundUploadHint(state: AppState) {
+    val palette = LocalPalette.current
+    val server = rememberRemoteInput(state)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            "Lägg till bilder från telefonen eller datorn: öppna adressen i webbläsaren, skriv koden och välj bilder under Bakgrundsbild.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = palette.textSecondary,
+        )
+        val address = server.address
+        if (address != null) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(
+                    address,
+                    style = MaterialTheme.typography.titleLarge.copy(fontFamily = FontFamily.Monospace, fontStyle = FontStyle.Normal, shadow = null),
+                    color = palette.focus,
+                )
+                Text(
+                    "Kod ${server.pin}",
+                    style = MaterialTheme.typography.titleLarge.copy(fontFamily = FontFamily.Monospace, fontStyle = FontStyle.Normal, shadow = null),
+                    color = palette.textPrimary,
+                )
+            }
+        } else {
+            Text(server.problem ?: "Startar…", style = MaterialTheme.typography.bodyMedium, color = palette.textTertiary)
+        }
+    }
+}

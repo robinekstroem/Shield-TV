@@ -27,14 +27,16 @@ import androidx.compose.ui.unit.sp
 enum class AppTheme(val label: String, val description: String) {
     GRAPHITE("Grafit", "Stilla gråskala. Markeringen är ljus, inte färg."),
     EMBER("Orange glöd", "Svart och orange, med en mjuk glöd kring det du pekar på."),
-    CHRISTMAS("Julafton", "Snöfall, en ljusslinga som blinkar och varmt sken. Extra mysigt i december."),
+    CHRISTMAS("Julafton", "Vinternatt i månsken: snö som driver i vinden, granar, en röd stuga med ljus i fönstren och en ljusslinga som blinkar."),
     HERO("Superhjälte", "Kraftiga färger, serietidningsraster och fart."),
     MAGIC("Trolldom", "Midnattsblått, pergament och guld, med glittrande stjärnstoft."),
     EPIC("Fantasyepos", "Jordnära gröna toner, gammalt guld och dimma som driver förbi."),
+    AURORA("Nordljus", "Arktisk natt där norrskenet böljar långsamt över fjällen."),
+    RETRO("Retrovåg", "Åttiotalsneon och VHS: rosa rutnät mot en randig sol, och svaga svep över bilden."),
 }
 
 /** Det som rör sig eller ligger i bakgrunden, per tema. */
-enum class Decoration { NONE, SNOW, SPARKLES, HALFTONE, MIST }
+enum class Decoration { NONE, SNOW, SPARKLES, HALFTONE, MIST, AURORA, RETRO }
 
 /**
  * Färgerna. Grafit är samma palett som Android-appen (core/ui/theme/Color.kt):
@@ -95,24 +97,65 @@ private val ember = Palette(
     glow = Color(0x8CFF7A00),
 )
 
+// Vinternatt: djupt midnattsblått, julrött och guld som levande ljus.
 private val christmas = Palette(
-    background = Color(0xFF07110C),
-    ambient = Color(0xFF050D09),
-    surface = Color(0xFF0D1913),
-    surfaceRaised = Color(0xFF16261D),
-    hairline = Color(0xFF26392D),
-    textPrimary = Color(0xFFFFF6EA),
-    textSecondary = Color(0xFFE6D2B5),
-    textTertiary = Color(0xFF9A8A73),
+    background = Color(0xFF050B18),
+    ambient = Color(0xFF040915),
+    surface = Color(0xFF0A1428),
+    surfaceRaised = Color(0xFF122039),
+    hairline = Color(0xFF223351),
+    textPrimary = Color(0xFFFFF7EC),
+    textSecondary = Color(0xFFE3D6C3),
+    textTertiary = Color(0xFF8E96A8),
     focus = Color(0xFFD93A3A),
     onFocus = Color(0xFFFFF6EA),
     signal = Color(0xFFF2C14E),
     secondary = Color(0xFF8FD18A),
     alert = Color(0xFFFF6B5B),
     // Som levande ljus: varm och svag.
-    glow = Color(0x59FFB347),
+    glow = Color(0x66FFB347),
     decoration = Decoration.SNOW,
     headingFont = FontFamily.Serif,
+)
+
+// Arktisk natt: norrskensgrönt med violett, kallt och klart.
+private val aurora = Palette(
+    background = Color(0xFF03080F),
+    ambient = Color(0xFF02060C),
+    surface = Color(0xFF07111C),
+    surfaceRaised = Color(0xFF0E1B29),
+    hairline = Color(0xFF1B2D3E),
+    textPrimary = Color(0xFFEFFAF7),
+    textSecondary = Color(0xFFA9C7C1),
+    textTertiary = Color(0xFF6A8580),
+    focus = Color(0xFF3EF0B2),
+    onFocus = Color(0xFF02150F),
+    signal = Color(0xFFB98BFF),
+    secondary = Color(0xFF5CC8FF),
+    alert = Color(0xFFFF7A8A),
+    glow = Color(0x733EF0B2),
+    decoration = Decoration.AURORA,
+)
+
+// Åttiotal: neonrosa och cyan på lila, som omslaget till en VHS-kassett.
+private val retro = Palette(
+    background = Color(0xFF0C0416),
+    ambient = Color(0xFF090312),
+    surface = Color(0xFF150826),
+    surfaceRaised = Color(0xFF211038),
+    hairline = Color(0xFF3B1D61),
+    textPrimary = Color(0xFFFFF0FB),
+    textSecondary = Color(0xFFD6B4E6),
+    textTertiary = Color(0xFF8E73A6),
+    focus = Color(0xFFFF3EA5),
+    onFocus = Color(0xFF1A0010),
+    signal = Color(0xFF36E2FF),
+    secondary = Color(0xFFFF9F43),
+    alert = Color(0xFFFF5C7A),
+    glow = Color(0x80FF3EA5),
+    decoration = Decoration.RETRO,
+    headingWeight = FontWeight.Bold,
+    headingStyle = FontStyle.Italic,
 )
 
 private val hero = Palette(
@@ -180,6 +223,8 @@ fun paletteFor(theme: AppTheme): Palette = when (theme) {
     AppTheme.HERO -> hero
     AppTheme.MAGIC -> magic
     AppTheme.EPIC -> epic
+    AppTheme.AURORA -> aurora
+    AppTheme.RETRO -> retro
 }
 
 // Skrivbordsstorlekar: läsavstånd en halv meter, inte tre meter som på tv:n.
