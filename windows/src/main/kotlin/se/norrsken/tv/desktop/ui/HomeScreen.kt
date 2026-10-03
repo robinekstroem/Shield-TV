@@ -181,7 +181,20 @@ fun HomeScreen(state: AppState) {
     }
     val history = state.history
     val myList = state.myList
-    val rows = remember(current, history, myList) { current.rowsFor(history, myList) }
+    val rowsResult = remember(current, history, myList) { runCatching { current.rowsFor(history, myList) } }
+    val rows = rowsResult.getOrNull()
+    if (rows == null) {
+        val cause = generateSequence(rowsResult.exceptionOrNull()) { it.cause }.lastOrNull()
+        Box(Modifier.fillMaxSize().padding(48.dp), contentAlignment = Alignment.Center) {
+            Text(
+                "Startsidan gick inte att visa. Ta ett foto och skicka det i chatten.\n\n" +
+                    "${cause?.javaClass?.simpleName}: ${cause?.message.orEmpty()}",
+                style = MaterialTheme.typography.bodyLarge,
+                color = LocalPalette.current.textTertiary,
+            )
+        }
+        return
+    }
     val shown = hero?.takeIf { item -> rows.any { row -> row.items.any { it.key == item.key } } }
         ?: rows.firstNotNullOfOrNull { row -> row.items.firstOrNull { it !is ChannelItem } }
 
@@ -199,7 +212,7 @@ fun HomeScreen(state: AppState) {
     val heroHeight = if (tvLayout) 340.dp else 320.dp
 
     Box(Modifier.fillMaxSize()) {
-        HeroBackdrop(backdropOf(state, current, shown), heroHeight + 160.dp)
+        HeroBackdrop(runCatching { backdropOf(state, current, shown) }.getOrNull(), heroHeight + 160.dp)
         Column(Modifier.fillMaxSize()) {
             HeroInfo(state, current, shown, heroHeight, firstFocus, onOpen = { openedKey = it })
             LazyColumn(
@@ -297,7 +310,7 @@ private fun HeroInfo(
         horizontalArrangement = Arrangement.spacedBy(28.dp),
     ) {
         if (item == null) return@Row
-        val hero = heroOf(state, catalog, item)
+        val hero = runCatching { heroOf(state, catalog, item) }.getOrNull() ?: return@Row
         val channel = item is ChannelItem
         // Omslaget skarpt bredvid texten: det man väljer syns alltid, även utan bakgrundsbild.
         Box(
@@ -310,7 +323,7 @@ private fun HeroInfo(
             contentAlignment = Alignment.Center,
         ) {
             RemoteImage(
-                url = posterOf(state, catalog, item),
+                url = runCatching { posterOf(state, catalog, item) }.getOrNull(),
                 modifier = Modifier.fillMaxSize().then(if (channel) Modifier.padding(24.dp) else Modifier),
                 maxSide = 600,
                 contentScale = if (channel) ContentScale.Fit else ContentScale.Crop,

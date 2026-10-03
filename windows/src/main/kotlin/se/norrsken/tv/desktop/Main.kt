@@ -1,5 +1,6 @@
 package se.norrsken.tv.desktop
 
+import se.norrsken.tv.desktop.data.AppDirs
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -26,6 +27,7 @@ import java.awt.Dimension
 import java.awt.GraphicsEnvironment
 
 fun main() {
+    installCrashReport()
     // Före allt annat: var VLC ligger måste vara känt innan JNA används första gången.
     VlcRuntime.prepare()
 
@@ -109,5 +111,41 @@ private fun FullscreenPlayer(state: AppState, owner: ComposeWindow?) {
         TvTheme(state.theme, translucent = state.backgrounds.isNotEmpty()) {
             PlayerScreen(state)
         }
+    }
+}
+
+/**
+ * Stängs appen av ett fel visas felet i en ruta som går att fotografera och
+ * skicka, och det sparas i senaste-krasch.txt bredvid inställningarna.
+ */
+private fun installCrashReport() {
+    Thread.setDefaultUncaughtExceptionHandler { _, error ->
+        val text = buildString {
+            append("Tv för Windows ").append(System.getProperty("tv.version").orEmpty()).append('\n')
+            var current: Throwable? = error
+            var depth = 0
+            while (current != null && depth < 6) {
+                if (depth > 0) append("\n\nOrsak: ")
+                append(current.javaClass.name).append(": ").append(current.message.orEmpty())
+                for (frame in current.stackTrace.take(10)) append("\n    at ").append(frame.toString())
+                val cause = current.cause
+                current = if (cause === current) null else cause
+                depth++
+            }
+        }
+        runCatching { java.io.File(AppDirs.config, "senaste-krasch.txt").writeText(text, Charsets.UTF_8) }
+        runCatching {
+            val area = javax.swing.JTextArea(text, 24, 110).apply {
+                isEditable = false
+                font = java.awt.Font(java.awt.Font.MONOSPACED, java.awt.Font.PLAIN, 13)
+            }
+            javax.swing.JOptionPane.showMessageDialog(
+                null,
+                javax.swing.JScrollPane(area),
+                "Tv stängdes av ett fel – ta en bild och skicka den i chatten",
+                javax.swing.JOptionPane.ERROR_MESSAGE,
+            )
+        }
+        kotlin.system.exitProcess(1)
     }
 }
