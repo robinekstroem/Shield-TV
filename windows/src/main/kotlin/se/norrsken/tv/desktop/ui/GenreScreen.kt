@@ -68,13 +68,20 @@ fun GenreScreen(state: AppState) {
     val query = state.genreQuery.trim().lowercase()
     val sort = state.genreSort
 
-    // Bara genrer som faktiskt har något, med antal.
-    val available = remember(index, showSeries) {
+    // Bara genrer som faktiskt har något, med antal: varje film en gång, hur många versioner den än har.
+    val versions = state.versions
+    val available = remember(index, showSeries, versions) {
         Genre.entries
-            .map { it to (if (showSeries) index.series[it] else index.movies[it]).orEmpty().size }
+            .map { entry ->
+                entry to if (showSeries) {
+                    index.series[entry].orEmpty().distinctBy { versions.groupKeyOf(it) }.size
+                } else {
+                    index.movies[entry].orEmpty().distinctBy { versions.groupKeyOf(it) }.size
+                }
+            }
             .filter { it.second > 0 }
     }
-    val movies = remember(index, genre, query, sort, showSeries) {
+    val movies = remember(index, genre, query, sort, showSeries, versions) {
         if (showSeries) {
             emptyList()
         } else {
@@ -83,10 +90,12 @@ fun GenreScreen(state: AppState) {
                 .filter { query.isEmpty() || query in it.searchKey }
                 .distinctBy { it.sourceId to it.streamId }
                 .toList()
-                .ranked(sort, { state.scoreOf(it) }, { it.year ?: facts[MovieFactsStore.keyOf(it.sourceId, it.streamId)]?.year ?: state.tmdbFor(it)?.year }, { it.addedUtc }, { state.tmdbFor(it)?.popularity })
+                .ranked(sort, { state.scoreOf(it) }, { versions.yearOf(it) ?: facts[MovieFactsStore.keyOf(it.sourceId, it.streamId)]?.year ?: state.tmdbFor(it)?.year }, { it.addedUtc }, { state.tmdbFor(it)?.popularity })
+                // En gång per film. Utan sökning visas filmens bästa version.
+                .let { versions.collapseMovies(it, preferDefault = query.isEmpty()) }
         }
     }
-    val series = remember(index, genre, query, sort, showSeries) {
+    val series = remember(index, genre, query, sort, showSeries, versions) {
         if (!showSeries) {
             emptyList()
         } else {
@@ -95,7 +104,8 @@ fun GenreScreen(state: AppState) {
                 .filter { query.isEmpty() || query in it.searchKey }
                 .distinctBy { it.sourceId to it.seriesId }
                 .toList()
-                .ranked(sort, { state.scoreOf(it) }, { it.year?.toIntOrNull() ?: state.tmdbFor(it)?.year }, { it.addedUtc }, { state.tmdbFor(it)?.popularity })
+                .ranked(sort, { state.scoreOf(it) }, { versions.yearOf(it) ?: state.tmdbFor(it)?.year }, { it.addedUtc }, { state.tmdbFor(it)?.popularity })
+                .let { versions.collapseSeries(it, preferDefault = query.isEmpty()) }
         }
     }
     val count = if (showSeries) series.size else movies.size
@@ -117,7 +127,11 @@ fun GenreScreen(state: AppState) {
     Row(Modifier.fillMaxSize()) {
         GroupColumn(
             allLabel = "Topplistan",
-            total = if (showSeries) library.series.size else library.movies.size,
+            total = when {
+                versions.isEmpty -> if (showSeries) library.series.size else library.movies.size
+                showSeries -> versions.seriesCount
+                else -> versions.movieCount
+            },
             groups = available.map { it.first.label },
             counts = available.associate { it.first.label to it.second },
             selected = genre?.label,
@@ -165,21 +179,23 @@ fun GenreScreen(state: AppState) {
                         if (showSeries) {
                             itemsIndexed(series, key = { _, item -> item.key }) { position, item ->
                                 PosterCard(
-                                    title = item.name,
-                                    imageUrl = item.cover ?: state.tmdbFor(item)?.poster,
-                                    meta = listOfNotNull(item.year, formatRating(state.tmdbFor(item)?.rating ?: item.rating)).joinToString("  ").ifEmpty { null },
+                                    title = state.titleOf(item),
+                                    images = state.posterCandidates(item),
+                                    meta = seriesMeta(state, item),
                                     onClick = { state.showSeries(item) },
                                     rank = if (ranked) position + 1 else null,
+                                    badge = state.badgeFor(item),
                                 )
                             }
                         } else {
                             itemsIndexed(movies, key = { _, item -> item.key }) { position, item ->
                                 PosterCard(
-                                    title = item.name,
-                                    imageUrl = item.poster ?: state.tmdbFor(item)?.poster,
-                                    meta = listOfNotNull(item.year?.toString(), formatRating(state.tmdbFor(item)?.rating ?: item.rating)).joinToString("  ").ifEmpty { null },
+                                    title = state.titleOf(item),
+                                    images = state.posterCandidates(item),
+                                    meta = movieMeta(state, item),
                                     onClick = { state.showMovie(item) },
                                     rank = if (ranked) position + 1 else null,
+                                    badge = state.badgeFor(item),
                                 )
                             }
                         }

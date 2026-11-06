@@ -1,5 +1,6 @@
 package se.norrsken.tv.desktop.ui
 
+import se.norrsken.tv.desktop.platform.WindowsIntegration
 import org.jetbrains.skia.Rect as SkiaRect
 import org.jetbrains.skia.Paint as SkiaPaint
 import org.jetbrains.skia.RRect
@@ -297,7 +298,13 @@ internal fun DisplayOptions() = Unit
 internal const val tvLayout = false
 
 /** Under appens namn i sidomenyn. */
-internal const val platformName = "Windows"
+internal val platformName: String = if (WindowsIntegration.isMac) "Mac" else "Windows"
+
+/**
+ * Windows: helskärm i ett eget ramlöst fönster över skärmen (se Main.kt).
+ * Mac: hela fönstret går över i Macens egen helskärm, med spelaren i det.
+ */
+internal val separateFullscreenWindow: Boolean = !WindowsIntegration.isMac
 
 /** Bilder läggs till med fildialogen i Windows; på Shield skickas de från telefonen. */
 @Composable

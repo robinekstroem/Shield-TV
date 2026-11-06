@@ -27,6 +27,8 @@ import se.norrsken.tv.desktop.data.AppDirs
 import se.norrsken.tv.desktop.platform.WindowsIntegration
 import se.norrsken.tv.desktop.ui.AppRoot
 import se.norrsken.tv.desktop.ui.AppTheme
+import se.norrsken.tv.desktop.ui.CoverPrefetch
+import se.norrsken.tv.desktop.ui.Images
 import se.norrsken.tv.desktop.ui.TvTheme
 
 /**
@@ -41,8 +43,9 @@ import se.norrsken.tv.desktop.ui.TvTheme
  * - Vänster och höger (film): spolar tio sekunder; snabbspolning trettio.
  * - Play/paus: paus. I minispelaren: tillbaka till helskärm.
  * - ≡: ljud och undertext.
- * - Tillbaka: stänger listan eller panelen, krymper sedan bilden till
- *   hörnet, stänger den, och leder till startsidan innan appen stängs.
+ * - Tillbaka: stänger listan eller panelen, krymper sedan bilden upp i
+ *   sidofältet, stänger den, och leder till startsidan innan appen stängs.
+ *   Den lilla bilden nås med pil upp från menyn; OK eller play gör den stor.
  */
 class MainActivity : ComponentActivity() {
     private lateinit var state: AppState
@@ -104,6 +107,9 @@ class MainActivity : ComponentActivity() {
                                 })
                             }
                         }
+                        // Omslagen sparas på Shield, de nyaste filmerna först. Färre än på
+                        // datorn: Shield har mindre lagring.
+                        CoverPrefetch(state, limit = 6_000)
                     }
                 }
             }
@@ -125,7 +131,9 @@ class MainActivity : ComponentActivity() {
                             state.focusPlayer()
                         }
                         state.trackPanelOpen -> state.trackPanelOpen = false
-                        // Som Esc i Windows: bilden krymper till hörnet och fortsätter där.
+                        // Rutan Nästa avsnitt: Tillbaka betyder "titta klart".
+                        playing != null && !state.miniPlayer && state.dismissPlayerPrompt() -> Unit
+                        // Som Esc i Windows: bilden krymper upp i sidofältet och fortsätter där.
                         playing != null && !state.miniPlayer -> state.minimizePlayer()
                         state.selectedMovie != null -> state.closeMovie()
                         state.selectedSeries != null -> state.closeSeries()
@@ -162,6 +170,8 @@ class MainActivity : ComponentActivity() {
         val live = playing.live
         when (event.key) {
             Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                // Hoppa över intro eller Nästa avsnitt syns: OK väljer den.
+                if (state.acceptPlayerPrompt()) return true
                 if (live) channelsOpen = true else state.togglePause()
                 state.touchPlayer(force = true)
                 return true
@@ -189,17 +199,22 @@ class MainActivity : ComponentActivity() {
                 return true
             }
             Key.MediaFastForward -> {
-                if (live) state.switchChannel(1) else state.videoPlayer?.seekBy(30_000)
+                if (live) state.switchChannel(1) else state.seekBy(30_000)
                 state.touchPlayer(force = true)
                 return true
             }
             Key.MediaRewind -> {
-                if (live) state.switchChannel(-1) else state.videoPlayer?.seekBy(-30_000)
+                if (live) state.switchChannel(-1) else state.seekBy(-30_000)
                 state.touchPlayer(force = true)
                 return true
             }
         }
         return state.handleKey(event)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        Images.appHidden = false
     }
 
     override fun onStop() {
@@ -208,6 +223,8 @@ class MainActivity : ComponentActivity() {
             state.saveProgressNow()
             state.pausePlayback()
         }
+        // Omslagen hämtas inte i förväg medan appen inte syns.
+        Images.appHidden = true
         super.onStop()
     }
 

@@ -1,0 +1,255 @@
+name: Build Mac
+
+# Tv för Mac: samma app som Windows (mappen windows/), byggd på Macar hos
+# GitHub, en gång för Apple Silicon och en gång för Intel. Läggs under
+# Releases som "Tv för Mac", med ett installationsskript som väljer rätt
+# version åt datorn.
+#
+# Körs när Windows-koden (som Mac bygger på), Mac-filerna eller koden som
+# delas med telefonappen ändras. Går också att starta för hand: Actions →
+# Build Mac → Run workflow.
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'windows/src/**'
+      - 'windows/build.gradle.kts'
+      - 'windows/settings.gradle.kts'
+      - 'windows/gradle.properties'
+      - 'windows/icon.icns'
+      - 'windows/app-resources/**'
+      - 'mac/**'
+      - '.github/workflows/mac.yml'
+      - 'app/src/main/java/se/norrsken/tv/data/playlist/M3uParser.kt'
+      - 'app/src/main/java/se/norrsken/tv/data/playlist/SourceDetection.kt'
+      - 'app/src/main/java/se/norrsken/tv/data/playlist/ImportState.kt'
+      - 'app/src/main/java/se/norrsken/tv/data/remote/PlaylistDownloader.kt'
+      - 'app/src/main/java/se/norrsken/tv/data/xtream/XtreamClient.kt'
+      - 'app/src/main/java/se/norrsken/tv/data/xtream/XtreamModels.kt'
+      - 'app/src/main/java/se/norrsken/tv/data/security/UrlSanitizer.kt'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Två pushar tätt efter varandra: den senaste vinner.
+concurrency:
+  group: build-mac-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Samma VLC som Windows-versionen bygger på, i Macens utförande.
+  VLC_VERSION: '3.0.24'
+
+jobs:
+  build:
+    name: Bygg (${{ matrix.name }})
+    strategy:
+      # Går det ena bygget sönder ska det andra ändå bli klart och publiceras.
+      fail-fast: false
+      matrix:
+        include:
+          - name: AppleSilicon
+            runner: macos-15
+            vlc: arm64
+          - name: Intel
+            runner: macos-15-intel
+            vlc: intel64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: current
+
+      # Bara VLC:s bibliotek (lib/) och tillägg (plugins/) behövs, inte VLC-appen.
+      - name: Hämta VLC ${{ env.VLC_VERSION }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          file="vlc-${VLC_VERSION}-${{ matrix.vlc }}.dmg"
+          base="https://download.videolan.org/pub/videolan/vlc/${VLC_VERSION}/macosx"
+          curl -fsSL --retry 3 --retry-delay 5 -o "$file" "$base/$file"
+          curl -fsSL --retry 3 --retry-delay 5 -o "$file.sha256" "$base/$file.sha256"
+          shasum -a 256 -c "$file.sha256"
+          mkdir -p "$RUNNER_TEMP/vlc-volym"
+          hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$RUNNER_TEMP/vlc-volym" "$file" < /dev/null
+          rm -rf vlc
+          mkdir -p vlc
+          # ditto behåller VLC:s länkar mellan filerna och deras signaturer.
+          ditto "$RUNNER_TEMP/vlc-volym/VLC.app/Contents/MacOS/lib" vlc/lib
+          ditto "$RUNNER_TEMP/vlc-volym/VLC.app/Contents/MacOS/plugins" vlc/plugins
+          hdiutil detach "$RUNNER_TEMP/vlc-volym" -quiet
+          ls -la vlc/lib
+          echo "Tillägg: $(ls vlc/plugins | wc -l)"
+          # Vilka bibliotek libvlc pekar på: bra att ha i loggen om något krånglar.
+          otool -L vlc/lib/libvlc.dylib || true
+          test -e vlc/lib/libvlc.dylib
+          test -e vlc/lib/libvlccore.dylib
+
+      - name: Bygg Tv för Mac
+        id: build
+        working-directory: windows
+        run: |
+          set -o pipefail
+          status=0
+          gradle createDistributable --stacktrace 2>&1 | tee build.log || status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      # Felet ska gå att läsa utan att gräva i tusen rader logg.
+      - name: Sammanfatta felet
+        if: steps.build.outputs.status != '0'
+        working-directory: windows
+        run: |
+          KOTLIN=$(grep -E '^e: ' build.log | head -n 40)
+          WHAT=$(sed -n '/\* What went wrong:/,/\* Try:/p' build.log | head -n 25)
+          {
+            echo '## Mac-bygget misslyckades (${{ matrix.name }})'
+            echo ''
+            echo 'Kopiera allt i rutan nedan och klistra in det i chatten.'
+            echo ''
+            echo '```'
+            if [ -n "$KOTLIN" ]; then printf '%s\n' "$KOTLIN"; fi
+            if [ -n "$WHAT" ]; then printf '%s\n' "$WHAT"; fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Bygget misslyckades. Se sammanfattningen för körningen."
+          exit 1
+
+      # VLC läggs in efter bygget och med ditto: Gradle skulle göra om VLC:s
+      # länkar till kopior, och två kopior av libvlccore i samma app krånglar.
+      # Sedan får hela appen en ad hoc-signatur, eftersom Apple Silicon inte
+      # kör kod utan signatur.
+      - name: Lägg in VLC och signera
+        run: |
+          set -euo pipefail
+          app="windows/build/compose/binaries/main/app/Tv.app"
+          test -d "$app"
+          # Där Compose lade appens resurser: mappen med om-resurser.txt. Det är
+          # den mappen appen själv letar i (compose.application.resources.dir).
+          marker="$(find "$app" -name om-resurser.txt -print -quit)"
+          if [ -n "$marker" ]; then
+            resources="$(dirname "$marker")"
+          else
+            resources="$app/Contents/app/resources"
+          fi
+          echo "Resurser: $resources"
+          mkdir -p "$resources"
+          rm -rf "$resources/vlc"
+          ditto "$RUNNER_TEMP/vlc" "$resources/vlc"
+          # Extra filattribut (från nedladdningar, Finder) får signeringen att vägra.
+          xattr -cr "$app"
+          codesign --force --deep --sign - "$app"
+          if codesign --verify --deep --strict "$app"; then
+            echo "Signaturen stämmer."
+          else
+            echo "::warning::codesign --verify klagade, se loggen ovan."
+          fi
+          du -sh "$app"
+
+      - name: Packa Tv-Mac-${{ matrix.name }}.dmg
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/dmg"
+          rm -rf "$stage"
+          mkdir -p "$stage" dist
+          ditto "windows/build/compose/binaries/main/app/Tv.app" "$stage/Tv.app"
+          # Genvägen att dra appen till. Svenska Finder kallar mappen Program.
+          ln -s /Applications "$stage/Program"
+          out="dist/Tv-Mac-${{ matrix.name }}.dmg"
+          # hdiutil kan ibland svara "upptagen" på GitHubs Macar: ett par försök till.
+          for attempt in 1 2 3; do
+            if hdiutil create -volname "Tv" -srcfolder "$stage" -ov -format UDZO "$out"; then
+              break
+            fi
+            echo "hdiutil misslyckades (försök $attempt), väntar och försöker igen…"
+            sleep 15
+          done
+          test -f "$out"
+          ls -la dist
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: tv-mac-${{ matrix.name }}
+          path: dist/Tv-Mac-${{ matrix.name }}.dmg
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publicera
+    needs: build
+    # Även om bara den ena Macen lyckades: den versionen ska ut.
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: tv-mac-*
+          path: dist
+          merge-multiple: true
+
+      # En enda release, "mac-senaste", som byts ut vid varje bygge.
+      # Förhandsversion: den blir aldrig "Latest", så telefonappens releaser
+      # och direktlänkar påverkas inte.
+      - name: Publicera Tv för Mac
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dmgs=(dist/*.dmg)
+          if [ ${#dmgs[@]} -eq 0 ]; then
+            echo "Inget av Mac-byggena lyckades, så det finns inget att publicera."
+            exit 1
+          fi
+          version="1.0.${GITHUB_RUN_NUMBER}"
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/mac-senaste"
+          # Repots namn in i skriptet, och Windows radslut bort om de kommit med.
+          sed -e 's/\r$//' -e "s|__REPO__|${GITHUB_REPOSITORY}|g" mac/installera-tv.sh > dist/installera-tv.sh
+          command="curl -fsSL ${base}/installera-tv.sh | bash"
+          kinds=()
+          [ -f dist/Tv-Mac-AppleSilicon.dmg ] && kinds+=("Apple Silicon")
+          [ -f dist/Tv-Mac-Intel.dmg ] && kinds+=("Intel")
+          if [ ${#kinds[@]} -eq 2 ]; then built="Apple Silicon och Intel"; else built="${kinds[0]} (den andra Macen misslyckades)"; fi
+          notes=$(cat <<NOTES
+          Version ${version}, byggd från ${GITHUB_SHA::7} för: ${built}
+
+          **Installera eller uppdatera:** öppna Terminal på Macen, klistra in raden nedan och tryck Retur.
+
+              ${command}
+
+          Skriptet väljer rätt version (Apple Silicon eller Intel), stänger Tv om den är igång och lägger den nya i Program. Källor, historik och inställningar ligger kvar.
+
+          **För hand:** ladda ner rätt .dmg nedan och dra Tv till Program. Första gången säger macOS att appen inte kan kontrolleras: öppna Systeminställningar → Integritet och säkerhet och tryck Öppna ändå.
+          NOTES
+          )
+          gh release delete mac-senaste --yes --cleanup-tag >/dev/null 2>&1 || true
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/mac-senaste" >/dev/null 2>&1 || true
+          gh release create mac-senaste "${dmgs[@]}" dist/installera-tv.sh \
+            --title "Tv för Mac ${version}" \
+            --notes "$notes" \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --latest=false
+          {
+            echo "## Tv för Mac ${version}"
+            echo
+            echo "Byggd för: ${built}"
+            echo
+            echo "Installera eller uppdatera: öppna Terminal på Macen och klistra in"
+            echo
+            echo '```'
+            echo "${command}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

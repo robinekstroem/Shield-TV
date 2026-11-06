@@ -61,9 +61,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import java.util.Locale
 
-private val swedish: Locale = Locale.forLanguageTag("sv-SE")
 
 /** Leverantörer anger trailern som YouTube-id eller som hel adress. */
 internal fun trailerUrl(value: String?): String? {
@@ -72,7 +70,17 @@ internal fun trailerUrl(value: String?): String? {
 }
 
 /** 12 345 — med svenskt tusentalsmellanrum. */
-fun Int.grouped(): String = String.format(swedish, "%,d", this)
+fun Int.grouped(): String {
+    // Mellanslag som tusentalsavgränsare, som på svenska. Utan Java, så att
+    // samma kod fungerar på iPad.
+    val digits = kotlin.math.abs(toLong()).toString()
+    val out = StringBuilder()
+    digits.forEachIndexed { i, c ->
+        if (i > 0 && (digits.length - i) % 3 == 0) out.append('\u00A0')
+        out.append(c)
+    }
+    return if (this < 0) "-$out" else out.toString()
+}
 
 /**
  * Basen för allt klickbart, som FocusableSurface på Android. Med mus finns

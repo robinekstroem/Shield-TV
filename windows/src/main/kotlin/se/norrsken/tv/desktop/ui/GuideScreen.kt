@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import se.norrsken.tv.desktop.AppState
+import se.norrsken.tv.desktop.data.LibraryFilter
 import se.norrsken.tv.desktop.data.LiveChannel
 import se.norrsken.tv.desktop.data.Programme
 import java.time.Instant
@@ -100,7 +101,7 @@ fun GuideScreen(state: AppState) {
     val query = state.liveQuery
     val onlyWithGuide = state.guideOnlyWithData
     val clock = state.clock
-    val channels = remember(library, group, query) { state.filteredChannels() }
+    val channels = remember(library, group, query, state.hiddenGroups) { state.filteredChannels() }
     val rows = remember(channels, guide, onlyWithGuide) {
         if (onlyWithGuide) channels.filter { guide.hasSchedule(it) } else channels
     }
@@ -133,7 +134,7 @@ fun GuideScreen(state: AppState) {
         GroupColumn(
             allLabel = "Alla kanaler",
             total = library.channels.size,
-            groups = library.liveGroups,
+            groups = state.visibleGroups(LibraryFilter.LIVE, library.liveGroups),
             counts = library.liveCounts,
             selected = group,
             onSelect = { state.liveGroup = it },

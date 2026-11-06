@@ -31,6 +31,14 @@ object SecretBox {
 
     private val random = SecureRandom()
 
+    /** Vad inställningarna visar om lösenorden. */
+    val description: String
+        get() = if (available) {
+            "Skyddas med Androids nyckellager — nyckeln lämnar aldrig Shield."
+        } else {
+            "Androids nyckellager gick inte att använda. Inloggningar sparas inte."
+        }
+
     val available: Boolean by lazy {
         runCatching {
             val probe = "tv".toByteArray()

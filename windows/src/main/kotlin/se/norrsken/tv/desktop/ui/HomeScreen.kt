@@ -1,5 +1,6 @@
 package se.norrsken.tv.desktop.ui
 
+import se.norrsken.tv.desktop.data.VersionIndex
 import androidx.compose.runtime.mutableLongStateOf
 import kotlinx.coroutines.CancellationException
 import androidx.compose.ui.unit.Dp
@@ -31,6 +32,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import se.norrsken.tv.desktop.data.LibraryFilter
+import se.norrsken.tv.desktop.data.TrendingTitle
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -108,7 +112,12 @@ internal data class ChannelItem(val channel: LiveChannel, val queue: List<LiveCh
     override val key: String get() = "c:" + channel.key
 }
 
-internal class HomeRow(val title: String, val items: List<HomeItem>)
+internal class HomeRow(
+    val title: String,
+    val items: List<HomeItem>,
+    /** Topplista: placeringen som en stor siffra bredvid omslaget. */
+    val ranked: Boolean = false,
+)
 
 private const val ROW = 30
 
@@ -146,7 +155,11 @@ fun HomeScreen(state: AppState) {
     val facts = state.movieFacts
     var catalogError by remember { mutableStateOf<String?>(null) }
     var lastBuild by remember { mutableLongStateOf(0L) }
-    val catalog by produceState<HomeCatalog?>(null, library, tmdb, facts) {
+    val versions = state.versions
+    val trending = state.trending
+    val newSince = state.newSinceUtc
+    val hiddenGroups = state.hiddenGroups
+    val catalog by produceState<HomeCatalog?>(null, library, tmdb, facts, versions, trending, newSince, hiddenGroups) {
         // TMDB fylls på i omgångar. Medan hämtningen pågår räknas raderna om
         // högst var trettionde sekund, annars en kort stund efter sista ändringen:
         // omräkningen ska aldrig ta kraft från menyerna.
@@ -157,7 +170,7 @@ fun HomeScreen(state: AppState) {
         }
         // Ett fel här ska synas på startsidan, inte stänga appen.
         try {
-            value = withContext(Dispatchers.Default) { buildCatalog(library, tmdb, facts) }
+            value = withContext(Dispatchers.Default) { buildCatalog(library, tmdb, facts, versions, trending, newSince, hiddenGroups) }
             lastBuild = System.currentTimeMillis()
             catalogError = null
         } catch (error: CancellationException) {
@@ -212,7 +225,11 @@ fun HomeScreen(state: AppState) {
     val heroHeight = if (tvLayout) 340.dp else 320.dp
 
     Box(Modifier.fillMaxSize()) {
-        HeroBackdrop(runCatching { backdropOf(state, current, shown) }.getOrNull(), heroHeight + 160.dp)
+        HeroBackdrop(
+            runCatching { backdropOf(state, current, shown) }.getOrNull(),
+            heroHeight + 160.dp,
+            running = state.nowPlaying == null || state.miniPlayer,
+        )
         Column(Modifier.fillMaxSize()) {
             HeroInfo(state, current, shown, heroHeight, firstFocus, onOpen = { openedKey = it })
             LazyColumn(
@@ -244,7 +261,7 @@ fun HomeScreen(state: AppState) {
  * stället för att täcka sidan. Utan en riktig bakgrundsbild visas ingen.
  */
 @Composable
-private fun HeroBackdrop(url: String?, height: Dp) {
+private fun HeroBackdrop(url: String?, height: Dp, running: Boolean) {
     Box(
         Modifier
             .fillMaxWidth()
@@ -262,18 +279,8 @@ private fun HeroBackdrop(url: String?, height: Dp) {
                 )
             },
     ) {
-        Crossfade(targetState = url, animationSpec = tween(500), label = "startbakgrund") { current ->
-            if (current != null) {
-                RemoteImage(
-                    url = current,
-                    modifier = Modifier.fillMaxSize(),
-                    // TMDB:s bakgrunder är 1 280 bildpunkter breda: större gör bara minnet fullt.
-                    maxSide = 1280,
-                    contentScale = ContentScale.Crop,
-                    alignment = Alignment.TopCenter,
-                )
-            }
-        }
+        // Titelns bild tonar in och rör sig sakta, som en trailer.
+        LivingBackdrop(url = url, modifier = Modifier.fillMaxSize(), running = running)
     }
 }
 
@@ -290,6 +297,9 @@ private class Hero(
     val saved: Boolean?,
     val toggle: () -> Unit,
     val channel: Boolean = false,
+    /** För loggan: "movie" eller "tv", och titelns TMDB-id. */
+    val logoKind: String? = null,
+    val tmdbId: Int? = null,
 )
 
 @Composable
@@ -322,8 +332,8 @@ private fun HeroInfo(
                 .background(palette.surfaceRaised),
             contentAlignment = Alignment.Center,
         ) {
-            RemoteImage(
-                url = runCatching { posterOf(state, catalog, item) }.getOrNull(),
+            Artwork(
+                candidates = runCatching { posterOf(state, catalog, item) }.getOrNull().orEmpty(),
                 modifier = Modifier.fillMaxSize().then(if (channel) Modifier.padding(24.dp) else Modifier),
                 maxSide = 600,
                 contentScale = if (channel) ContentScale.Fit else ContentScale.Crop,
@@ -343,13 +353,27 @@ private fun HeroInfo(
             if (hero.kicker != null) {
                 Text(hero.kicker.uppercase(), style = MaterialTheme.typography.labelLarge, color = palette.focus)
             }
-            Text(
-                hero.title,
-                style = MaterialTheme.typography.headlineLarge,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = 820.dp),
-            )
+            val logoKind = hero.logoKind
+            if (logoKind != null) {
+                TitleLogo(
+                    state = state,
+                    kind = logoKind,
+                    tmdbId = hero.tmdbId,
+                    title = hero.title,
+                    style = MaterialTheme.typography.headlineLarge,
+                    maxHeight = if (tvLayout) 104.dp else 96.dp,
+                    maxWidth = 460.dp,
+                    modifier = Modifier.widthIn(max = 820.dp),
+                )
+            } else {
+                Text(
+                    hero.title,
+                    style = MaterialTheme.typography.headlineLarge,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 820.dp),
+                )
+            }
             if (hero.meta != null) {
                 Text(hero.meta, style = MaterialTheme.typography.titleSmall, color = palette.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
@@ -432,15 +456,18 @@ private fun heroOf(state: AppState, catalog: HomeCatalog, item: HomeItem): Hero 
     }
 }
 
-private fun movieHero(state: AppState, movie: Movie, resume: WatchEntry?): Hero {
+private fun movieHero(state: AppState, shown: Movie, resume: WatchEntry?): Hero {
+    // Har man börjat på en annan version av filmen är det den som fortsätter.
+    val all = state.versionsOf(shown)
+    val earlier = resume ?: state.history.firstOrNull { entry ->
+        entry.kind == WatchKind.MOVIE && all.any { it.sourceId == entry.sourceId && it.streamId.toString() == entry.itemId }
+    }?.takeIf { it.resumable }
+    val movie = earlier?.let { entry -> all.firstOrNull { it.sourceId == entry.sourceId && it.streamId.toString() == entry.itemId } } ?: shown
     val tmdb = state.tmdbFor(movie)
     val facts = state.movieFacts[movie.key]
-    val earlier = resume ?: state.history.firstOrNull {
-        it.kind == WatchKind.MOVIE && it.sourceId == movie.sourceId && it.itemId == movie.streamId.toString()
-    }?.takeIf { it.resumable }
     return Hero(
         kicker = if (resume != null) "Fortsätt titta" else null,
-        title = movie.name,
+        title = state.titleOf(movie),
         meta = listOfNotNull(
             (tmdb?.year ?: facts?.year)?.toString(),
             formatRating(tmdb?.rating ?: movie.rating),
@@ -450,14 +477,17 @@ private fun movieHero(state: AppState, movie: Movie, resume: WatchEntry?): Hero 
         playLabel = if (earlier != null) timeLeft(earlier)?.let { "Fortsätt  ·  $it" } ?: "Fortsätt" else "Spela",
         play = { state.playMovie(movie) },
         more = { state.showMovie(movie) },
-        saved = state.inMyList(movie.key),
-        toggle = { state.toggleMyList(ListKind.MOVIE, movie.key) },
+        saved = state.inMyList(movie),
+        toggle = { state.toggleMyList(movie) },
+        logoKind = "movie",
+        tmdbId = tmdb?.id,
     )
 }
 
 private fun seriesHero(state: AppState, series: Series, resume: WatchEntry?): Hero {
     val tmdb = state.tmdbFor(series)
-    val latest = resume ?: latestEpisode(state.history, series)
+    // Senaste avsnittet i någon av seriens versioner.
+    val latest = resume ?: latestEpisode(state.history, state.versionsOf(series))
     val episode = latest?.let { "S${it.season} E${it.episode}" }
     return Hero(
         kicker = when {
@@ -465,7 +495,7 @@ private fun seriesHero(state: AppState, series: Series, resume: WatchEntry?): He
             resume != null -> "Fortsätt titta"
             else -> null
         },
-        title = series.name,
+        title = state.titleOf(series),
         meta = if (resume != null) {
             listOfNotNull(resume.subtitle, if (resume.upNext) null else timeLeft(resume)).joinToString("  ·  ").ifEmpty { null }
         } else {
@@ -483,8 +513,10 @@ private fun seriesHero(state: AppState, series: Series, resume: WatchEntry?): He
         },
         play = { if (latest != null) state.playFromHistory(latest) else state.showSeries(series) },
         more = { state.showSeries(series) },
-        saved = state.inMyList(series.key),
-        toggle = { state.toggleMyList(ListKind.SERIES, series.key) },
+        saved = state.inMyList(series),
+        toggle = { state.toggleMyList(series) },
+        logoKind = "tv",
+        tmdbId = tmdb?.id,
     )
 }
 
@@ -492,6 +524,13 @@ private fun seriesHero(state: AppState, series: Series, resume: WatchEntry?): He
 internal fun latestEpisode(history: List<WatchEntry>, series: Series): WatchEntry? =
     history.firstOrNull {
         it.kind == WatchKind.EPISODE && it.sourceId == series.sourceId && it.seriesId == series.seriesId && (it.resumable || it.upNext)
+    }
+
+/** Senaste påbörjade eller föreslagna avsnittet i någon av seriens versioner. */
+internal fun latestEpisode(history: List<WatchEntry>, versions: List<Series>): WatchEntry? =
+    history.firstOrNull { entry ->
+        entry.kind == WatchKind.EPISODE && (entry.resumable || entry.upNext) &&
+            versions.any { it.sourceId == entry.sourceId && it.seriesId == entry.seriesId }
     }
 
 private fun timeLeft(entry: WatchEntry): String? {
@@ -519,19 +558,20 @@ private fun backdropOf(state: AppState, catalog: HomeCatalog, item: HomeItem?): 
     null -> null
 }
 
-/** Omslaget (eller kanalens logga) som visas skarpt bredvid texten överst. */
-private fun posterOf(state: AppState, catalog: HomeCatalog, item: HomeItem): String? = when (item) {
-    is MovieItem -> item.movie.poster ?: state.tmdbFor(item.movie)?.poster
-    is SeriesItem -> item.series.cover ?: state.tmdbFor(item.series)?.poster
+/** Omslagen (eller kanalens logga) att visa skarpt bredvid texten överst, i ordning. */
+private fun posterOf(state: AppState, catalog: HomeCatalog, item: HomeItem): List<String> = when (item) {
+    is MovieItem -> state.posterCandidates(item.movie)
+    is SeriesItem -> state.posterCandidates(item.series)
     is ResumeItem -> {
         val entry = item.entry
-        when (entry.kind) {
-            WatchKind.MOVIE -> catalog.movieByStream["${entry.sourceId}|${entry.itemId}"]?.let { it.poster ?: state.tmdbFor(it)?.poster }
-            WatchKind.EPISODE -> catalog.seriesById["${entry.sourceId}|${entry.seriesId}"]?.let { it.cover ?: state.tmdbFor(it)?.poster }
+        val found = when (entry.kind) {
+            WatchKind.MOVIE -> catalog.movieByStream["${entry.sourceId}|${entry.itemId}"]?.let { state.posterCandidates(it) }
+            WatchKind.EPISODE -> catalog.seriesById["${entry.sourceId}|${entry.seriesId}"]?.let { state.posterCandidates(it) }
             else -> null
-        } ?: entry.image
+        }
+        found.orEmpty() + listOfNotNull(entry.image)
     }
-    is ChannelItem -> item.channel.logo
+    is ChannelItem -> listOfNotNull(item.channel.logo)
 }
 
 // --- Raderna ----------------------------------------------------------------------------
@@ -554,34 +594,36 @@ private fun HomeRowView(
             contentPadding = PaddingValues(start = 34.dp, end = 34.dp, top = 14.dp, bottom = 18.dp),
             horizontalArrangement = Arrangement.spacedBy(if (tvLayout) 16.dp else 12.dp),
         ) {
-            items(row.items, key = { it.key }) { item ->
+            itemsIndexed(row.items, key = { _, item -> item.key }) { index, item ->
                 val focus = if (item.key == restoreKey) Modifier.focusRequester(restore) else Modifier
+                val cardWidth = if (tvLayout) 164.dp else 150.dp
                 when (item) {
-                    is MovieItem -> Box(Modifier.width(if (tvLayout) 164.dp else 150.dp)) {
+                    is MovieItem -> RankedOrPlain(if (row.ranked) index + 1 else null, cardWidth) {
                         PosterCard(
-                            title = item.movie.name,
-                            imageUrl = item.movie.poster ?: state.tmdbFor(item.movie)?.poster,
-                            meta = formatRating(state.tmdbFor(item.movie)?.rating ?: item.movie.rating),
+                            title = state.titleOf(item.movie),
+                            images = state.posterCandidates(item.movie),
+                            meta = movieMeta(state, item.movie),
                             onClick = {
                                 onOpen(item)
                                 state.showMovie(item.movie)
                             },
                             modifier = focus,
                             onActive = { onActive(item) },
+                            badge = state.badgeFor(item.movie),
                         )
                     }
-                    is SeriesItem -> Box(Modifier.width(if (tvLayout) 164.dp else 150.dp)) {
+                    is SeriesItem -> RankedOrPlain(if (row.ranked) index + 1 else null, cardWidth) {
                         PosterCard(
-                            title = item.series.name,
-                            imageUrl = item.series.cover ?: state.tmdbFor(item.series)?.poster,
-                            meta = listOfNotNull(item.series.year, formatRating(state.tmdbFor(item.series)?.rating ?: item.series.rating))
-                                .joinToString("  ").ifEmpty { null },
+                            title = state.titleOf(item.series),
+                            images = state.posterCandidates(item.series),
+                            meta = seriesMeta(state, item.series),
                             onClick = {
                                 onOpen(item)
                                 state.showSeries(item.series)
                             },
                             modifier = focus,
                             onActive = { onActive(item) },
+                            badge = state.badgeFor(item.series),
                         )
                     }
                     is ResumeItem -> {
@@ -614,6 +656,16 @@ private fun HomeRowView(
                 }
             }
         }
+    }
+}
+
+/** Ett omslag i en rad: med en stor placeringssiffra i topplistor, annars som det är. */
+@Composable
+private fun RankedOrPlain(rank: Int?, cardWidth: Dp, content: @Composable () -> Unit) {
+    if (rank != null) {
+        RankedPoster(rank = rank, cardWidth = cardWidth, content = content)
+    } else {
+        Box(Modifier.width(cardWidth)) { content() }
     }
 }
 
@@ -800,6 +852,8 @@ internal class HomeCatalog(
     val bestByGenre: Map<Genre, List<Movie>>,
     val leading: List<HomeRow>,
     val trailing: List<HomeRow>,
+    /** Versionerna katalogen byggdes med: samma film i flera utföranden räknas en gång. */
+    val versions: VersionIndex,
 ) {
     /**
      * Raderna i ordning: det personliga först (Fortsätt titta, Min lista,
@@ -811,7 +865,14 @@ internal class HomeCatalog(
             .filter { it.kind != WatchKind.LIVE && (it.resumable || it.upNext) }
             .filter { it.kind != WatchKind.MOVIE || movieByStream.containsKey("${it.sourceId}|${it.itemId}") }
             // En plats per serie: det senaste avsnittet.
-            .distinctBy { if (it.kind == WatchKind.EPISODE) "serie:${it.sourceId}:${it.seriesId}" else it.identity }
+            .distinctBy { entry ->
+                when (entry.kind) {
+                    WatchKind.EPISODE -> seriesById["${entry.sourceId}|${entry.seriesId}"]?.let { versions.groupKeyOf(it) }
+                        ?: "serie:${entry.sourceId}:${entry.seriesId}"
+                    WatchKind.MOVIE -> movieByStream["${entry.sourceId}|${entry.itemId}"]?.let { versions.groupKeyOf(it) } ?: entry.identity
+                    else -> entry.identity
+                }
+            }
             .take(20)
             .map { ResumeItem(it) }
             .toList()
@@ -822,6 +883,12 @@ internal class HomeCatalog(
                 ListKind.MOVIE -> movieByKey[entry.key]?.let { MovieItem(it) }
                 ListKind.SERIES -> seriesByKey[entry.key]?.let { SeriesItem(it) }
                 ListKind.CHANNEL -> null
+            }
+        }.distinctBy { item ->
+            when (item) {
+                is MovieItem -> versions.groupKeyOf(item.movie)
+                is SeriesItem -> versions.groupKeyOf(item.series)
+                else -> item.key
             }
         }
         if (mine.isNotEmpty()) rows += HomeRow("Min lista", mine)
@@ -850,12 +917,14 @@ internal class HomeCatalog(
         for (entry in history) {
             if (entry.kind != WatchKind.MOVIE) continue
             val movie = movieByStream["${entry.sourceId}|${entry.itemId}"] ?: continue
-            seen += movie.key
+            // Sett i en version är sett i alla.
+            versions.versionsOf(movie).forEach { seen += it.key }
             genresOfMovie[movie.key]?.forEach { counts[it] = (counts[it] ?: 0) + 2 }
         }
         for (entry in myList) {
             if (entry.kind != ListKind.MOVIE) continue
             seen += entry.key
+            movieByKey[entry.key]?.let { saved -> versions.versionsOf(saved).forEach { seen += it.key } }
             genresOfMovie[entry.key]?.forEach { counts[it] = (counts[it] ?: 0) + 1 }
         }
         val top = counts.entries.sortedByDescending { it.value }.take(2).map { it.key }
@@ -867,7 +936,7 @@ internal class HomeCatalog(
         for (i in 0 until longest) {
             for (list in lists) list.getOrNull(i)?.let { picks += it }
         }
-        val items = picks.distinctBy { it.key }.take(ROW).map { MovieItem(it) }
+        val items = picks.distinctBy { versions.groupKeyOf(it) }.take(ROW).map { MovieItem(it) }
         return if (items.size >= 6) HomeRow("Rekommenderat för dig", items) else null
     }
 }
@@ -878,15 +947,34 @@ private val homeGenres = listOf(
     Genre.FAMILY, Genre.ANIMATION, Genre.ROMANCE, Genre.FANTASY, Genre.ADVENTURE, Genre.DOCUMENTARY, Genre.WAR,
 )
 
-internal fun buildCatalog(library: Library, tmdb: Map<String, TmdbFacts>, facts: Map<String, MovieFacts>): HomeCatalog {
+internal fun buildCatalog(
+    library: Library,
+    tmdb: Map<String, TmdbFacts>,
+    facts: Map<String, MovieFacts>,
+    versions: VersionIndex,
+    trending: List<TrendingTitle> = emptyList(),
+    newSinceUtc: Long = 0L,
+    hiddenGroups: Set<String> = emptySet(),
+): HomeCatalog {
     fun movieTmdb(movie: Movie): TmdbFacts? = if (tmdb.isEmpty()) null else tmdb[HomeKeys.movie(movie)]?.takeIf { it.found }
     fun seriesTmdb(series: Series): TmdbFacts? = if (tmdb.isEmpty()) null else tmdb[HomeKeys.series(series)]?.takeIf { it.found }
     // Samma film finns ofta flera gånger hos leverantören (HD, 4K, språk): en gång per rad.
-    fun identity(movie: Movie): String = movieTmdb(movie)?.id?.let { "tmdb:$it" } ?: TitleCleaner.normalize(movie.name)
-    fun seriesIdentity(series: Series): String = seriesTmdb(series)?.id?.let { "tmdb:$it" } ?: TitleCleaner.normalize(series.name)
+    // Versionerna avgör; tills de är klara duger TMDB-id eller titeln.
+    fun identity(movie: Movie): String =
+        if (!versions.isEmpty) versions.groupKeyOf(movie)
+        else movieTmdb(movie)?.id?.let { "tmdb:$it" } ?: TitleCleaner.normalize(movie.name)
+    fun seriesIdentity(series: Series): String =
+        if (!versions.isEmpty) versions.groupKeyOf(series)
+        else seriesTmdb(series)?.id?.let { "tmdb:$it" } ?: TitleCleaner.normalize(series.name)
 
-    val movies = library.movies
-    val series = library.series
+    // Det som döljs av språkvalet eller en dold kategori syns inte heller här.
+    val movies = library.movies.filterNot { versions.isHidden(it) }
+    val series = library.series.filterNot { versions.isHidden(it) }
+    val channels = if (hiddenGroups.isEmpty()) {
+        library.channels
+    } else {
+        library.channels.filter { LibraryFilter.groupKey(LibraryFilter.LIVE, it.group) !in hiddenGroups }
+    }
     val score = HashMap<String, Double>(movies.size * 2)
     for (movie in movies) {
         val value = movieTmdb(movie)?.let { weightedScore(it.rating, it.votes) } ?: weightedScore(movie.rating, PROVIDER_VOTES)
@@ -896,12 +984,59 @@ internal fun buildCatalog(library: Library, tmdb: Map<String, TmdbFacts>, facts:
     val leading = ArrayList<HomeRow>()
     val trailing = ArrayList<HomeRow>()
     fun movieRow(title: String, list: List<Movie>, into: MutableList<HomeRow>) {
-        val items = list.distinctBy { identity(it) }.take(ROW).map { MovieItem(it) }
+        // Filmens bästa version på kortet, oavsett vilken version som tog den hit.
+        val items = list.distinctBy { identity(it) }.take(ROW).map { MovieItem(versions.versionsOf(it).first()) }
         if (items.size >= 6) into += HomeRow(title, items)
     }
     fun seriesRow(title: String, list: List<Series>, into: MutableList<HomeRow>) {
-        val items = list.distinctBy { seriesIdentity(it) }.take(ROW).map { SeriesItem(it) }
+        val items = list.distinctBy { seriesIdentity(it) }.take(ROW).map { SeriesItem(versions.versionsOf(it).first()) }
         if (items.size >= 6) into += HomeRow(title, items)
+    }
+
+    // Trendar just nu: TMDB:s lista för i dag, med det som finns i biblioteket.
+    if (trending.isNotEmpty()) {
+        val movieById = HashMap<Int, Movie>()
+        val movieByTitle = HashMap<String, Movie>()
+        for (movie in movies) {
+            movieTmdb(movie)?.id?.let { movieById.putIfAbsent(it, movie) }
+            movieByTitle.putIfAbsent(HomeKeys.movie(movie), movie)
+        }
+        val seriesByTmdb = HashMap<Int, Series>()
+        val seriesByTitle = HashMap<String, Series>()
+        for (s in series) {
+            seriesTmdb(s)?.id?.let { seriesByTmdb.putIfAbsent(it, s) }
+            seriesByTitle.putIfAbsent(HomeKeys.series(s), s)
+        }
+        val ranked = ArrayList<HomeItem>()
+        val taken = HashSet<String>()
+        for (title in trending) {
+            if (ranked.size >= TRENDING_ROW) break
+            val item: HomeItem? = if (title.kind == "movie") {
+                (movieById[title.id] ?: trendingMatch(movieByTitle, "movie", title))?.let { MovieItem(versions.versionsOf(it).first()) }
+            } else {
+                (seriesByTmdb[title.id] ?: trendingMatch(seriesByTitle, "tv", title))?.let { SeriesItem(versions.versionsOf(it).first()) }
+            }
+            val identity = when (item) {
+                is MovieItem -> identity(item.movie)
+                is SeriesItem -> seriesIdentity(item.series)
+                else -> null
+            }
+            if (item != null && identity != null && taken.add(identity)) ranked += item
+        }
+        if (ranked.size >= 3) leading += HomeRow("Trendar just nu", ranked, ranked = true)
+    }
+
+    // Nytt sedan sist: filmer och serier som kommit till sedan förra besöket, nyast först.
+    if (newSinceUtc > 0L) {
+        val fresh = ArrayList<Pair<Long, HomeItem>>()
+        movies.asSequence().filter { it.addedUtc >= newSinceUtc }.sortedByDescending { it.addedUtc }
+            .distinctBy { identity(it) }.take(ROW)
+            .forEach { fresh += it.addedUtc to MovieItem(versions.versionsOf(it).first()) }
+        series.asSequence().filter { it.addedUtc >= newSinceUtc }.sortedByDescending { it.addedUtc }
+            .distinctBy { seriesIdentity(it) }.take(ROW)
+            .forEach { fresh += it.addedUtc to SeriesItem(versions.versionsOf(it).first()) }
+        val items = fresh.sortedByDescending { it.first }.map { it.second }.distinctBy { it.key }.take(ROW)
+        if (items.size >= 4) leading += HomeRow("Nytt sedan sist", items)
     }
 
     val popular = movies.mapNotNull { m -> movieTmdb(m)?.popularity?.takeIf { it > 0.0 }?.let { m to it } }
@@ -919,7 +1054,7 @@ internal fun buildCatalog(library: Library, tmdb: Map<String, TmdbFacts>, facts:
     val genresOfMovie = HashMap<String, MutableList<Genre>>()
     index.movies.forEach { (genre, list) -> list.forEach { genresOfMovie.getOrPut(it.key) { ArrayList(3) } += genre } }
     val bestByGenre = index.movies.mapValues { (_, list) ->
-        list.sortedByDescending { score[it.key] ?: 0.0 }.distinctBy { identity(it) }.take(60)
+        list.filterNot { versions.isHidden(it) }.sortedByDescending { score[it.key] ?: 0.0 }.distinctBy { identity(it) }.take(60)
     }
     for (genre in homeGenres) movieRow(genre.label, bestByGenre[genre] ?: emptyList(), trailing)
     // Julfilmerna i november och december.
@@ -929,16 +1064,26 @@ internal fun buildCatalog(library: Library, tmdb: Map<String, TmdbFacts>, facts:
     return HomeCatalog(
         movieByKey = movies.associateBy { it.key },
         seriesByKey = series.associateBy { it.key },
-        channelByKey = library.channels.associateBy { it.key },
-        channelByHistoryId = library.channels.associateBy { "${it.sourceId}|${it.streamId?.toString() ?: "namn:${it.name}"}" },
+        channelByKey = channels.associateBy { it.key },
+        channelByHistoryId = channels.associateBy { "${it.sourceId}|${it.streamId?.toString() ?: "namn:${it.name}"}" },
         movieByStream = movies.associateBy { "${it.sourceId}|${it.streamId}" },
         seriesById = series.associateBy { "${it.sourceId}|${it.seriesId}" },
         genresOfMovie = genresOfMovie,
         bestByGenre = bestByGenre,
         leading = leading,
         trailing = trailing,
+        versions = versions,
     )
 }
 
 /** Som AppState: leverantörens betyg vägs som om få hade röstat. */
 private const val PROVIDER_VOTES = 30
+
+/** Topp tio, som på streamingtjänsterna. */
+private const val TRENDING_ROW = 10
+
+/** En trendande titel i biblioteket efter titel och år, när TMDB-id:t inte är känt ännu. */
+private fun <T> trendingMatch(byKey: Map<String, T>, kind: String, title: TrendingTitle): T? =
+    byKey[TmdbStore.keyOf(kind, title.title, title.year)]
+        ?: byKey[TmdbStore.keyOf(kind, title.original, title.year)]
+        ?: byKey[TmdbStore.keyOf(kind, title.title, null)]

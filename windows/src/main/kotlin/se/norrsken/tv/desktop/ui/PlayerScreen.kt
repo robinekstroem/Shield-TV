@@ -14,9 +14,6 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.unit.lerp
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
@@ -98,9 +95,12 @@ fun PlayerScreen(state: AppState, collapse: Float = 0f, highlighted: Boolean = f
         }
     }
 
-    // En film eller ett avsnitt som spelats klart stänger spelaren.
+    // En film eller ett avsnitt som spelats klart stänger spelaren. Finns ett nästa
+    // avsnitt spelas det i stället, om man inte valt att titta klart.
     LaunchedEffect(status.phase, playing) {
-        if (status.phase == Phase.ENDED && !playing.live) state.closePlayer()
+        if (status.phase == Phase.ENDED && !playing.live) {
+            if (!state.miniPlayer && state.nextUp != null && !state.nextUpDismissed) state.playNextUp() else state.closePlayer()
+        }
     }
 
     val problem = problemFor(state, playing, status)
@@ -125,7 +125,14 @@ fun PlayerScreen(state: AppState, collapse: Float = 0f, highlighted: Boolean = f
                 }
             }
             .hoverable(hoverSource)
-            .pointerHoverIcon(if (controlsVisible || mini) PointerIcon.Default else hiddenCursor),
+            .pointerHoverIcon(
+                when {
+                    // Minispelaren förstoras med ett klick.
+                    mini -> PointerIcon.Hand
+                    controlsVisible -> PointerIcon.Default
+                    else -> hiddenCursor
+                },
+            ),
     ) {
         if (player != null) {
             VideoSurface(
@@ -192,8 +199,19 @@ fun PlayerScreen(state: AppState, collapse: Float = 0f, highlighted: Boolean = f
             )
         }
 
+        // Hoppa över intro och Nästa avsnitt, nere till höger.
+        if (!mini && problem == null && !state.trackPanelOpen) {
+            PlayerPrompts(
+                state = state,
+                status = status,
+                lifted = controlsVisible,
+                modifier = Modifier.align(Alignment.BottomEnd),
+            )
+        }
+
         if (mini) {
-            MiniOverlay(state, playing, status, visible = hovered || highlighted, now = now, modifier = Modifier.fillMaxSize())
+            // Titel och knappar står i sidofältet under bilden; på bilden bara förstora.
+            DockedOverlay(state, playing, status, visible = hovered || highlighted, now = now, modifier = Modifier.fillMaxSize())
         }
     }
 }
@@ -273,7 +291,7 @@ private fun BottomBar(state: AppState, playing: NowPlaying, status: VideoPlayer.
             .padding(start = 20.dp, end = 20.dp, top = 40.dp, bottom = 14.dp),
     ) {
         if (!playing.live && status.lengthMs > 0) {
-            SeekBar(status, onSeek = { fraction -> player?.seekTo(fraction) })
+            SeekBar(status, onSeek = { fraction -> state.seekTo(fraction) })
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             val playPause = if (paused) Glyphs.Play else Glyphs.Pause
@@ -283,9 +301,9 @@ private fun BottomBar(state: AppState, playing: NowPlaying, status: VideoPlayer.
                 IconAction(playPause, playPauseLabel, onClick = { state.togglePause() }, size = 52.dp, iconSize = 30.dp, emphasized = true)
                 IconAction(Glyphs.SkipNext, "Nästa kanal", onClick = { state.switchChannel(1) })
             } else {
-                IconAction(Glyphs.Replay10, "Bakåt 10 sekunder", onClick = { player?.seekBy(-10_000) })
+                IconAction(Glyphs.Replay10, "Bakåt 10 sekunder", onClick = { state.seekBy(-10_000) })
                 IconAction(playPause, playPauseLabel, onClick = { state.togglePause() }, size = 52.dp, iconSize = 30.dp, emphasized = true)
-                IconAction(Glyphs.Forward10, "Framåt 10 sekunder", onClick = { player?.seekBy(10_000) })
+                IconAction(Glyphs.Forward10, "Framåt 10 sekunder", onClick = { state.seekBy(10_000) })
                 if (status.lengthMs > 0) {
                     Spacer(Modifier.width(10.dp))
                     Text(
@@ -550,17 +568,15 @@ private fun formatTime(ms: Long): String {
 }
 
 /**
- * Spelaren i huvudfönstret. Minimeras den glider bilden ner i hörnet och
- * spelar vidare, medan resten av appen går att använda som vanligt. Samma
- * PlayerScreen hela vägen: bilden byts aldrig ut, den bara krymper.
+ * Spelaren i huvudfönstret. Minimeras den glider bilden upp i sidofältets
+ * övre hörn och spelar vidare, medan resten av appen går att använda som
+ * vanligt. Samma PlayerScreen hela vägen: bilden byts aldrig ut, den bara
+ * krymper. [collapse] är hur långt: 0 över allt, 1 liten.
  */
 @Composable
-fun PlayerHost(state: AppState) {
+fun PlayerHost(state: AppState, collapse: () -> Float) {
     val palette = LocalPalette.current
-    val collapse by animateFloatAsState(
-        targetValue = if (state.miniPlayer) 1f else 0f,
-        animationSpec = tween(durationMillis = 460, easing = FastOutSlowInEasing),
-    )
+    val progress = collapse()
     // Fjärrkontroll och tangentbord: rutan i hörnet går att markera, och OK
     // tar bilden till helskärm igen. I helskärm står markeringen på bilden,
     // så att fjärrkontrollen alltid svarar direkt.
@@ -576,24 +592,22 @@ fun PlayerHost(state: AppState) {
         }
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val miniWidth = (maxWidth * 0.27f).coerceIn(300.dp, 480.dp)
-        val miniHeight = miniWidth * (9f / 16f)
-        val margin = 24.dp
-        val shape = RoundedCornerShape(lerp(0.dp, 14.dp, collapse))
+        // Liten: överst i sidofältet, i facket det håller fritt.
+        val shape = RoundedCornerShape(lerp(0.dp, MiniDock.radius, progress))
         Box(
             Modifier
                 .offset(
-                    x = lerp(0.dp, maxWidth - miniWidth - margin, collapse),
-                    y = lerp(0.dp, maxHeight - miniHeight - margin, collapse),
+                    x = lerp(0.dp, MiniDock.inset, progress),
+                    y = lerp(0.dp, MiniDock.top, progress),
                 )
                 .size(
-                    width = lerp(maxWidth, miniWidth, collapse),
-                    height = lerp(maxHeight, miniHeight, collapse),
+                    width = lerp(maxWidth, MiniDock.videoWidth, progress),
+                    height = lerp(maxHeight, MiniDock.videoHeight, progress),
                 )
-                .glow(palette.glowOf((if (focused) 1f else 0.55f) * collapse), shape, 30.dp)
-                .shadow(lerp(0.dp, 24.dp, collapse), shape)
+                .glow(palette.glowOf((if (focused) 1f else 0.55f) * progress), shape, 22.dp)
+                .shadow(lerp(0.dp, 14.dp, progress), shape)
                 .clip(shape)
-                .then(if (focused && collapse > 0.5f) Modifier.border(3.dp, palette.focus, shape) else Modifier)
+                .then(if (focused && progress > 0.5f) Modifier.border(3.dp, palette.focus, shape) else Modifier)
                 .focusRequester(requester)
                 .onKeyEvent { event ->
                     val ok = event.key == Key.Enter || event.key == Key.NumPadEnter || event.key == Key.DirectionCenter
@@ -606,18 +620,31 @@ fun PlayerHost(state: AppState) {
                 }
                 .focusable(interactionSource = focusSource),
         ) {
-            PlayerScreen(state, collapse, highlighted = focused)
+            PlayerScreen(state, progress, highlighted = focused)
         }
     }
 }
 
+/** Filmens tid, eller hur långt programmet som sänds just nu på kanalen kommit. */
+private fun miniProgress(state: AppState, playing: NowPlaying, status: VideoPlayer.Status, now: Long): Float? = when {
+    !playing.live && status.lengthMs > 0 -> (status.timeMs.toFloat() / status.lengthMs).coerceIn(0f, 1f)
+    else -> playing.channel?.let { channel -> state.guide.current(channel, now)?.progress(now) }
+}
+
+@Composable
+private fun ProgressLine(progress: Float, modifier: Modifier) {
+    val palette = LocalPalette.current
+    Box(modifier.fillMaxWidth().height(3.dp).background(palette.focus.copy(alpha = 0.25f))) {
+        Box(Modifier.fillMaxHeight().fillMaxWidth(progress).background(palette.focus))
+    }
+}
+
 /**
- * Minispelarens kontroller, när musen står på den: titel, stäng, paus och
- * förstora. Förloppet längst ned syns alltid — filmens tid, eller programmet
- * som sänds just nu på kanalen.
+ * Bilden i sidofältet, när musen står på den: dämpad, med ett tecken för
+ * att den förstoras med ett klick. Förloppet längst ned syns alltid.
  */
 @Composable
-private fun MiniOverlay(
+private fun DockedOverlay(
     state: AppState,
     playing: NowPlaying,
     status: VideoPlayer.Status,
@@ -625,66 +652,99 @@ private fun MiniOverlay(
     now: Long,
     modifier: Modifier,
 ) {
-    val palette = LocalPalette.current
-    val paused = status.phase == Phase.PAUSED
-    val progress: Float? = when {
-        !playing.live && status.lengthMs > 0 -> (status.timeMs.toFloat() / status.lengthMs).coerceIn(0f, 1f)
-        else -> playing.channel?.let { channel -> state.guide.current(channel, now)?.progress(now) }
-    }
+    val progress = miniProgress(state, playing, status, now)
     Box(modifier) {
         AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize()) {
-            Box(
-                Modifier.fillMaxSize().background(
-                    Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.7f), Color.Transparent, Color.Black.copy(alpha = 0.7f))),
-                ),
-            ) {
-                Row(
-                    Modifier.align(Alignment.TopStart).fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)), contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier.size(46.dp).clip(RoundedCornerShape(23.dp)).background(Color.Black.copy(alpha = 0.55f)),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    if (playing.live) {
-                        Tag("LIVE", palette.signal)
-                        Spacer(Modifier.width(8.dp))
-                    }
-                    Text(
-                        playing.title,
-                        style = MaterialTheme.typography.labelLarge,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    IconAction(Glyphs.Close, "Stäng", onClick = { state.closePlayer() }, size = 34.dp, iconSize = 18.dp)
-                }
-                Row(
-                    Modifier.align(Alignment.Center),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconAction(
-                        if (paused) Glyphs.Play else Glyphs.Pause,
-                        if (paused) "Spela" else "Paus",
-                        onClick = { state.togglePause() },
-                        size = 44.dp,
-                        iconSize = 26.dp,
-                        emphasized = true,
-                    )
-                    IconAction(
-                        Glyphs.OpenInFull,
-                        "Förstora",
-                        onClick = { state.expandPlayer() },
-                        size = 44.dp,
-                        iconSize = 20.dp,
-                        emphasized = true,
-                    )
+                    Icon(Glyphs.OpenInFull, contentDescription = "Förstora", tint = Color.White, modifier = Modifier.size(20.dp))
                 }
             }
         }
         if (progress != null) {
-            Box(
-                Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp).background(palette.focus.copy(alpha = 0.25f)),
-            ) {
-                Box(Modifier.fillMaxHeight().fillMaxWidth(progress).background(palette.focus))
+            ProgressLine(progress, Modifier.align(Alignment.BottomStart))
+        }
+    }
+}
+
+/**
+ * "Spelas nu" i sidofältet, under minispelarens bild: titel, vad som sänds
+ * eller hur länge det är kvar, och paus, förstora och stäng.
+ */
+@Composable
+internal fun MiniPlayerCard(state: AppState, modifier: Modifier = Modifier) {
+    val palette = LocalPalette.current
+    // Det som spelades står kvar medan raden glider undan efter Stäng.
+    val last = remember { arrayOfNulls<NowPlaying>(1) }
+    val playing = state.nowPlaying?.also { last[0] = it } ?: last[0] ?: return
+    val player = state.videoPlayer
+    val rawStatus by (player?.status ?: idleStatus).collectAsState()
+    val status = if (rawStatus.session == state.playbackSession) rawStatus else VideoPlayer.Status(phase = Phase.OPENING)
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(10_000)
+            now = System.currentTimeMillis()
+        }
+    }
+    val paused = status.phase == Phase.PAUSED
+    val problem = problemFor(state, playing, status)
+    val onAir = playing.channel?.let { state.guide.current(it, now) }
+    val detail = when {
+        problem != null -> problem.title
+        player == null || status.phase == Phase.OPENING || status.phase == Phase.IDLE -> "Startar…"
+        onAir != null -> (if (paused) "Pausad · " else "") + clockText(onAir.start) + "–" + clockText(onAir.stop) + "  " + onAir.title
+        !playing.live && status.lengthMs > 0 -> listOfNotNull(
+            if (paused) "Pausad" else null,
+            remainingText(status.lengthMs - status.timeMs),
+            playing.subtitle?.takeIf { it.isNotBlank() },
+        ).joinToString(" · ")
+        paused -> "Pausad"
+        else -> playing.subtitle?.takeIf { it.isNotBlank() } ?: if (playing.live) "Direktsändning" else ""
+    }
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(start = 2.dp, end = 6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (playing.live) {
+                    Tag("LIVE", palette.signal)
+                    Spacer(Modifier.width(7.dp))
+                }
+                Text(playing.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (detail.isNotEmpty()) {
+                Text(
+                    detail,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (problem != null) palette.signal else palette.textTertiary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
             }
         }
+        IconAction(
+            if (paused) Glyphs.Play else Glyphs.Pause,
+            if (paused) "Spela" else "Paus",
+            onClick = { state.togglePause() },
+            size = 34.dp,
+            iconSize = 18.dp,
+        )
+        IconAction(Glyphs.OpenInFull, "Förstora", onClick = { state.expandPlayer() }, size = 34.dp, iconSize = 16.dp)
+        IconAction(Glyphs.Close, "Stäng", onClick = { state.closePlayer() }, size = 34.dp, iconSize = 16.dp)
+    }
+}
+
+/** "1 tim 12 min kvar", "42 min kvar". */
+private fun remainingText(ms: Long): String {
+    val minutes = ((ms.coerceAtLeast(0L) + 59_999L) / 60_000L).toInt()
+    val hours = minutes / 60
+    val rest = minutes % 60
+    return when {
+        hours == 0 -> "$minutes min kvar"
+        rest == 0 -> "$hours tim kvar"
+        else -> "$hours tim $rest min kvar"
     }
 }

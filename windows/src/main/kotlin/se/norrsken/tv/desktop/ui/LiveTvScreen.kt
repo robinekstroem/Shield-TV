@@ -32,6 +32,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import se.norrsken.tv.desktop.AppState
+import se.norrsken.tv.desktop.data.LibraryFilter
 import se.norrsken.tv.desktop.Screen
 import se.norrsken.tv.desktop.data.LiveChannel
 import se.norrsken.tv.desktop.data.Programme
@@ -46,7 +47,7 @@ fun LiveTvScreen(state: AppState) {
 
     val group = state.liveGroup
     val query = state.liveQuery
-    val channels = remember(library, group, query) { state.filteredChannels() }
+    val channels = remember(library, group, query, state.hiddenGroups) { state.filteredChannels() }
     val listState = rememberLazyListState()
     val guide = state.guide
     val clock = state.clock
@@ -56,7 +57,7 @@ fun LiveTvScreen(state: AppState) {
         GroupColumn(
             allLabel = "Alla kanaler",
             total = library.channels.size,
-            groups = library.liveGroups,
+            groups = state.visibleGroups(LibraryFilter.LIVE, library.liveGroups),
             counts = library.liveCounts,
             selected = group,
             onSelect = { state.liveGroup = it },

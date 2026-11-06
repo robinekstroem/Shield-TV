@@ -68,7 +68,8 @@ kotlin {
 }
 
 dependencies {
-    // Skia-renderaren för det operativsystem bygget körs på — Windows i CI.
+    // Skia-renderaren för det operativsystem bygget körs på: Windows hos
+    // "Installera Tv", Mac (Apple Silicon eller Intel) hos GitHub.
     implementation(compose.desktop.currentOs)
     implementation("org.jetbrains.compose.runtime:runtime:1.12.1")
     implementation("org.jetbrains.compose.foundation:foundation:1.12.1")
@@ -80,7 +81,8 @@ dependencies {
     // 4.8.3 hålls fast medvetet: 4.10 ändrade callback-API:t som
     // VideoPlayer.kt bygger på.
     implementation("uk.co.caprica:vlcj:4.8.3")
-    // Windows DPAPI (lösenord), energisparläge och mörk titelrad.
+    // Windows DPAPI (lösenord), energisparläge och mörk titelrad; på Mac
+    // laddningen av VLC:s bibliotek.
     implementation("net.java.dev.jna:jna-platform:5.14.0")
 
     // Beroenden för den delade Android-koden. På Android finns org.json i
@@ -107,9 +109,20 @@ compose.desktop {
             // felsöka på distans. Går att banta senare med suggestRuntimeModules.
             includeAllModules = true
 
-            // VLC (libvlc.dll, libvlccore.dll, plugins/) läggs i
-            // app-resources/windows-x64/vlc av CI-bygget och följer med appen.
+            // VLC följer med appen. Windows: libvlc.dll, libvlccore.dll och plugins/
+            // läggs i app-resources/windows-x64/vlc av "Installera Tv". Mac: Macens
+            // VLC (lib/ och plugins/) läggs i Tv.app av GitHub-bygget, se
+            // .github/workflows/mac.yml, så att filerna behåller sina länkar.
             appResourcesRootDir.set(layout.projectDirectory.dir("app-resources"))
+
+            // Mac: samma app, som Tv.app. Byggs av GitHub på en Mac, en gång för
+            // Apple Silicon och en för Intel (.github/workflows/mac.yml).
+            macOS {
+                bundleID = "se.norrsken.tv"
+                dockName = "Tv"
+                appCategory = "public.app-category.entertainment"
+                iconFile.set(project.file("icon.icns"))
+            }
 
             // Installationsfilen: en .msi som installerar för den inloggade
             // användaren — inga administratörsrättigheter, inga frågor om mapp.

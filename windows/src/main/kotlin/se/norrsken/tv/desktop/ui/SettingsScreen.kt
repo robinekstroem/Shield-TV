@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import se.norrsken.tv.data.playlist.ImportState
 import se.norrsken.tv.desktop.AppState
+import se.norrsken.tv.desktop.data.LibraryFilter
 import se.norrsken.tv.desktop.data.AppDirs
 import se.norrsken.tv.desktop.data.SecretBox
 import se.norrsken.tv.desktop.data.Source
@@ -58,6 +59,12 @@ private val syncFormat: DateTimeFormatter =
 fun SettingsScreen(state: AppState) {
     val palette = LocalPalette.current
     val scroll = rememberScrollState()
+    // Kategorierna väljs på en egen sida: listorna är långa.
+    var managing by remember { mutableStateOf<Char?>(null) }
+    managing?.let { kind ->
+        CategoryManager(state, kind, onKind = { managing = it }, onClose = { managing = null })
+        return
+    }
     Box(Modifier.fillMaxSize()) {
         Column(
             Modifier
@@ -110,6 +117,41 @@ fun SettingsScreen(state: AppState) {
                     BackgroundsCard(state)
                 }
 
+                Section("Bibliotek") {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "Språk",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = palette.textTertiary,
+                            modifier = Modifier.width(140.dp),
+                        )
+                        Chip("Alla", selected = !state.hideForeign, onClick = { state.updateHideForeign(false) })
+                        Chip("Svenska, nordiska och engelska", selected = state.hideForeign, onClick = { state.updateHideForeign(true) })
+                    }
+                    Text(
+                        "Döljer filmer och serier som bara finns på andra språk, som polsk speakerröst eller arabisk text. " +
+                            "Inget tas bort: välj Alla för att se allt igen.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = palette.textTertiary,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "Kategorier",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = palette.textTertiary,
+                            modifier = Modifier.width(140.dp),
+                        )
+                        SecondaryButton("Live-tv" + hiddenSuffix(state.hiddenCount(LibraryFilter.LIVE)), onClick = { managing = LibraryFilter.LIVE })
+                        SecondaryButton("Filmer" + hiddenSuffix(state.hiddenCount(LibraryFilter.MOVIE)), onClick = { managing = LibraryFilter.MOVIE })
+                        SecondaryButton("Serier" + hiddenSuffix(state.hiddenCount(LibraryFilter.SERIES)), onClick = { managing = LibraryFilter.SERIES })
+                    }
+                    Text(
+                        "Välj vilka kategorier som syns. Dolda kategorier försvinner ur listorna, tablån och startsidan.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = palette.textTertiary,
+                    )
+                }
+
                 Section("Bild och ljud") {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
@@ -143,11 +185,7 @@ fun SettingsScreen(state: AppState) {
                 Section("Uppspelning") {
                     InfoRow("Spelarmotor", VlcRuntime.description)
                     InfoRow("User-Agent", state.userAgent)
-                    InfoRow(
-                        "Lösenord",
-                        if (SecretBox.available) "Skyddas med Windows DPAPI — bara ditt Windows-konto kan läsa dem."
-                        else "Windows lösenordsskydd är inte tillgängligt. Inloggningar sparas inte.",
-                    )
+                    InfoRow("Lösenord", SecretBox.description)
                 }
 
                 Section("Tablå") {
@@ -181,6 +219,7 @@ fun SettingsScreen(state: AppState) {
                     }
                     InfoRow("Data", AppDirs.config.absolutePath)
                     InfoRow("Bibliotek", AppDirs.cache.absolutePath)
+                    state.coverStatus?.let { InfoRow("Omslag", it) }
                 }
             }
         }
@@ -574,3 +613,6 @@ private fun BackgroundsCard(state: AppState) {
         }
     }
 }
+
+/** " · 3 dolda" efter knappens namn, eller inget. */
+private fun hiddenSuffix(count: Int): String = if (count > 0) " · $count dolda" else ""

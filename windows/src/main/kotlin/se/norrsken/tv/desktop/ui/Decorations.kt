@@ -1,5 +1,6 @@
 package se.norrsken.tv.desktop.ui
 
+import kotlin.time.TimeSource
 import kotlin.math.min
 import kotlin.math.abs
 import androidx.compose.ui.geometry.Size
@@ -77,10 +78,10 @@ internal fun rememberSeconds(running: Boolean, fps: Int): MutableFloatState {
     LaunchedEffect(running, fps) {
         if (!running) return@LaunchedEffect
         val offset = seconds.floatValue
-        val start = System.nanoTime()
+        val start = TimeSource.Monotonic.markNow()
         while (true) {
             if (fps >= 60) withFrameNanos { } else delay(1000L / fps)
-            seconds.floatValue = offset + (System.nanoTime() - start) / 1_000_000_000f
+            seconds.floatValue = offset + start.elapsedNow().inWholeNanoseconds / 1_000_000_000f
         }
     }
     return seconds

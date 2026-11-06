@@ -30,6 +30,12 @@ data class Settings(
     val tmdbKey: String? = null,
     /** Egna bakgrundsbilder: sökvägar till appens kopior. */
     val backgrounds: List<String> = emptyList(),
+    /** När appen senast öppnades: det som kommit till sedan dess är "nytt". 0: aldrig. */
+    val lastVisitUtc: Long = 0L,
+    /** Dölj det som bara finns på andra språk än svenska, nordiska och engelska. */
+    val hideForeign: Boolean = false,
+    /** Dolda kategorier, som "m|Action" (LibraryFilter.groupKey). */
+    val hiddenGroups: List<String> = emptyList(),
 )
 
 class Storage {
@@ -95,6 +101,11 @@ class Storage {
             backgrounds = o.optJSONArray("backgrounds")?.let { array ->
                 (0 until array.length()).mapNotNull { array.optString(it, "").ifEmpty { null } }
             }.orEmpty(),
+            lastVisitUtc = o.optLong("lastVisitUtc", 0L),
+            hideForeign = o.optBoolean("hideForeign", false),
+            hiddenGroups = o.optJSONArray("hiddenGroups")?.let { array ->
+                (0 until array.length()).mapNotNull { array.optString(it, "").ifEmpty { null } }
+            }.orEmpty(),
         )
     }.getOrDefault(Settings())
 
@@ -110,6 +121,9 @@ class Storage {
                 .put("theme", settings.theme)
                 .put("tmdbKey", settings.tmdbKey)
                 .put("backgrounds", JSONArray(settings.backgrounds))
+                .put("lastVisitUtc", settings.lastVisitUtc)
+                .put("hideForeign", settings.hideForeign)
+                .put("hiddenGroups", JSONArray(settings.hiddenGroups))
             writeAtomically(settingsFile, o.toString(2).toByteArray(Charsets.UTF_8))
         }
     }

@@ -1,5 +1,14 @@
 package se.norrsken.tv.desktop
 
+import se.norrsken.tv.desktop.data.VersionIndex
+import se.norrsken.tv.desktop.data.LibraryFilter
+import se.norrsken.tv.desktop.data.SeriesMark
+import se.norrsken.tv.desktop.data.SeriesMarksStore
+import se.norrsken.tv.desktop.data.TmdbExtrasStore
+import se.norrsken.tv.desktop.data.TrendingTitle
+import se.norrsken.tv.desktop.data.VersionTags
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import se.norrsken.tv.desktop.data.MyListStore
 import se.norrsken.tv.desktop.data.ListKind
 import se.norrsken.tv.desktop.data.ListEntry
@@ -229,6 +238,64 @@ class AppState {
     /** Titel till TMDB-nyckel, per film och serie: titelstädningen körs en gång. */
     private val tmdbKeys = HashMap<String, String>()
 
+    // --- Versioner: samma film i flera utföranden (4K, svensk text, andra språk) ---
+    /**
+     * Dubbletter som en titel med versioner. Byggs i bakgrunden när biblioteket
+     * eller TMDB ändras; tills det första är klart visas listorna som de är.
+     */
+    var versions by mutableStateOf(VersionIndex.EMPTY)
+        private set
+    private var versionsJob: Job? = null
+    private var versionsDirty = false
+
+    // --- Loggor, trender och nytt sedan sist -----------------------------------------
+    /** Filmernas och seriernas loggor från TMDB, per "movie:id" eller "tv:id". Tom text: ingen logga. */
+    var tmdbLogos by mutableStateOf<Map<String, String>>(emptyMap())
+        private set
+    /** Dagens trendlista från TMDB. */
+    var trending by mutableStateOf<List<TrendingTitle>>(emptyList())
+        private set
+    private var trendingAt = 0L
+    private val extrasStore = TmdbExtrasStore()
+    private val logoRequests = HashSet<String>()
+    private val logoGate = Semaphore(2)
+    private var extrasSaveJob: Job? = null
+    /** Det som kommit till efter detta är nytt: sedan förra besöket, högst en månad bakåt. */
+    var newSinceUtc by mutableStateOf(0L)
+        private set
+    private var lastVisitUtc = 0L
+
+    // --- Biblioteket: språk och dolda kategorier ---------------------------------------
+    /** Dölj det som bara finns på andra språk än svenska, nordiska och engelska. */
+    var hideForeign by mutableStateOf(false)
+        private set
+    /** Dolda kategorier, som LibraryFilter.groupKey. */
+    var hiddenGroups by mutableStateOf<Set<String>>(emptySet())
+        private set
+
+    // --- Serier: intro, eftertexter och nästa avsnitt -----------------------------------
+    /** Avsnittet som spelas efter det här. Null: inget, eller inte klart ännu. */
+    var nextUp by mutableStateOf<NextUp?>(null)
+        private set
+    /** Rutan Nästa avsnitt är bortvald för avsnittet som spelas. */
+    var nextUpDismissed by mutableStateOf(false)
+        private set
+    /** Introt i serien som spelas, om appen lärt sig var det ligger. */
+    var introMark by mutableStateOf<SeriesMark?>(null)
+        private set
+    private var playingSeries: Series? = null
+    private var seriesMarks: Map<String, SeriesMark> = emptyMap()
+    private val marksStore = SeriesMarksStore()
+    private val episodeCache = HashMap<String, List<XtreamEpisode>>()
+    private var nextUpJob: Job? = null
+    private var learnJob: Job? = null
+    private var seekFrom = -1L
+    private var seekTarget = 0L
+    private var seekAt = 0L
+
+    /** Omslag som sparas i bakgrunden, för inställningarna. Null: inget att säga. */
+    var coverStatus by mutableStateOf<String?>(null)
+
     // --- Egna bakgrundsbilder ------------------------------------------------
     var backgrounds by mutableStateOf<List<String>>(emptyList())
         private set
@@ -372,6 +439,17 @@ class AppState {
         tmdbKey = SecretBox.unsealText(loaded.third.tmdbKey)
         tmdbConnected = tmdbKey != null
         backgrounds = loaded.third.backgrounds.filter { File(it).isFile }
+        hideForeign = loaded.third.hideForeign
+        hiddenGroups = loaded.third.hiddenGroups.toSet()
+        lastVisitUtc = loaded.third.lastVisitUtc
+        val visitStart = System.currentTimeMillis()
+        newSinceUtc = if (lastVisitUtc > 0L) lastVisitUtc.coerceAtLeast(visitStart - NEW_MAX_AGE_MS) else visitStart - NEW_FIRST_RUN_MS
+        // Besöket räknas först efter en stund, så att en snabb omstart inte tömmer "Nytt sedan sist".
+        scope.launch {
+            delay(VISIT_COUNTS_AFTER_MS)
+            lastVisitUtc = visitStart
+            saveSettings()
+        }
         rebuildLibrary()
         loading = false
         loadGuides()
@@ -379,6 +457,18 @@ class AppState {
         myList = withContext(Dispatchers.IO) { myListStore.load() }
         movieFacts = withContext(Dispatchers.IO) { factsStore.load() }
         tmdbFacts = withContext(Dispatchers.IO) { tmdbStore.load() }
+        val extras = withContext(Dispatchers.IO) { extrasStore.load() }
+        tmdbLogos = extras.logos
+        trending = extras.trending
+        trendingAt = extras.trendingAt
+        seriesMarks = withContext(Dispatchers.IO) { marksStore.load() }
+        scope.launch {
+            while (true) {
+                refreshTrending()
+                delay(TRENDING_CHECK_MS)
+            }
+        }
+        scheduleVersions(urgent = true)
         factsLoaded = true
         tmdbLoaded = true
         startTmdbScan()
@@ -410,6 +500,7 @@ class AppState {
         if (factsLoaded) restartFactsScan()
         tmdbKeys.clear()
         if (tmdbLoaded) restartTmdbScan()
+        scheduleVersions(urgent = true)
     }
 
     fun contentFor(sourceId: String): SourceContent? = contents[sourceId]
@@ -417,23 +508,436 @@ class AppState {
     fun filteredChannels(): List<LiveChannel> {
         val query = liveQuery.trim().lowercase()
         val group = liveGroup
-        return library.channels.filter { (group == null || it.group == group) && (query.isEmpty() || query in it.searchKey) }
+        val hidden = hiddenGroups
+        return library.channels.filter { channel ->
+            (group == null || channel.group == group) &&
+                (query.isEmpty() || query in channel.searchKey) &&
+                (group != null || hidden.isEmpty() || LibraryFilter.groupKey(LibraryFilter.LIVE, channel.group) !in hidden)
+        }
     }
 
+    /** Filmerna i vald kategori och sökning, en gång per film: versionerna väljs på filmens sida. */
     fun filteredMovies(): List<Movie> {
         val query = movieQuery.trim().lowercase()
         val group = movieGroup
+        val index = versions
         return library.movies
             .filter { (group == null || it.group == group) && (query.isEmpty() || query in it.searchKey) }
-            .ordered(movieSort, { it.name }, { it.addedUtc }, { scoreOf(it) }, { it.year }, { tmdbFor(it)?.popularity })
+            .ordered(movieSort, { index.titleOf(it) }, { it.addedUtc }, { scoreOf(it) }, { index.yearOf(it) }, { tmdbFor(it)?.popularity })
+            .let { index.collapseMovies(it, preferDefault = group == null && query.isEmpty()) }
     }
 
     fun filteredSeries(): List<Series> {
         val query = seriesQuery.trim().lowercase()
         val group = seriesGroup
+        val index = versions
         return library.series
             .filter { (group == null || it.group == group) && (query.isEmpty() || query in it.searchKey) }
-            .ordered(seriesSort, { it.name }, { it.addedUtc }, { scoreOf(it) }, { it.year?.toIntOrNull() }, { tmdbFor(it)?.popularity })
+            .ordered(seriesSort, { index.titleOf(it) }, { it.addedUtc }, { scoreOf(it) }, { index.yearOf(it) }, { tmdbFor(it)?.popularity })
+            .let { index.collapseSeries(it, preferDefault = group == null && query.isEmpty()) }
+    }
+
+    // --- Versioner -----------------------------------------------------------------
+
+    /**
+     * Bygger om versionerna i bakgrunden. [urgent]: biblioteket har ändrats,
+     * så direkt. Annars (nya TMDB-svar) högst var femte sekund.
+     */
+    private fun scheduleVersions(urgent: Boolean) {
+        versionsDirty = true
+        if (versionsJob?.isActive == true) {
+            if (!urgent) return
+            versionsJob?.cancel()
+        }
+        versionsJob = scope.launch {
+            if (!urgent) delay(VERSIONS_PAUSE_MS)
+            while (versionsDirty) {
+                versionsDirty = false
+                val lib = library
+                val tmdb = tmdbFacts
+                val names = sources.associate { it.id to it.name }
+                val filter = LibraryFilter(hideForeign, hiddenGroups)
+                versions = withContext(Dispatchers.Default) { VersionIndex.build(lib, tmdb, names, filter) }
+                if (versionsDirty) delay(VERSIONS_PAUSE_MS)
+            }
+        }
+    }
+
+    fun versionsOf(movie: Movie): List<Movie> = versions.versionsOf(movie)
+
+    fun versionsOf(series: Series): List<Series> = versions.versionsOf(series)
+
+    /** Titeln utan leverantörens taggar: "Pressure", inte "Pressure [PRE] [2026] [SWE-SUB]". */
+    fun titleOf(movie: Movie): String = versions.titleOf(movie)
+
+    fun titleOf(series: Series): String = versions.titleOf(series)
+
+    // --- Loggor från TMDB --------------------------------------------------------------
+
+    /** TMDB-id för filmen eller serien, när titeln hittats där. */
+    fun tmdbIdOf(movie: Movie): Int? = tmdbFor(movie)?.id?.takeIf { it > 0 }
+
+    fun tmdbIdOf(series: Series): Int? = tmdbFor(series)?.id?.takeIf { it > 0 }
+
+    /** Loggans adress, eller null: ingen logga, eller inte hämtad ännu. kind: "movie" eller "tv". */
+    fun logoUrl(kind: String, tmdbId: Int): String? = tmdbLogos["$kind:$tmdbId"]?.ifEmpty { null }
+
+    /** Hämtar loggan om den inte redan finns. Anropas när titeln visas stort. */
+    fun ensureLogo(kind: String, tmdbId: Int) {
+        val apiKey = tmdbKey ?: return
+        val key = "$kind:$tmdbId"
+        if (tmdbId <= 0 || tmdbLogos.containsKey(key) || !logoRequests.add(key)) return
+        scope.launch {
+            val result = logoGate.withPermit {
+                withContext(Dispatchers.IO) { runCatching { TmdbClient(apiKey).logo(kind, tmdbId) } }
+            }
+            // Ett nätfel provas igen nästa gång titeln visas. "Ingen logga" sparas.
+            result.onSuccess { found ->
+                tmdbLogos = tmdbLogos + (key to (found ?: ""))
+                saveExtrasSoon()
+            }
+            logoRequests.remove(key)
+        }
+    }
+
+    private fun saveExtrasSoon() {
+        extrasSaveJob?.cancel()
+        extrasSaveJob = scope.launch {
+            delay(3_000)
+            val snapshot = TmdbExtrasStore.Saved(tmdbLogos, trending, trendingAt)
+            withContext(Dispatchers.IO) { extrasStore.save(snapshot) }
+        }
+    }
+
+    // --- Trender ------------------------------------------------------------------------
+
+    /** Dagens trendlista från TMDB, högst var sjätte timme. */
+    private fun refreshTrending(force: Boolean = false) {
+        val apiKey = tmdbKey ?: return
+        val fresh = System.currentTimeMillis() - trendingAt < TRENDING_MAX_AGE_MS
+        if (!force && fresh && trending.isNotEmpty()) return
+        scope.launch {
+            val list = withContext(Dispatchers.IO) { runCatching { TmdbClient(apiKey).trending() }.getOrNull() }
+            if (list.isNullOrEmpty()) return@launch
+            trending = list
+            trendingAt = System.currentTimeMillis()
+            saveExtrasSoon()
+        }
+    }
+
+    // --- Nytt sedan sist -----------------------------------------------------------------
+
+    /** Tillagd sedan förra besöket, i någon version. */
+    fun isNew(movie: Movie): Boolean = newSinceUtc > 0L && versions.versionsOf(movie).any { it.addedUtc >= newSinceUtc }
+
+    fun isNew(series: Series): Boolean = newSinceUtc > 0L && versions.versionsOf(series).any { it.addedUtc >= newSinceUtc }
+
+    /** Serien har fått nya avsnitt sedan man senast tittade på den. */
+    fun hasNewEpisode(series: Series): Boolean {
+        val seen = seriesSeen()
+        if (seen.isEmpty()) return false
+        val all = versions.versionsOf(series)
+        val watched = all.maxOf { seen["${it.sourceId}:${it.seriesId}"] ?: 0L }
+        return watched > 0L && all.any { it.addedUtc > watched }
+    }
+
+    /** Skylten på omslaget: "Ny", "Nytt avsnitt", "4K" eller "Ny · 4K". */
+    fun badgeFor(movie: Movie): String? = listOfNotNull(
+        if (isNew(movie)) "Ny" else null,
+        if (versions.has4k(movie)) "4K" else null,
+    ).joinToString(" · ").ifEmpty { null }
+
+    fun badgeFor(series: Series): String? = listOfNotNull(
+        when {
+            hasNewEpisode(series) -> "Nytt avsnitt"
+            isNew(series) -> "Ny"
+            else -> null
+        },
+        if (versions.has4k(series)) "4K" else null,
+    ).joinToString(" · ").ifEmpty { null }
+
+    private var seriesSeenCache: Pair<List<WatchEntry>, Map<String, Long>>? = null
+
+    /** När man senast tittade på varje serie, per "källa:serie-id". */
+    private fun seriesSeen(): Map<String, Long> {
+        val list = history
+        seriesSeenCache?.let { (cachedFor, map) -> if (cachedFor === list) return map }
+        val map = HashMap<String, Long>()
+        for (entry in list) {
+            if (entry.kind != WatchKind.EPISODE) continue
+            val key = "${entry.sourceId}:${entry.seriesId}"
+            if ((map[key] ?: 0L) < entry.watchedAtUtc) map[key] = entry.watchedAtUtc
+        }
+        seriesSeenCache = list to map
+        return map
+    }
+
+    // --- Biblioteket: språk och dolda kategorier ---------------------------------------
+
+    /** Kategorierna som visas i listan. kind: LibraryFilter.LIVE, MOVIE eller SERIES. */
+    fun visibleGroups(kind: Char, groups: List<String>): List<String> {
+        val hidden = hiddenGroups
+        // Med språkvalet försvinner också film- och seriekategorierna på andra språk: de vore tomma.
+        val foreign = hideForeign && kind != LibraryFilter.LIVE
+        if (hidden.isEmpty() && !foreign) return groups
+        return groups.filter { group ->
+            LibraryFilter.groupKey(kind, group) !in hidden && !(foreign && isForeignGroup(group))
+        }
+    }
+
+    private val foreignGroupCache = HashMap<String, Boolean>()
+
+    private fun isForeignGroup(group: String): Boolean = foreignGroupCache.getOrPut(group) { VersionTags.isForeignGroup(group) }
+
+    fun isGroupHidden(kind: Char, group: String): Boolean = LibraryFilter.groupKey(kind, group) in hiddenGroups
+
+    fun hiddenCount(kind: Char): Int = hiddenGroups.count { it.startsWith("$kind|") }
+
+    fun setGroupHidden(kind: Char, group: String, hidden: Boolean) {
+        val key = LibraryFilter.groupKey(kind, group)
+        hiddenGroups = if (hidden) hiddenGroups + key else hiddenGroups - key
+        libraryFilterChanged()
+    }
+
+    /** Döljer kategorierna på andra språk: "PL | Filmy", "AR | أفلام", "TURKISH". */
+    fun hideForeignGroups(kind: Char, groups: List<String>) {
+        hiddenGroups = hiddenGroups + groups.filter { VersionTags.isForeignGroup(it) }.map { LibraryFilter.groupKey(kind, it) }
+        libraryFilterChanged()
+    }
+
+    fun showAllGroups(kind: Char) {
+        val prefix = "$kind|"
+        hiddenGroups = hiddenGroups.filterNot { it.startsWith(prefix) }.toSet()
+        libraryFilterChanged()
+    }
+
+    fun updateHideForeign(hide: Boolean) {
+        if (hideForeign == hide) return
+        hideForeign = hide
+        libraryFilterChanged()
+    }
+
+    private fun libraryFilterChanged() {
+        movieGroup?.let { if (isGroupHidden(LibraryFilter.MOVIE, it)) movieGroup = null }
+        seriesGroup?.let { if (isGroupHidden(LibraryFilter.SERIES, it)) seriesGroup = null }
+        liveGroup?.let { if (isGroupHidden(LibraryFilter.LIVE, it)) liveGroup = null }
+        saveSettings()
+        scheduleVersions(urgent = true)
+    }
+
+    // --- Serier: hoppa över introt och nästa avsnitt -------------------------------------
+
+    private fun currentStatus(): VideoPlayer.Status? = videoPlayer?.status?.value?.takeIf { it.session == playbackSession }
+
+    /** Spola relativt. Spolar man i ett avsnitt lär sig appen var introt och eftertexterna ligger. */
+    fun seekBy(deltaMs: Long) {
+        val player = videoPlayer ?: return
+        val status = currentStatus()
+        player.seekBy(deltaMs)
+        if (status != null) noteSeek(status.timeMs, (status.timeMs + deltaMs).coerceAtLeast(0L), status.lengthMs)
+    }
+
+    fun seekTo(fraction: Float) {
+        val player = videoPlayer ?: return
+        val status = currentStatus()
+        player.seekTo(fraction)
+        if (status != null && status.lengthMs > 0L) {
+            noteSeek(status.timeMs, (status.lengthMs * fraction.coerceIn(0f, 1f)).toLong(), status.lengthMs)
+        }
+    }
+
+    private fun noteSeek(fromMs: Long, toMs: Long, lengthMs: Long) {
+        val series = playingSeries ?: return
+        val now = System.currentTimeMillis()
+        // Flera tryck i följd (10 s, 10 s, 10 s …) räknas som ett hopp.
+        if (seekFrom < 0L || now - seekAt > SEEK_GROUP_MS) seekFrom = fromMs
+        seekTarget = toMs
+        seekAt = now
+        learnJob?.cancel()
+        learnJob = scope.launch {
+            delay(SEEK_GROUP_MS)
+            learn(series, seekFrom, seekTarget, lengthMs)
+            seekFrom = -1L
+        }
+    }
+
+    /** Ett hopp framåt i början är introt; ett hopp förbi slutet är eftertexterna. */
+    private fun learn(series: Series, from: Long, to: Long, length: Long) {
+        if (from < 0L) return
+        val key = SeriesMarksStore.keyOf(titleOf(series))
+        val old = seriesMarks[key] ?: SeriesMark()
+        val jump = to - from
+        val updated = when {
+            from <= INTRO_LATEST_START_MS && jump in INTRO_MIN_MS..INTRO_MAX_MS && to <= INTRO_LATEST_END_MS ->
+                old.copy(introFromMs = from, introToMs = to)
+            length > 0L && from >= length - OUTRO_WINDOW_MS && to >= length - 15_000L && length - from >= 20_000L ->
+                old.copy(outroLeadMs = length - from)
+            else -> return
+        }
+        seriesMarks = seriesMarks + (key to updated)
+        if (playingSeries?.let { SeriesMarksStore.keyOf(titleOf(it)) } == key) introMark = updated.takeIf { it.hasIntro }
+        val snapshot = seriesMarks
+        scope.launch(Dispatchers.IO) { marksStore.save(snapshot) }
+    }
+
+    /** Ett avsnitt har börjat: introt som appen lärt sig, och vilket avsnitt som kommer sedan. */
+    private fun startSeriesExtras(series: Series, episodeId: String) {
+        playingSeries = series
+        introMark = seriesMarks[SeriesMarksStore.keyOf(titleOf(series))]?.takeIf { it.hasIntro }
+        nextUpJob?.cancel()
+        nextUpJob = scope.launch {
+            val list = episodesFor(series) ?: return@launch
+            val ordered = list.sortedWith(compareBy<XtreamEpisode> { it.season }.thenBy { it.episode })
+            val index = ordered.indexOfFirst { it.id == episodeId }
+            val next = if (index >= 0) ordered.getOrNull(index + 1) else null
+            // Bara om samma avsnitt fortfarande spelas.
+            if (nowPlaying?.entry?.itemId == episodeId) nextUp = next?.let { NextUp(series, it) }
+        }
+    }
+
+    private fun resetSeriesExtras() {
+        nextUpJob?.cancel()
+        nextUp = null
+        nextUpDismissed = false
+        introMark = null
+        playingSeries = null
+    }
+
+    private suspend fun episodesFor(series: Series): List<XtreamEpisode>? {
+        val key = series.key
+        episodeCache[key]?.let { return it }
+        val shown = episodes
+        if (selectedSeries?.key == key && shown is EpisodesState.Loaded) {
+            episodeCache[key] = shown.episodes
+            return shown.episodes
+        }
+        val account = credentials(series.sourceId) ?: return null
+        val loaded = withContext(Dispatchers.IO) {
+            runCatching { xtream.episodes(account.second, series.seriesId) }.getOrNull()
+        } ?: return null
+        episodeCache[key] = loaded
+        return loaded
+    }
+
+    /** Ska knappen Hoppa över intro synas nu? */
+    fun showsIntroSkip(status: VideoPlayer.Status): Boolean {
+        val mark = introMark ?: return false
+        if (nowPlaying?.live != false || status.lengthMs <= 0L || miniPlayer) return false
+        return status.timeMs in (mark.introFromMs - 3_000L)..(mark.introToMs - 4_000L)
+    }
+
+    /** Till där introt slutar. Direkt i spelaren, så att hoppet inte lärs in på nytt. */
+    fun skipIntro() {
+        val mark = introMark ?: return
+        val status = currentStatus() ?: return
+        videoPlayer?.seekBy(mark.introToMs - status.timeMs)
+        touchPlayer(force = true)
+    }
+
+    /** Ska rutan Nästa avsnitt synas nu? Mot slutet, eller när avsnittet tagit slut. */
+    fun showsNextUp(status: VideoPlayer.Status): Boolean {
+        if (nextUp == null || nextUpDismissed || miniPlayer) return false
+        if (status.phase == VideoPlayer.Phase.ENDED) return true
+        if (status.lengthMs <= 60_000L || status.phase == VideoPlayer.Phase.OPENING) return false
+        val learned = playingSeries?.let { seriesMarks[SeriesMarksStore.keyOf(titleOf(it))]?.outroLeadMs } ?: 0L
+        val lead = if (learned > 0L) learned else DEFAULT_OUTRO_LEAD_MS
+        return status.lengthMs - status.timeMs in 0L..lead
+    }
+
+    fun playNextUp() {
+        val next = nextUp ?: return
+        playEpisode(next.series, next.episode)
+    }
+
+    fun dismissNextUp() {
+        nextUpDismissed = true
+    }
+
+    /** OK eller Enter i spelaren: hoppa över introt, eller spela nästa avsnitt, om någon av dem visas. */
+    fun acceptPlayerPrompt(): Boolean {
+        val status = currentStatus() ?: return false
+        return when {
+            showsIntroSkip(status) -> {
+                skipIntro()
+                true
+            }
+            showsNextUp(status) -> {
+                playNextUp()
+                true
+            }
+            else -> false
+        }
+    }
+
+    /** Tillbaka eller Esc: stänger rutan Nästa avsnitt om den visas. */
+    fun dismissPlayerPrompt(): Boolean {
+        val status = currentStatus() ?: return false
+        if (!showsNextUp(status)) return false
+        dismissNextUp()
+        return true
+    }
+
+    /**
+     * Omslagen att prova, i ordning: den visade versionens, de andra
+     * versionernas, TMDB:s. Saknas eller fungerar inte ett, tas nästa.
+     */
+    fun posterCandidates(movie: Movie): List<String> {
+        val list = ArrayList<String>(4)
+        movie.poster?.let { list += it }
+        for (version in versions.versionsOf(movie)) version.poster?.let { list += it }
+        tmdbFor(movie)?.poster?.let { list += it }
+        return list.distinct()
+    }
+
+    fun posterCandidates(series: Series): List<String> {
+        val list = ArrayList<String>(4)
+        series.cover?.let { list += it }
+        for (version in versions.versionsOf(series)) version.cover?.let { list += it }
+        tmdbFor(series)?.poster?.let { list += it }
+        return list.distinct()
+    }
+
+    /**
+     * Omslagen som sparas i bakgrunden: ett per film och serie, de senast
+     * tillagda först, så att nya filmer får sina omslag först. Saknar en
+     * titel eget omslag tas TMDB:s. Högst [limit].
+     *
+     * Körs utanför UI-tråden, så TMDB slås upp direkt i en kopia av
+     * faktan, inte via [tmdbFor] och dess cache.
+     */
+    fun coverPrefetchList(limit: Int): List<String> {
+        val index = versions
+        val lib = library
+        val facts = tmdbFacts
+        fun usable(url: String?): String? = url?.trim()?.takeIf { it.startsWith("http", ignoreCase = true) }
+        fun tmdbPoster(kind: String, name: String, fallbackYear: Int?): String? {
+            if (facts.isEmpty()) return null
+            val (title, year) = TitleCleaner.searchTitle(name)
+            return facts[TmdbStore.keyOf(kind, title, year ?: fallbackYear)]?.takeIf { it.found }?.poster
+        }
+        val movies = index.collapseMovies(lib.movies.sortedByDescending { it.addedUtc }, preferDefault = true)
+        val series = index.collapseSeries(lib.series.sortedByDescending { it.addedUtc }, preferDefault = true)
+        val result = LinkedHashSet<String>()
+        var m = 0
+        var s = 0
+        // Varannan film och serie, så att båda får sina nyaste omslag tidigt.
+        while (result.size < limit && (m < movies.size || s < series.size)) {
+            if (m < movies.size) {
+                val movie = movies[m++]
+                val cover = usable(movie.poster)
+                    ?: index.versionsOf(movie).firstNotNullOfOrNull { usable(it.poster) }
+                    ?: usable(tmdbPoster("movie", movie.name, null))
+                if (cover != null) result += cover
+            }
+            if (s < series.size && result.size < limit) {
+                val item = series[s++]
+                val cover = usable(item.cover)
+                    ?: index.versionsOf(item).firstNotNullOfOrNull { usable(it.cover) }
+                    ?: usable(tmdbPoster("tv", item.name, item.year?.toIntOrNull()))
+                if (cover != null) result += cover
+            }
+        }
+        return result.toList()
     }
 
     fun sortMovies(order: SortOrder) {
@@ -641,7 +1145,9 @@ class AppState {
     // --- Serier ------------------------------------------------------------------
 
     /** Avsnitten hämtas först nu, per serie — aldrig vid import. */
-    fun showSeries(series: Series) {
+    /** Seriens sida. Som för filmer: versionen man senast tittade på, om inte [exact]. */
+    fun showSeries(requested: Series, exact: Boolean = false) {
+        val series = if (exact) requested else watchedVersion(requested) ?: requested
         selectedSeries = series
         episodes = EpisodesState.Loading
         episodesJob?.cancel()
@@ -671,8 +1177,14 @@ class AppState {
 
     // --- Filmer ----------------------------------------------------------------------
 
-    /** Filmens sida. Leverantörens information hämtas en gång per film och sparas under körningen. */
-    fun showMovie(movie: Movie) {
+    /**
+     * Filmens sida. Leverantörens information hämtas en gång per film och sparas under körningen.
+     *
+     * Har man börjat titta på en annan version av filmen öppnas den, så att
+     * Fortsätt hamnar rätt. [exact]: just den här versionen, vald på sidan.
+     */
+    fun showMovie(requested: Movie, exact: Boolean = false) {
+        val movie = if (exact) requested else startedVersion(requested) ?: requested
         selectedMovie = movie
         movieInfoJob?.cancel()
         if (movieInfoCache.containsKey(movie.key)) {
@@ -713,6 +1225,24 @@ class AppState {
         selectedMovie = null
     }
 
+    /** Den version av filmen man senast började titta på och kan fortsätta, om någon. */
+    private fun startedVersion(movie: Movie): Movie? {
+        val all = versions.versionsOf(movie)
+        if (all.size < 2) return null
+        val byStream = all.associateBy { it.sourceId + ":" + it.streamId }
+        val entry = history.firstOrNull { it.kind == WatchKind.MOVIE && it.resumable && (it.sourceId + ":" + it.itemId) in byStream } ?: return null
+        return byStream[entry.sourceId + ":" + entry.itemId]
+    }
+
+    /** Den version av serien man senast tittade på, om någon. */
+    private fun watchedVersion(series: Series): Series? {
+        val all = versions.versionsOf(series)
+        if (all.size < 2) return null
+        val byId = all.associateBy { it.sourceId + ":" + it.seriesId }
+        val entry = history.firstOrNull { it.kind == WatchKind.EPISODE && (it.sourceId + ":" + it.seriesId) in byId } ?: return null
+        return byId[entry.sourceId + ":" + entry.seriesId]
+    }
+
     // --- Uppspelning -------------------------------------------------------------
 
     fun playChannel(channel: LiveChannel, queue: List<LiveChannel>) {
@@ -742,15 +1272,15 @@ class AppState {
             kind = WatchKind.MOVIE,
             sourceId = movie.sourceId,
             itemId = movie.streamId.toString(),
-            title = movie.name,
-            subtitle = movie.group,
+            title = titleOf(movie),
+            subtitle = versions.labelOf(movie).ifEmpty { movie.group },
             image = movie.poster,
             watchedAtUtc = System.currentTimeMillis(),
             positionMs = start,
             durationMs = earlier?.durationMs ?: 0L,
             extension = movie.extension,
         )
-        val item = NowPlaying(title = movie.name, subtitle = movie.group, live = false, entry = entry, startMs = start)
+        val item = NowPlaying(title = titleOf(movie), subtitle = versions.labelOf(movie).ifEmpty { movie.group }, live = false, entry = entry, startMs = start)
         launchPlayback(item) {
             val account = credentials(movie.sourceId) ?: return@launchPlayback null
             xtream.movieUrl(account.second, movie.streamId, movie.extension)
@@ -768,7 +1298,7 @@ class AppState {
             kind = WatchKind.EPISODE,
             sourceId = series.sourceId,
             itemId = episode.id,
-            title = series.name,
+            title = titleOf(series),
             subtitle = subtitle,
             image = episode.thumbnail ?: series.cover,
             watchedAtUtc = System.currentTimeMillis(),
@@ -779,11 +1309,12 @@ class AppState {
             episode = episode.episode,
             extension = episode.containerExtension,
         )
-        val item = NowPlaying(title = series.name, subtitle = subtitle, live = false, entry = entry, startMs = start)
+        val item = NowPlaying(title = titleOf(series), subtitle = subtitle, live = false, entry = entry, startMs = start)
         launchPlayback(item) {
             val account = credentials(series.sourceId) ?: return@launchPlayback null
             xtream.episodeUrl(account.second, episode.id, episode.containerExtension)
         }
+        startSeriesExtras(series, episode.id)
     }
 
     fun retryPlayback() {
@@ -797,6 +1328,8 @@ class AppState {
         historyJob?.cancel()
         lastLaunch = item to resolve
         nowPlaying = item
+        // Nästa avsnitt och introt gäller avsnittet som spelades; ett avsnitt sätter dem igen.
+        resetSeriesExtras()
         item.entry?.let { recordWatch(it) }
         // Något nytt att titta på: spelaren växer upp igen om den låg i hörnet.
         miniPlayer = false
@@ -868,6 +1401,7 @@ class AppState {
         fullscreen = false
         miniPlayer = false
         trackPanelOpen = false
+        resetSeriesExtras()
         WindowsIntegration.keepAwake(false)
         saveSettings()
     }
@@ -974,16 +1508,18 @@ class AppState {
             Key.Escape -> {
                 when {
                     trackPanelOpen -> trackPanelOpen = false
+                    dismissPlayerPrompt() -> Unit
                     fullscreen -> fullscreen = false
                     else -> minimizePlayer()
                 }
                 true
             }
+            Key.Enter, Key.NumPadEnter -> acceptPlayerPrompt()
             Key.Backspace -> { closePlayer(); true }
             Key.F -> { toggleFullscreen(); true }
             Key.M -> { toggleMute(); true }
-            Key.DirectionLeft -> { if (!playing.live) videoPlayer?.seekBy(-10_000); true }
-            Key.DirectionRight -> { if (!playing.live) videoPlayer?.seekBy(10_000); true }
+            Key.DirectionLeft -> { if (!playing.live) seekBy(-10_000); true }
+            Key.DirectionRight -> { if (!playing.live) seekBy(10_000); true }
             Key.DirectionUp -> { if (playing.live) switchChannel(-1) else setVolumeLevel(volume + 5); true }
             Key.DirectionDown -> { if (playing.live) switchChannel(1) else setVolumeLevel(volume - 5); true }
             Key.PageUp -> { switchChannel(-1); true }
@@ -1123,6 +1659,9 @@ class AppState {
         backgrounds = backgrounds,
         audioLanguage = preferredAudio,
         subtitleLanguage = preferredSubtitle,
+        lastVisitUtc = lastVisitUtc,
+        hideForeign = hideForeign,
+        hiddenGroups = hiddenGroups.toList(),
     )
 
     private fun saveSettings() {
@@ -1167,6 +1706,8 @@ class AppState {
                     val account = credentials(entry.sourceId) ?: return@launchPlayback null
                     xtream.episodeUrl(account.second, entry.itemId, entry.extension ?: "mp4")
                 }
+                library.series.firstOrNull { it.sourceId == entry.sourceId && it.seriesId == entry.seriesId }
+                    ?.let { startSeriesExtras(it, entry.itemId) }
             }
         }
     }
@@ -1229,6 +1770,27 @@ class AppState {
     // --- Min lista -------------------------------------------------------------------
 
     fun inMyList(key: String): Boolean = myList.any { it.key == key }
+
+    fun inMyList(movie: Movie): Boolean = versions.versionsOf(movie).any { inMyList(it.key) }
+
+    fun inMyList(series: Series): Boolean = versions.versionsOf(series).any { inMyList(it.key) }
+
+    /** Sparar filmen, eller tar bort alla dess versioner om någon redan är sparad. */
+    fun toggleMyList(movie: Movie) {
+        val keys = versions.versionsOf(movie).map { it.key }.toSet()
+        if (myList.any { it.key in keys }) removeFromMyList(keys) else toggleMyList(ListKind.MOVIE, movie.key)
+    }
+
+    fun toggleMyList(series: Series) {
+        val keys = versions.versionsOf(series).map { it.key }.toSet()
+        if (myList.any { it.key in keys }) removeFromMyList(keys) else toggleMyList(ListKind.SERIES, series.key)
+    }
+
+    private fun removeFromMyList(keys: Set<String>) {
+        myList = myList.filterNot { it.key in keys }
+        val snapshot = myList
+        scope.launch(Dispatchers.IO) { myListStore.save(snapshot) }
+    }
 
     fun toggleMyList(kind: ListKind, key: String) {
         myList = if (inMyList(key)) {
@@ -1383,6 +1945,8 @@ class AppState {
 
     private fun releaseYear(date: String?): Int? = date?.trim()?.take(4)?.toIntOrNull()?.takeIf { it in 1880..2100 }
 
+    private fun hasOwnArt(url: String?): Boolean = url?.trim()?.startsWith("http", ignoreCase = true) == true
+
     // --- TMDB ---------------------------------------------------------------------
 
     fun tmdbFor(movie: Movie): TmdbFacts? {
@@ -1426,6 +1990,7 @@ class AppState {
                 tmdbStatus = "Nyckeln fungerar. Hämtningen har börjat."
                 saveSettings()
                 restartTmdbScan()
+                refreshTrending(force = true)
             }.onFailure { error ->
                 tmdbStatus = if (error is TmdbKeyException) {
                     "TMDB godkände inte nyckeln. Kontrollera att du kopierade API-nyckeln (32 tecken)."
@@ -1464,9 +2029,12 @@ class AppState {
         val series = library.series
         tmdbJob = scope.launch {
             val wanted: List<Triple<String, String, Int?>> = withContext(Dispatchers.Default) {
-                val movieTitles = movies.sortedByDescending { it.rating ?: -1.0 }
+                // Titlar utan eget omslag först: för dem är TMDB enda chansen till en bild.
+                val movieTitles = movies
+                    .sortedWith(compareBy<Movie> { if (hasOwnArt(it.poster)) 1 else 0 }.thenByDescending { it.rating ?: -1.0 })
                     .map { m -> TitleCleaner.searchTitle(m.name).let { (title, year) -> Triple("movie", title, year) } }
-                val seriesTitles = series.sortedByDescending { it.rating ?: -1.0 }
+                val seriesTitles = series
+                    .sortedWith(compareBy<Series> { if (hasOwnArt(it.cover)) 1 else 0 }.thenByDescending { it.rating ?: -1.0 })
                     .map { s -> TitleCleaner.searchTitle(s.name).let { (title, year) -> Triple("tv", title, year ?: s.year?.toIntOrNull()) } }
                 (movieTitles + seriesTitles)
                     .filter { it.second.isNotBlank() }
@@ -1549,6 +2117,7 @@ class AppState {
     private fun publishTmdb(fresh: Map<String, TmdbFacts>, save: Boolean) {
         if (fresh.isEmpty()) return
         tmdbFacts = tmdbFacts + fresh
+        scheduleVersions(urgent = false)
         if (save) {
             val snapshot = tmdbFacts
             scope.launch(Dispatchers.IO) { tmdbSaving.withLock { tmdbStore.save(snapshot) } }
@@ -1606,6 +2175,7 @@ class AppState {
         persistHistory()
         runCatching { factsStore.save(movieFacts) }
         runCatching { tmdbStore.save(tmdbFacts) }
+        runCatching { extrasStore.save(TmdbExtrasStore.Saved(tmdbLogos, trending, trendingAt)) }
         storage.saveSettings(currentSettings())
         WindowsIntegration.keepAwake(false)
         val released = videoPlayer?.release() ?: true
@@ -1634,7 +2204,7 @@ class AppState {
 private val swedishOrder: Collator = Collator.getInstance(Locale.forLanguageTag("sv-SE")).apply { strength = Collator.SECONDARY }
 
 /** "SE - Titel" och "[4K] Titel" sorteras på Titel. */
-private val sortPrefix = Regex("""^\s*(?:\[[^\]]*]\s*|[A-Za-z]{2,4}\s*[-|:]\s+)""")
+private val sortPrefix = Regex("""^\s*(?:\[[^\]]*\]\s*|[A-Za-z]{2,4}\s*[-|:]\s+)""")
 
 /**
  * Sortering av filmer och serier. Stabil: lika värden behåller leverantörens
@@ -1664,4 +2234,27 @@ private const val FACTS_PACE_MS = 500L
 private const val PROVIDER_VOTES = 30
 /** Uppslag hos TMDB samtidigt. TMDB tål runt 50 i sekunden; sex ger ett par dussin. */
 private const val TMDB_WORKERS = 6
+/** Minsta tid mellan två ombyggnader av versionerna medan TMDB-svar strömmar in. */
+private const val VERSIONS_PAUSE_MS = 5_000L
+private const val DAY_MS = 24L * 60 * 60 * 1000
+/** "Ny": högst en månad bakåt, och tre dagar första gången. */
+private const val NEW_MAX_AGE_MS = 30 * DAY_MS
+private const val NEW_FIRST_RUN_MS = 3 * DAY_MS
+private const val VISIT_COUNTS_AFTER_MS = 10 * 60_000L
+private const val TRENDING_MAX_AGE_MS = 6 * 60 * 60_000L
+private const val TRENDING_CHECK_MS = 60 * 60_000L
+/** Spoltryck med kortare mellanrum än så räknas som ett hopp. */
+private const val SEEK_GROUP_MS = 4_000L
+private const val INTRO_LATEST_START_MS = 6 * 60_000L
+private const val INTRO_LATEST_END_MS = 10 * 60_000L
+private const val INTRO_MIN_MS = 15_000L
+private const val INTRO_MAX_MS = 240_000L
+private const val OUTRO_WINDOW_MS = 8 * 60_000L
+/** Nästa avsnitt visas så här länge före slutet, tills appen lärt sig var eftertexterna börjar. */
+private const val DEFAULT_OUTRO_LEAD_MS = 30_000L
+
+/** Avsnittet som spelas efter det här. */
+class NextUp(val series: Series, val episode: XtreamEpisode) {
+    val heading: String get() = "Säsong ${episode.season} · Avsnitt ${episode.episode}"
+}
 private const val MAX_BACKGROUNDS = 3

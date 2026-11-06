@@ -265,3 +265,9 @@ internal fun BackgroundUploadHint(state: AppState) {
         }
     }
 }
+
+/**
+ * Shield: spelaren täcker alltid hela tv:n, så helskärm är bara samma ruta.
+ * Något eget helskärmsfönster finns inte, och skärmen under ska aldrig bli svart.
+ */
+internal const val separateFullscreenWindow = false

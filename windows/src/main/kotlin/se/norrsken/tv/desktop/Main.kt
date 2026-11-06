@@ -1,5 +1,10 @@
 package se.norrsken.tv.desktop
 
+import se.norrsken.tv.desktop.ui.separateFullscreenWindow
+import se.norrsken.tv.desktop.ui.platformName
+import se.norrsken.tv.desktop.ui.CoverPrefetch
+import kotlinx.coroutines.delay
+import androidx.compose.ui.window.WindowState
 import se.norrsken.tv.desktop.data.AppDirs
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -28,6 +33,8 @@ import java.awt.GraphicsEnvironment
 
 fun main() {
     installCrashReport()
+    // Mac: mörkt utseende och appens namn i menyraden, innan något fönster finns.
+    WindowsIntegration.prepareApp()
     // Före allt annat: var VLC ligger måste vara känt innan JNA används första gången.
     VlcRuntime.prepare()
 
@@ -53,6 +60,7 @@ fun main() {
                 mainWindow = window
                 window.minimumSize = Dimension(960, 600)
                 WindowsIntegration.darkTitleBar(window)
+                WindowsIntegration.installQuitBehaviour()
             }
             // Tillbaka från helskärm: huvudfönstret får tangentbordet igen.
             var wasFullscreen by remember { mutableStateOf(false) }
@@ -66,10 +74,51 @@ fun main() {
             TvTheme(state.theme, translucent = state.backgrounds.isNotEmpty()) {
                 AppRoot(state)
             }
+            CoverPrefetch(state, COVER_PREFETCH_LIMIT)
         }
 
-        if (state.fullscreen && state.nowPlaying != null) {
-            FullscreenPlayer(state, mainWindow)
+        if (separateFullscreenWindow) {
+            if (state.fullscreen && state.nowPlaying != null) {
+                FullscreenPlayer(state, mainWindow)
+            }
+        } else {
+            MacFullscreen(state, windowState)
+        }
+    }
+}
+
+/** Omslag som sparas på disken i förväg: datorn har plats för många. */
+private const val COVER_PREFETCH_LIMIT = 8_000
+
+/**
+ * Mac: helskärm är Macens egen. Hela fönstret glider ut till ett eget
+ * skrivbord, med spelaren över allt, och tillbaka igen. Var fönstret redan i
+ * helskärm när filmen startade får det stanna där.
+ */
+@Composable
+private fun MacFullscreen(state: AppState, windowState: WindowState) {
+    var enteredByApp by remember { mutableStateOf(false) }
+    var placementBefore by remember { mutableStateOf(WindowPlacement.Floating) }
+    LaunchedEffect(state.fullscreen) {
+        if (state.fullscreen) {
+            if (windowState.placement != WindowPlacement.Fullscreen) {
+                placementBefore = windowState.placement
+                windowState.placement = WindowPlacement.Fullscreen
+                enteredByApp = true
+            }
+        } else if (enteredByApp) {
+            enteredByApp = false
+            windowState.placement = placementBefore
+        }
+    }
+    // Lämnar man helskärm med Macens gröna knapp eller ⌃⌘F följer appen med.
+    // Efter en paus: medan Macens animering pågår kan läget hinna se annorlunda ut.
+    LaunchedEffect(windowState.placement) {
+        if (windowState.placement == WindowPlacement.Fullscreen || !state.fullscreen) return@LaunchedEffect
+        delay(1_500)
+        if (windowState.placement != WindowPlacement.Fullscreen && state.fullscreen) {
+            enteredByApp = false
+            state.fullscreen = false
         }
     }
 }
@@ -121,7 +170,7 @@ private fun FullscreenPlayer(state: AppState, owner: ComposeWindow?) {
 private fun installCrashReport() {
     Thread.setDefaultUncaughtExceptionHandler { _, error ->
         val text = buildString {
-            append("Tv för Windows ").append(System.getProperty("tv.version").orEmpty()).append('\n')
+            append("Tv för ").append(platformName).append(' ').append(System.getProperty("tv.version").orEmpty()).append('\n')
             var current: Throwable? = error
             var depth = 0
             while (current != null && depth < 6) {

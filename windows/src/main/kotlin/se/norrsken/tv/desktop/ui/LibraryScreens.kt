@@ -1,5 +1,6 @@
 package se.norrsken.tv.desktop.ui
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.draw.drawWithContent
@@ -65,6 +66,7 @@ import androidx.compose.ui.unit.dp
 import se.norrsken.tv.data.xtream.XtreamEpisode
 import se.norrsken.tv.data.xtream.XtreamVodInfo
 import se.norrsken.tv.desktop.AppState
+import se.norrsken.tv.desktop.data.LibraryFilter
 import se.norrsken.tv.desktop.EpisodesState
 import se.norrsken.tv.desktop.MovieInfoState
 import se.norrsken.tv.desktop.Screen
@@ -114,16 +116,16 @@ fun MoviesScreen(state: AppState) {
         NoVideoLibrary(state, what = "filmer")
         return
     }
-    val movies = remember(library, group, query, state.movieSort, state.tmdbFacts) { state.filteredMovies() }
-    // Tv: filmen överst följer markeringen, med en kort fördröjning så att
-    // snabbt bläddrande inte hämtar en bakgrundsbild per omslag man passerar.
+    val movies = remember(library, group, query, state.movieSort, state.tmdbFacts, state.versions) { state.filteredMovies() }
+    // Filmen överst följer markeringen på tv:n och musen på datorn, med en kort
+    // fördröjning så att snabbt bläddrande inte byter bakgrund för varje omslag.
     var spotlightKey by remember(movies) { mutableStateOf(movies.firstOrNull()?.key) }
-    if (tvLayout) {
-        LaunchedEffect(focusedKey) {
-            val key = focusedKey ?: return@LaunchedEffect
-            delay(180)
-            spotlightKey = key
-        }
+    var hoveredKey by remember { mutableStateOf<String?>(null) }
+    val activeKey = if (tvLayout) focusedKey else hoveredKey
+    LaunchedEffect(activeKey) {
+        val key = activeKey ?: return@LaunchedEffect
+        delay(if (tvLayout) 180 else 260)
+        spotlightKey = key
     }
     val spotlight = remember(movies, spotlightKey) { movies.firstOrNull { it.key == spotlightKey } }
     val restore = remember { FocusRequester() }
@@ -139,16 +141,16 @@ fun MoviesScreen(state: AppState) {
     Row(Modifier.fillMaxSize()) {
         GroupColumn(
             allLabel = "Alla filmer",
-            total = library.movies.size,
-            groups = library.movieGroups,
+            total = if (state.versions.isEmpty) library.movies.size else state.versions.movieCount,
+            groups = state.visibleGroups(LibraryFilter.MOVIE, library.movieGroups),
             counts = library.movieCounts,
             selected = group,
             onSelect = { state.movieGroup = it },
         )
         Box(Modifier.weight(1f).fillMaxHeight()) {
-            if (tvLayout && spotlight != null) {
+            if (spotlight != null) {
                 val tmdb = state.tmdbFor(spotlight)
-                SpotlightBackdrop(tmdb?.backdrop)
+                SpotlightBackdrop(tmdb?.backdrop, running = state.nowPlaying == null || state.miniPlayer)
             }
             Column(Modifier.fillMaxSize()) {
                 ScreenHeader(
@@ -159,11 +161,14 @@ fun MoviesScreen(state: AppState) {
                     placeholder = "Sök film",
                 )
                 SortRow(state.movieSort, series = false, onSelect = { state.sortMovies(it) })
-                if (tvLayout && spotlight != null) {
+                if (spotlight != null) {
                     val tmdb = state.tmdbFor(spotlight)
                     val facts = state.movieFacts[spotlight.key]
                     SpotlightInfo(
-                        title = spotlight.name,
+                        state = state,
+                        kind = "movie",
+                        tmdbId = tmdb?.id,
+                        title = state.titleOf(spotlight),
                         meta = listOfNotNull(
                             (tmdb?.year ?: facts?.year)?.toString(),
                             formatRating(tmdb?.rating ?: spotlight.rating),
@@ -190,9 +195,9 @@ fun MoviesScreen(state: AppState) {
                         ) {
                             gridItems(movies, key = { it.key }) { movie ->
                                 PosterCard(
-                                    title = movie.name,
-                                    imageUrl = movie.poster ?: state.tmdbFor(movie)?.poster,
-                                    meta = formatRating(state.tmdbFor(movie)?.rating ?: movie.rating),
+                                    title = state.titleOf(movie),
+                                    images = state.posterCandidates(movie),
+                                    meta = movieMeta(state, movie),
                                     onClick = {
                                         openedKey = movie.key
                                         state.showMovie(movie)
@@ -202,6 +207,8 @@ fun MoviesScreen(state: AppState) {
                                     onFocusChange = { has ->
                                         if (has) focusedKey = movie.key else if (focusedKey == movie.key) focusedKey = null
                                     },
+                                    onActive = { if (!tvLayout) hoveredKey = movie.key },
+                                    badge = state.badgeFor(movie),
                                 )
                             }
                         }
@@ -227,13 +234,15 @@ internal fun MovieDetail(state: AppState, movie: Movie) {
 
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxWidth().height(460.dp)) {
-            RemoteImage(
-                url = info?.backdrop ?: info?.cover ?: movie.poster,
-                modifier = Modifier.fillMaxSize(),
-                maxSide = 1600,
-                contentScale = ContentScale.Crop,
-                alignment = Alignment.TopCenter,
-            )
+            KenBurns(running = state.nowPlaying == null || state.miniPlayer, modifier = Modifier.fillMaxSize()) {
+                Artwork(
+                    candidates = listOfNotNull(info?.backdrop, state.tmdbFor(movie)?.backdrop, info?.cover) + state.posterCandidates(movie),
+                    modifier = Modifier.fillMaxSize(),
+                    maxSide = 1600,
+                    contentScale = ContentScale.Crop,
+                    alignment = Alignment.TopCenter,
+                )
+            }
             Box(
                 Modifier.fillMaxSize().background(
                     Brush.verticalGradient(
@@ -259,11 +268,25 @@ internal fun MovieDetail(state: AppState, movie: Movie) {
                         .clip(RoundedCornerShape(12.dp))
                         .background(palette.surfaceRaised),
                 ) {
-                    RemoteImage(url = movie.poster ?: info?.cover, modifier = Modifier.fillMaxSize(), maxSide = 600)
+                    Artwork(
+                        candidates = state.posterCandidates(movie) + listOfNotNull(info?.cover),
+                        modifier = Modifier.fillMaxSize(),
+                        maxSide = 600,
+                        placeholder = { PosterPlaceholder(state.titleOf(movie)) },
+                    )
                 }
                 Spacer(Modifier.width(32.dp))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(movie.name, style = MaterialTheme.typography.displaySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    TitleLogo(
+                        state = state,
+                        kind = "movie",
+                        tmdbId = state.tmdbIdOf(movie),
+                        title = state.titleOf(movie),
+                        style = MaterialTheme.typography.displaySmall,
+                        maxHeight = 120.dp,
+                        maxWidth = 520.dp,
+                        maxLines = 3,
+                    )
                     val facts = listOfNotNull(
                         yearOf(info?.releaseDate),
                         info?.genre?.takeIf { it.isNotBlank() },
@@ -272,6 +295,21 @@ internal fun MovieDetail(state: AppState, movie: Movie) {
                     )
                     if (facts.isNotEmpty()) {
                         Text(facts.joinToString("  ·  "), style = MaterialTheme.typography.bodyLarge, color = palette.textSecondary)
+                    }
+                    // Samma film i flera versioner: välj här, Spela spelar den valda.
+                    val all = state.versionsOf(movie)
+                    if (all.size > 1) {
+                        VersionPicker(
+                            labels = all.map { version ->
+                                val started = state.history.any {
+                                    it.kind == WatchKind.MOVIE && it.sourceId == version.sourceId &&
+                                        it.itemId == version.streamId.toString() && it.resumable
+                                }
+                                state.versions.labelOf(version) + (if (started) " · påbörjad" else "")
+                            },
+                            selected = all.indexOfFirst { it.key == movie.key },
+                            onSelect = { index -> state.showMovie(all[index], exact = true) },
+                        )
                     }
                     Row(
                         Modifier.padding(vertical = 6.dp),
@@ -284,7 +322,12 @@ internal fun MovieDetail(state: AppState, movie: Movie) {
                         trailerUrl(info?.trailer)?.let { url ->
                             SecondaryButton("Trailer", onClick = { openInBrowser(url) }, icon = Glyphs.Movies)
                         }
-                        MyListButton(state, ListKind.MOVIE, movie.key)
+                        val saved = state.inMyList(movie)
+                        SecondaryButton(
+                            if (saved) "I min lista" else "Min lista",
+                            onClick = { state.toggleMyList(movie) },
+                            icon = if (saved) Glyphs.Check else Glyphs.Add,
+                        )
                     }
                     when (infoState) {
                         MovieInfoState.Loading -> Row(
@@ -384,14 +427,14 @@ fun SeriesScreen(state: AppState) {
     }
     val group = state.seriesGroup
     val query = state.seriesQuery
-    val series = remember(library, group, query, state.seriesSort, state.tmdbFacts) { state.filteredSeries() }
+    val series = remember(library, group, query, state.seriesSort, state.tmdbFacts, state.versions) { state.filteredSeries() }
     var spotlightKey by remember(series) { mutableStateOf(series.firstOrNull()?.key) }
-    if (tvLayout) {
-        LaunchedEffect(focusedKey) {
-            val key = focusedKey ?: return@LaunchedEffect
-            delay(180)
-            spotlightKey = key
-        }
+    var hoveredKey by remember { mutableStateOf<String?>(null) }
+    val activeKey = if (tvLayout) focusedKey else hoveredKey
+    LaunchedEffect(activeKey) {
+        val key = activeKey ?: return@LaunchedEffect
+        delay(if (tvLayout) 180 else 260)
+        spotlightKey = key
     }
     val spotlight = remember(series, spotlightKey) { series.firstOrNull { it.key == spotlightKey } }
     val restore = remember { FocusRequester() }
@@ -407,16 +450,16 @@ fun SeriesScreen(state: AppState) {
     Row(Modifier.fillMaxSize()) {
         GroupColumn(
             allLabel = "Alla serier",
-            total = library.series.size,
-            groups = library.seriesGroups,
+            total = if (state.versions.isEmpty) library.series.size else state.versions.seriesCount,
+            groups = state.visibleGroups(LibraryFilter.SERIES, library.seriesGroups),
             counts = library.seriesCounts,
             selected = group,
             onSelect = { state.seriesGroup = it },
         )
         Box(Modifier.weight(1f).fillMaxHeight()) {
-            if (tvLayout && spotlight != null) {
+            if (spotlight != null) {
                 val tmdb = state.tmdbFor(spotlight)
-                SpotlightBackdrop(spotlight.backdrop ?: tmdb?.backdrop)
+                SpotlightBackdrop(spotlight.backdrop ?: tmdb?.backdrop, running = state.nowPlaying == null || state.miniPlayer)
             }
             Column(Modifier.fillMaxSize()) {
                 ScreenHeader(
@@ -427,10 +470,13 @@ fun SeriesScreen(state: AppState) {
                     placeholder = "Sök serie",
                 )
                 SortRow(state.seriesSort, series = true, onSelect = { state.sortSeries(it) })
-                if (tvLayout && spotlight != null) {
+                if (spotlight != null) {
                     val tmdb = state.tmdbFor(spotlight)
                     SpotlightInfo(
-                        title = spotlight.name,
+                        state = state,
+                        kind = "tv",
+                        tmdbId = tmdb?.id,
+                        title = state.titleOf(spotlight),
                         meta = listOfNotNull(
                             spotlight.year,
                             formatRating(tmdb?.rating ?: spotlight.rating),
@@ -456,9 +502,9 @@ fun SeriesScreen(state: AppState) {
                         ) {
                             gridItems(series, key = { it.key }) { item ->
                                 PosterCard(
-                                    title = item.name,
-                                    imageUrl = item.cover ?: state.tmdbFor(item)?.poster,
-                                    meta = listOfNotNull(item.year, formatRating(state.tmdbFor(item)?.rating ?: item.rating)).joinToString("  ").ifEmpty { null },
+                                    title = state.titleOf(item),
+                                    images = state.posterCandidates(item),
+                                    meta = seriesMeta(state, item),
                                     onClick = {
                                         openedKey = item.key
                                         state.showSeries(item)
@@ -468,6 +514,8 @@ fun SeriesScreen(state: AppState) {
                                     onFocusChange = { has ->
                                         if (has) focusedKey = item.key else if (focusedKey == item.key) focusedKey = null
                                     },
+                                    onActive = { if (!tvLayout) hoveredKey = item.key },
+                                    badge = state.badgeFor(item),
                                 )
                             }
                         }
@@ -482,16 +530,20 @@ fun SeriesScreen(state: AppState) {
 @Composable
 internal fun SeriesDetail(state: AppState, series: Series) {
     val palette = LocalPalette.current
+    // Samma serie i flera versioner: väljs i huvudet, avsnitten följer valet.
+    val all = state.versionsOf(series)
     Column(Modifier.fillMaxSize()) {
         // Huvudet: bakgrundsbild tonad mot svart, omslag och fakta.
-        Box(Modifier.fillMaxWidth().height(300.dp)) {
-            RemoteImage(
-                url = series.backdrop ?: series.cover,
-                modifier = Modifier.fillMaxSize(),
-                maxSide = 1600,
-                contentScale = ContentScale.Crop,
-                alignment = Alignment.TopCenter,
-            )
+        Box(Modifier.fillMaxWidth().height(if (all.size > 1) 350.dp else 300.dp)) {
+            KenBurns(running = state.nowPlaying == null || state.miniPlayer, modifier = Modifier.fillMaxSize()) {
+                Artwork(
+                    candidates = listOfNotNull(series.backdrop, state.tmdbFor(series)?.backdrop) + state.posterCandidates(series),
+                    modifier = Modifier.fillMaxSize(),
+                    maxSide = 1600,
+                    contentScale = ContentScale.Crop,
+                    alignment = Alignment.TopCenter,
+                )
+            }
             Box(
                 Modifier.fillMaxSize().background(
                     Brush.verticalGradient(
@@ -512,11 +564,25 @@ internal fun SeriesDetail(state: AppState, series: Series) {
                         .clip(RoundedCornerShape(10.dp))
                         .background(palette.surfaceRaised),
                 ) {
-                    RemoteImage(url = series.cover, modifier = Modifier.fillMaxSize(), maxSide = 480)
+                    Artwork(
+                        candidates = state.posterCandidates(series),
+                        modifier = Modifier.fillMaxSize(),
+                        maxSide = 480,
+                        placeholder = { PosterPlaceholder(state.titleOf(series)) },
+                    )
                 }
                 Spacer(Modifier.width(24.dp))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(series.name, style = MaterialTheme.typography.displaySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    TitleLogo(
+                        state = state,
+                        kind = "tv",
+                        tmdbId = state.tmdbIdOf(series),
+                        title = state.titleOf(series),
+                        style = MaterialTheme.typography.displaySmall,
+                        maxHeight = 104.dp,
+                        maxWidth = 480.dp,
+                        maxLines = 2,
+                    )
                     val facts = listOfNotNull(series.year, series.genre?.takeIf { it.isNotBlank() }, formatRating(series.rating))
                     if (facts.isNotEmpty()) {
                         Text(facts.joinToString("  ·  "), style = MaterialTheme.typography.bodyMedium, color = palette.textSecondary)
@@ -526,9 +592,16 @@ internal fun SeriesDetail(state: AppState, series: Series) {
                             plot,
                             style = MaterialTheme.typography.bodyLarge,
                             color = palette.textSecondary,
-                            maxLines = 4,
+                            maxLines = if (all.size > 1) 2 else 4,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.widthIn(max = 780.dp),
+                        )
+                    }
+                    if (all.size > 1) {
+                        VersionPicker(
+                            labels = all.map { state.versions.labelOf(it) },
+                            selected = all.indexOfFirst { it.key == series.key },
+                            onSelect = { index -> state.showSeries(all[index], exact = true) },
                         )
                     }
                     Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -542,7 +615,12 @@ internal fun SeriesDetail(state: AppState, series: Series) {
                         trailerUrl(series.trailer)?.let { url ->
                             SecondaryButton("Trailer", onClick = { openInBrowser(url) }, icon = Glyphs.Movies)
                         }
-                        MyListButton(state, ListKind.SERIES, series.key)
+                        val saved = state.inMyList(series)
+                        SecondaryButton(
+                            if (saved) "I min lista" else "Min lista",
+                            onClick = { state.toggleMyList(series) },
+                            icon = if (saved) Glyphs.Check else Glyphs.Add,
+                        )
                     }
                 }
             }
@@ -562,7 +640,7 @@ internal fun SeriesDetail(state: AppState, series: Series) {
                 body = episodes.message,
                 actionLabel = "Försök igen",
                 actionIcon = Glyphs.Refresh,
-                onAction = { state.showSeries(series) },
+                onAction = { state.showSeries(series, exact = true) },
             )
             is EpisodesState.Loaded -> EpisodeList(state, series, episodes.episodes)
         }
@@ -673,7 +751,8 @@ private fun EpisodeRow(episode: XtreamEpisode, series: Series, onClick: () -> Un
 @Composable
 internal fun PosterCard(
     title: String,
-    imageUrl: String?,
+    /** Omslagen att prova, i ordning; det första som går att visa används. */
+    images: List<String>,
     meta: String?,
     onClick: () -> Unit,
     rank: Int? = null,
@@ -684,6 +763,8 @@ internal fun PosterCard(
     onFocusChange: (Boolean) -> Unit = {},
     /** När musen eller markeringen kommer till omslaget. */
     onActive: () -> Unit = {},
+    /** Liten skylt uppe i hörnet, som "4K". */
+    badge: String? = null,
 ) {
     val palette = LocalPalette.current
     var focused by remember { mutableStateOf(false) }
@@ -724,22 +805,25 @@ internal fun PosterCard(
                     .then(if (hovered) Modifier.border(ring, palette.focus.copy(alpha = ringAlpha), RoundedCornerShape(10.dp)) else Modifier),
                 contentAlignment = Alignment.Center,
             ) {
-                RemoteImage(
-                    url = imageUrl,
+                Artwork(
+                    candidates = images,
                     modifier = Modifier.fillMaxSize(),
                     maxSide = 480,
-                    placeholder = {
-                        Text(
-                            title,
-                            modifier = Modifier.padding(12.dp),
-                            style = MaterialTheme.typography.titleSmall,
-                            color = palette.textTertiary,
-                            textAlign = TextAlign.Center,
-                            maxLines = 4,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
+                    placeholder = { PosterPlaceholder(title) },
                 )
+                if (badge != null) {
+                    Box(
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(6.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color.Black.copy(alpha = 0.72f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    ) {
+                        // "Ny" och "Nytt avsnitt" i accentfärgen, "4K" i vitt.
+                        Text(badge, style = MaterialTheme.typography.labelSmall, color = if (badge.startsWith("Ny")) palette.focus else Color.White)
+                    }
+                }
                 // Placeringen i en topplista. De tre första i accentfärgen.
                 if (rank != null) {
                     Box(
@@ -814,7 +898,7 @@ private fun SortRow(current: SortOrder, series: Boolean, onSelect: (SortOrder) -
  * bakgrundsbild visas ingen.
  */
 @Composable
-private fun SpotlightBackdrop(url: String?) {
+private fun SpotlightBackdrop(url: String?, running: Boolean) {
     Box(
         Modifier
             .fillMaxWidth()
@@ -832,32 +916,34 @@ private fun SpotlightBackdrop(url: String?) {
                 )
             },
     ) {
-        Crossfade(targetState = url, animationSpec = tween(450), label = "bakgrund") { current ->
-            if (current != null) {
-                RemoteImage(
-                    url = current,
-                    modifier = Modifier.fillMaxSize(),
-                    maxSide = 1280,
-                    contentScale = ContentScale.Crop,
-                    alignment = Alignment.TopCenter,
-                )
-            }
-        }
+        LivingBackdrop(url = url, modifier = Modifier.fillMaxSize(), running = running)
     }
 }
 
-/** Tv: titeln man står på, med år, betyg, genrer och handling. Fast höjd, så att omslagen inte hoppar. */
+/**
+ * Titeln man står på, med logga, år, betyg, genrer och handling. Fast höjd,
+ * så att omslagen inte hoppar när markeringen flyttas.
+ */
 @Composable
-private fun SpotlightInfo(title: String, meta: String?, overview: String?) {
+private fun SpotlightInfo(state: AppState, kind: String, tmdbId: Int?, title: String, meta: String?, overview: String?) {
     val palette = LocalPalette.current
     Column(
         Modifier
             .fillMaxWidth()
-            .height(196.dp)
+            .height(if (tvLayout) 196.dp else 176.dp)
             .padding(start = 24.dp, end = 36.dp, top = 6.dp, bottom = 10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(title, style = MaterialTheme.typography.headlineMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        TitleLogo(
+            state = state,
+            kind = kind,
+            tmdbId = tmdbId,
+            title = title,
+            style = MaterialTheme.typography.headlineMedium,
+            maxHeight = 64.dp,
+            maxWidth = 380.dp,
+            maxLines = 1,
+        )
         if (meta != null) {
             Text(meta, style = MaterialTheme.typography.titleSmall, color = palette.focus, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
@@ -866,10 +952,63 @@ private fun SpotlightInfo(title: String, meta: String?, overview: String?) {
                 overview,
                 style = MaterialTheme.typography.bodyLarge,
                 color = palette.textSecondary,
-                maxLines = 4,
+                maxLines = if (tvLayout) 4 else 3,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.fillMaxWidth(0.72f),
             )
+        }
+    }
+}
+
+/** Under omslaget: år, betyg och hur många versioner filmen finns i. */
+internal fun movieMeta(state: AppState, movie: Movie): String? {
+    val count = state.versionsOf(movie).size
+    return listOfNotNull(
+        state.versions.yearOf(movie)?.toString(),
+        formatRating(state.tmdbFor(movie)?.rating ?: movie.rating),
+        if (count > 1) "$count versioner" else null,
+    ).joinToString("  ").ifEmpty { null }
+}
+
+internal fun seriesMeta(state: AppState, series: Series): String? {
+    val count = state.versionsOf(series).size
+    return listOfNotNull(
+        state.versions.yearOf(series)?.toString(),
+        formatRating(state.tmdbFor(series)?.rating ?: series.rating),
+        if (count > 1) "$count versioner" else null,
+    ).joinToString("  ").ifEmpty { null }
+}
+
+/** Ett omslag som saknas: titeln på en tonad yta, så att det ser avsiktligt ut. */
+@Composable
+internal fun PosterPlaceholder(title: String) {
+    val palette = LocalPalette.current
+    Box(
+        Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(palette.surfaceRaised, palette.surface))),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            title,
+            modifier = Modifier.padding(12.dp),
+            style = MaterialTheme.typography.titleSmall,
+            color = palette.textSecondary,
+            textAlign = TextAlign.Center,
+            maxLines = 4,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** Filmens eller seriens versioner som val. Den valda spelas med Spela. */
+@Composable
+private fun VersionPicker(labels: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+    val palette = LocalPalette.current
+    Column(Modifier.padding(top = 2.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("${labels.size} versioner", style = MaterialTheme.typography.labelLarge, color = palette.textTertiary)
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            labels.forEachIndexed { index, label ->
+                Chip(label, selected = index == selected, onClick = { if (index != selected) onSelect(index) })
+            }
         }
     }
 }

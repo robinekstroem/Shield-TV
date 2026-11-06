@@ -131,6 +131,48 @@ class TmdbClient(private val key: String) {
         )
     }
 
+    /**
+     * Titeln som bild — filmens eller seriens logga — helst på svenska, annars
+     * engelska eller utan text. Bara PNG: SVG går inte att visa. Null: ingen finns.
+     */
+    fun logo(kind: String, id: Int): String? {
+        val logos = get("$kind/$id/images", mapOf("include_image_language" to "sv,en,null")).optJSONArray("logos") ?: return null
+        fun language(o: JSONObject): Int = when (o.optString("iso_639_1", "")) {
+            "sv" -> 0
+            "en" -> 1
+            "", "null" -> 2
+            else -> 3
+        }
+        val best = (0 until logos.length())
+            .mapNotNull { logos.optJSONObject(it) }
+            .filter { it.optString("file_path", "").endsWith(".png", ignoreCase = true) }
+            .sortedWith(compareBy<JSONObject> { language(it) }.thenByDescending { it.optDouble("vote_average", 0.0) })
+            .firstOrNull() ?: return null
+        return IMAGES + "w500" + best.optString("file_path")
+    }
+
+    /** Det som trendar i dag hos TMDB, filmer och serier blandat, mest omtalat först. */
+    fun trending(): List<TrendingTitle> {
+        val result = ArrayList<TrendingTitle>()
+        for (page in 1..2) {
+            val array = get("trending/all/day", mapOf("language" to "sv-SE", "page" to page.toString())).optJSONArray("results") ?: break
+            for (index in 0 until array.length()) {
+                val o = array.optJSONObject(index) ?: continue
+                val kind = o.optString("media_type", "")
+                if (kind != "movie" && kind != "tv") continue
+                val movie = kind == "movie"
+                result += TrendingTitle(
+                    kind = kind,
+                    id = o.optInt("id"),
+                    title = o.optString(if (movie) "title" else "name", ""),
+                    original = o.optString(if (movie) "original_title" else "original_name", ""),
+                    year = o.optString(if (movie) "release_date" else "first_air_date", "").take(4).toIntOrNull(),
+                )
+            }
+        }
+        return result
+    }
+
     private fun get(path: String, params: Map<String, String>): JSONObject {
         val query = buildString {
             for ((name, value) in params) {
@@ -157,6 +199,65 @@ class TmdbClient(private val key: String) {
 
     private companion object {
         const val IMAGES = "https://image.tmdb.org/t/p/"
+    }
+}
+
+/** En titel på TMDB:s trendlista. kind: "movie" eller "tv". */
+data class TrendingTitle(
+    val kind: String,
+    val id: Int,
+    val title: String,
+    val original: String,
+    val year: Int?,
+)
+
+/**
+ * Loggor och dagens trendlista från TMDB, sparade mellan körningar så att
+ * startsidan har dem direkt. Loggorna per "movie:id" eller "tv:id"; tom
+ * text betyder att titeln saknar logga.
+ */
+class TmdbExtrasStore {
+    private val file: File get() = File(AppDirs.cache, "tmdb-extra.json")
+
+    class Saved(val logos: Map<String, String>, val trending: List<TrendingTitle>, val trendingAt: Long)
+
+    fun load(): Saved = runCatching {
+        val current = file
+        if (!current.isFile) return Saved(emptyMap(), emptyList(), 0L)
+        val o = JSONObject(current.readText(Charsets.UTF_8))
+        val logos = HashMap<String, String>()
+        o.optJSONObject("logos")?.let { saved -> for (key in saved.keys()) logos[key] = saved.optString(key, "") }
+        val list = o.optJSONArray("trending")
+        val trending = if (list == null) {
+            emptyList()
+        } else {
+            (0 until list.length()).mapNotNull { index ->
+                val e = list.optJSONObject(index) ?: return@mapNotNull null
+                TrendingTitle(
+                    kind = e.optString("k", "movie"),
+                    id = e.optInt("i"),
+                    title = e.optString("t", ""),
+                    original = e.optString("o", ""),
+                    year = if (e.has("y")) e.optInt("y") else null,
+                )
+            }
+        }
+        Saved(logos, trending, o.optLong("at", 0L))
+    }.getOrDefault(Saved(emptyMap(), emptyList(), 0L))
+
+    fun save(saved: Saved) {
+        runCatching {
+            val logos = JSONObject()
+            for ((key, url) in saved.logos) logos.put(key, url)
+            val list = JSONArray()
+            for (t in saved.trending) {
+                val e = JSONObject().put("k", t.kind).put("i", t.id).put("t", t.title).put("o", t.original)
+                t.year?.let { e.put("y", it) }
+                list.put(e)
+            }
+            val o = JSONObject().put("logos", logos).put("trending", list).put("at", saved.trendingAt)
+            writeFileSafely(file, o.toString().toByteArray(Charsets.UTF_8))
+        }
     }
 }
 
@@ -196,7 +297,9 @@ class TmdbStore {
             for ((key, f) in facts) {
                 val e = JSONObject().put("i", f.id).put("t", f.checkedUtc)
                 if (f.found) {
-                    e.put("g", JSONArray(f.genres)).put("v", f.votes).put("p", f.popularity)
+                    // Genrerna är en vanlig text ("Drama, Komedi"). Förr stod JSONArray(...) här,
+                    // som försöker tolka texten som JSON och kastar: då sparades ingenting alls.
+                    e.put("g", f.genres).put("v", f.votes).put("p", f.popularity)
                     f.rating?.let { e.put("r", it) }
                     f.overview?.let { e.put("o", it) }
                     f.poster?.let { e.put("ps", it) }

@@ -11,6 +11,10 @@ on:
       - '.github/workflows/windows.yml'
       - 'shield/**'
       - '.github/workflows/shield.yml'
+      - 'ipad/**'
+      - '.github/workflows/ipad.yml'
+      - 'mac/**'
+      - '.github/workflows/mac.yml'
   pull_request:
   workflow_dispatch:
 
