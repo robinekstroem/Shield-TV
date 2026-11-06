@@ -382,25 +382,55 @@ class FootballClient {
         return hex.toLongOrNull(16)?.let { 0xFF000000L or it }
     }
 
-    private fun get(url: String): JSONObject {
+    /**
+     * Sedan augusti 2026 spärrar ESPN ofta site.api.espn.com ("You don't have
+     * permission"), särskilt för program som utger sig för att vara en
+     * webbläsare. site.web.api.espn.com svarar på samma frågor. Adressen som
+     * svarade senast provas först, den andra är reserv.
+     */
+    private fun get(path: String): JSONObject {
+        val first = preferredHost
+        var failure: IOException? = null
+        for (host in listOf(first) + HOSTS.filter { it != first }) {
+            try {
+                val result = fetch("https://$host$path")
+                preferredHost = host
+                return result
+            } catch (error: IOException) {
+                if (failure == null) failure = error
+            }
+        }
+        throw failure ?: IOException("ESPN svarade inte")
+    }
+
+    private fun fetch(url: String): JSONObject {
         val connection = URL(url).openConnection() as HttpURLConnection
         connection.connectTimeout = 8_000
         connection.readTimeout = 15_000
-        connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Tv)")
+        // Inte "Mozilla": ESPN spärrar program som säger sig vara en webbläsare utan att vara det.
+        connection.setRequestProperty("User-Agent", USER_AGENT)
         connection.setRequestProperty("Accept", "application/json")
         try {
             val code = connection.responseCode
             if (code !in 200..299) throw IOException("ESPN svarade $code")
             val text = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            // En spärrsida i stället för data räknas som ett fel, så att reservadressen provas.
+            if (!text.trimStart().startsWith("{")) throw IOException("ESPN svarade utan data")
             return JSONObject(text)
         } finally {
             connection.disconnect()
         }
     }
 
+    /** Adressen som svarade senast. Läses och skrivs från flera hämtningar samtidigt. */
+    @Volatile
+    private var preferredHost: String = HOSTS[0]
+
     private companion object {
-        const val SITE = "https://site.api.espn.com/apis/site/v2/sports/soccer"
-        const val STANDINGS = "https://site.api.espn.com/apis/v2/sports/soccer"
+        const val SITE = "/apis/site/v2/sports/soccer"
+        const val STANDINGS = "/apis/v2/sports/soccer"
+        val HOSTS = listOf("site.web.api.espn.com", "site.api.espn.com")
+        const val USER_AGENT = "Tv/1.0 (fotboll)"
 
         val STAT_LABELS = listOf(
             "possessionPct" to "Bollinnehav",

@@ -634,10 +634,18 @@ class AppState {
      */
     suspend fun footballLoop() {
         footballVisible = true
+        var failures = 0
         try {
             while (true) {
                 val full = footballMatches.isEmpty() || System.currentTimeMillis() - footballFullAt > FOOTBALL_FULL_MS
                 safely { refreshFootball(full = full, foreground = true) }
+                // Gick inget att hämta: nytt försök snart, sedan allt glesare upp till var tionde minut.
+                if (footballError != null && footballMatches.isEmpty()) {
+                    failures++
+                    delay((30_000L shl (failures - 1).coerceAtMost(4)).coerceAtMost(600_000L))
+                    continue
+                }
+                failures = 0
                 val now = System.currentTimeMillis()
                 val live = footballMatches.any { it.state == MatchState.LIVE || it.shouldHaveStarted(now) }
                 val soon = footballMatches.any { it.state == MatchState.UPCOMING && it.kickoff - now in 0L..LINEUP_WATCH_MS }
@@ -678,6 +686,15 @@ class AppState {
         }
     }
 
+    /** Varför fotbollen inte gick att hämta, kort och på svenska. */
+    private fun footballReason(error: Throwable): String = when (error) {
+        is UnknownHostException -> "ingen anslutning till ESPN"
+        is SocketTimeoutException -> "ESPN svarade inte i tid"
+        is ConnectException -> "kunde inte ansluta till ESPN"
+        is SSLException -> "den säkra anslutningen till ESPN misslyckades"
+        else -> error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName
+    }
+
     /** Ett oväntat fel i en hämtning ska inte stoppa slingan; nästa varv försöker igen. */
     private inline fun safely(block: () -> Unit) {
         try {
@@ -709,7 +726,10 @@ class AppState {
         }
         val fetched = results.filter { it.second.isSuccess }
         if (fetched.isEmpty()) {
-            footballError = "Matcherna gick inte att hämta just nu. Appen försöker igen om en stund."
+            // Skälet står med, så att det går att se om det är nätet eller ESPN.
+            val reason = results.firstNotNullOfOrNull { it.second.exceptionOrNull() }?.let { footballReason(it) }
+            footballError = "Matcherna gick inte att hämta just nu" + (reason?.let { " ($it)" } ?: "") +
+                ". Appen försöker igen om en stund."
             return
         }
         footballError = null
