@@ -71,8 +71,7 @@ internal fun trailerUrl(value: String?): String? {
 
 /** 12 345 — med svenskt tusentalsmellanrum. */
 fun Int.grouped(): String {
-    // Mellanslag som tusentalsavgränsare, som på svenska. Utan Java, så att
-    // samma kod fungerar på iPad.
+    // Mellanslag som tusentalsavgränsare, som på svenska.
     val digits = kotlin.math.abs(toLong()).toString()
     val out = StringBuilder()
     digits.forEachIndexed { i, c ->

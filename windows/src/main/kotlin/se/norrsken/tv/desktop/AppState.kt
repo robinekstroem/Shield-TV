@@ -2522,8 +2522,6 @@ private const val FOOTBALL_RETRY_MS = 10 * 60_000L
 private const val FOOTBALL_START_DELAY_MS = 25_000L
 /** En match räknas som pågående upp till tre timmar efter avspark. */
 private const val FOOTBALL_LIVE_WINDOW_MS = 3 * 60 * 60_000L
-/** "Visas på" letas för matcherna de närmaste fyra dygnen. */
-private const val BROADCAST_HORIZON_MS = 4 * DAY_MS
 
 /** Det "Visas på" senast räknades fram för. Allt utom matcherna jämförs som samma objekt. */
 private class BroadcastKey(
@@ -2536,6 +2534,8 @@ private class BroadcastKey(
         other != null && other.guide === guide && other.channels === channels && other.hidden === hidden && other.matches == matches
 }
 private const val DAY_MS = 24L * 60 * 60 * 1000
+/** "Visas på" letas för matcherna de närmaste fyra dygnen. */
+private const val BROADCAST_HORIZON_MS = 4 * DAY_MS
 /** "Ny": högst en månad bakåt, och tre dagar första gången. */
 private const val NEW_MAX_AGE_MS = 30 * DAY_MS
 private const val NEW_FIRST_RUN_MS = 3 * DAY_MS
