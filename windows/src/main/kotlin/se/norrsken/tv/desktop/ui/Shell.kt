@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
@@ -52,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import se.norrsken.tv.data.playlist.ImportState
 import se.norrsken.tv.desktop.AppState
 import se.norrsken.tv.desktop.Screen
+import se.norrsken.tv.desktop.data.MatchState
 
 /**
  * Var minispelaren står: överst i sidofältet, som ett "spelas nu" med
@@ -112,6 +114,7 @@ fun AppRoot(state: AppState) {
                         Screen.HOME -> HomeScreen(state)
                         Screen.LIVE -> LiveTvScreen(state)
                         Screen.GUIDE -> GuideScreen(state)
+                        Screen.FOOTBALL -> FootballScreen(state)
                         Screen.MOVIES -> MoviesScreen(state)
                         Screen.SERIES -> SeriesScreen(state)
                         Screen.GENRES -> GenreScreen(state)
@@ -198,6 +201,11 @@ private fun Sidebar(state: AppState, docked: Boolean) {
             NavItem(Glyphs.Guide, "Tablå", "Vad som sänds", state.guide.channelCount, state.screen == Screen.GUIDE, docked) {
                 state.screen = Screen.GUIDE
             }
+            // Antalet matcher som pågår just nu.
+            val liveMatches = state.footballMatches.count { it.state == MatchState.LIVE }
+            NavItem(Glyphs.Football, "Fotboll", "Matcher & tabeller", liveMatches.takeIf { it > 0 }, state.screen == Screen.FOOTBALL, docked, live = true) {
+                state.screen = Screen.FOOTBALL
+            }
             // Varje film och serie en gång, hur många versioner den än finns i.
             val versions = state.versions
             val movieCount = if (versions.isEmpty) library.movies.size else versions.movieCount
@@ -236,6 +244,8 @@ private fun NavItem(
     selected: Boolean,
     /** Utan undertext, när minispelaren tar plats i sidofältet. */
     compact: Boolean,
+    /** Siffran räknar det som pågår just nu: röd, med en prick framför. */
+    live: Boolean = false,
     onClick: () -> Unit,
 ) {
     val palette = LocalPalette.current
@@ -262,7 +272,15 @@ private fun NavItem(
                 }
             }
             if (count != null && count > 0) {
-                Text(count.grouped(), style = MaterialTheme.typography.labelSmall, color = palette.textTertiary)
+                if (live) {
+                    Box(Modifier.size(6.dp).clip(CircleShape).background(LIVE_COUNT))
+                    Spacer(Modifier.width(5.dp))
+                }
+                Text(
+                    count.grouped(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (live) LIVE_COUNT else palette.textTertiary,
+                )
             }
         }
     }
@@ -307,3 +325,6 @@ fun ImportState.describe(): String = when (this) {
     }.joinToString(prefix = "Klart: ", separator = ", ", postfix = ".")
     is ImportState.Failed -> message
 }
+
+/** Samma röda som LIVE i fliken Fotboll. */
+private val LIVE_COUNT = Color(0xFFFF453A)

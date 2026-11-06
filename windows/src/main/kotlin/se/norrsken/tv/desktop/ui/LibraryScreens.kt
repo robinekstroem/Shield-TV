@@ -329,20 +329,30 @@ internal fun MovieDetail(state: AppState, movie: Movie) {
                             icon = if (saved) Glyphs.Check else Glyphs.Add,
                         )
                     }
+                    // Handlingen på svenska från TMDB när den finns, annars leverantörens text.
+                    val swedishPlot = state.tmdbFor(movie)?.overview?.takeIf { it.isNotBlank() }
                     when (infoState) {
-                        MovieInfoState.Loading -> Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            Spinner(size = 18.dp)
-                            Text("Hämtar information…", style = MaterialTheme.typography.bodyMedium, color = palette.textTertiary)
+                        MovieInfoState.Loading -> if (swedishPlot != null) {
+                            MovieFacts(null, swedishPlot)
+                        } else {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Spinner(size = 18.dp)
+                                Text("Hämtar information…", style = MaterialTheme.typography.bodyMedium, color = palette.textTertiary)
+                            }
                         }
-                        is MovieInfoState.Failed -> Text(
-                            "Informationen gick inte att hämta. ${infoState.message}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = palette.textTertiary,
-                        )
-                        is MovieInfoState.Loaded -> MovieFacts(infoState.info)
+                        is MovieInfoState.Failed -> if (swedishPlot != null) {
+                            MovieFacts(null, swedishPlot)
+                        } else {
+                            Text(
+                                "Informationen gick inte att hämta. ${infoState.message}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = palette.textTertiary,
+                            )
+                        }
+                        is MovieInfoState.Loaded -> MovieFacts(infoState.info, swedishPlot)
                     }
                 }
             }
@@ -359,9 +369,9 @@ internal fun MovieDetail(state: AppState, movie: Movie) {
 }
 
 @Composable
-private fun MovieFacts(info: XtreamVodInfo?) {
+private fun MovieFacts(info: XtreamVodInfo?, swedishPlot: String?) {
     val palette = LocalPalette.current
-    val plot = info?.plot?.takeIf { it.isNotBlank() }
+    val plot = swedishPlot ?: info?.plot?.takeIf { it.isNotBlank() }
     val director = info?.director?.takeIf { it.isNotBlank() }
     val cast = info?.cast?.takeIf { it.isNotBlank() }
     if (plot == null && director == null && cast == null) {
@@ -587,7 +597,10 @@ internal fun SeriesDetail(state: AppState, series: Series) {
                     if (facts.isNotEmpty()) {
                         Text(facts.joinToString("  ·  "), style = MaterialTheme.typography.bodyMedium, color = palette.textSecondary)
                     }
-                    series.plot?.takeIf { it.isNotBlank() }?.let { plot ->
+                    // Handlingen på svenska från TMDB när den finns, annars leverantörens text.
+                    val shownPlot = state.tmdbFor(series)?.overview?.takeIf { it.isNotBlank() }
+                        ?: series.plot?.takeIf { it.isNotBlank() }
+                    shownPlot?.let { plot ->
                         Text(
                             plot,
                             style = MaterialTheme.typography.bodyLarge,

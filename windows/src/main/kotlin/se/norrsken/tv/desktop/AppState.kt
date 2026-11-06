@@ -7,6 +7,19 @@ import se.norrsken.tv.desktop.data.SeriesMarksStore
 import se.norrsken.tv.desktop.data.TmdbExtrasStore
 import se.norrsken.tv.desktop.data.TrendingTitle
 import se.norrsken.tv.desktop.data.VersionTags
+import se.norrsken.tv.desktop.data.FootballClient
+import se.norrsken.tv.desktop.data.FootballMatch
+import se.norrsken.tv.desktop.data.League
+import se.norrsken.tv.desktop.data.Lineup
+import se.norrsken.tv.desktop.data.MatchDetail
+import se.norrsken.tv.desktop.data.MatchState
+import se.norrsken.tv.desktop.data.TableRow
+import se.norrsken.tv.desktop.data.findBroadcasts
+import kotlinx.coroutines.async
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import java.time.LocalDate
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import se.norrsken.tv.desktop.data.MyListStore
@@ -15,7 +28,6 @@ import se.norrsken.tv.desktop.data.ListEntry
 import se.norrsken.tv.desktop.ui.Images
 import se.norrsken.tv.desktop.data.AppDirs
 import java.io.File
-import kotlinx.coroutines.coroutineScope
 import se.norrsken.tv.desktop.data.weightedScore
 import se.norrsken.tv.desktop.data.TitleCleaner
 import se.norrsken.tv.desktop.data.TmdbBusyException
@@ -55,7 +67,6 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
@@ -93,7 +104,7 @@ import java.text.Collator
 import java.util.UUID
 import javax.net.ssl.SSLException
 
-enum class Screen { HOME, LIVE, GUIDE, MOVIES, SERIES, GENRES, HISTORY, SETTINGS }
+enum class Screen { HOME, LIVE, GUIDE, FOOTBALL, MOVIES, SERIES, GENRES, HISTORY, SETTINGS }
 
 enum class SortOrder(val label: String) {
     PROVIDER("Standard"),
@@ -293,6 +304,47 @@ class AppState {
     private var seekTarget = 0L
     private var seekAt = 0L
 
+    // --- Fotboll ----------------------------------------------------------------------
+    /** Matcherna från en vecka bakåt till två veckor framåt, i tidsordning. */
+    var footballMatches by mutableStateOf<List<FootballMatch>>(emptyList())
+        private set
+    var footballTables by mutableStateOf<Map<League, List<TableRow>>>(emptyMap())
+        private set
+    /** När matcherna senast hämtades. 0: aldrig. */
+    var footballUpdatedAt by mutableStateOf(0L)
+        private set
+    var footballError by mutableStateOf<String?>(null)
+        private set
+    /** Vald liga, eller null för översikten. */
+    var footballLeague by mutableStateOf<League?>(null)
+    var selectedMatch by mutableStateOf<FootballMatch?>(null)
+        private set
+    var matchDetail by mutableStateOf<MatchDetail?>(null)
+        private set
+    var matchDetailLoading by mutableStateOf(false)
+        private set
+    /** Förra matchens startelvor, per lag-id, medan den öppna matchens elva inte är släppt. */
+    var previousLineups by mutableStateOf<Map<String, Lineup>>(emptyMap())
+        private set
+    /** Kommande matcher vars startelvor är släppta. */
+    var lineupsReady by mutableStateOf<Set<String>>(emptySet())
+        private set
+    /** Kanalerna som visar matchen enligt tablån, per match-id. */
+    var matchChannels by mutableStateOf<Map<String, List<LiveChannel>>>(emptyMap())
+        private set
+    private val footballClient = FootballClient()
+    private var tablesAt = 0L
+    /** När hela perioden senast hämtades; däremellan hämtas bara dagarna kring idag. */
+    private var footballFullAt = 0L
+    private var footballTriedAt = 0L
+    private val footballMutex = Mutex()
+    private val channelsMutex = Mutex()
+    private var channelsKey: BroadcastKey? = null
+    /** Fliken Fotboll syns: då håller footballLoop allt färskt. */
+    private var footballVisible = false
+    /** Appen syns. Shield sätter false när man gått till hemskärmen. */
+    var appVisible = true
+
     /** Omslag som sparas i bakgrunden, för inställningarna. Null: inget att säga. */
     var coverStatus by mutableStateOf<String?>(null)
 
@@ -407,6 +459,7 @@ class AppState {
 
     init {
         scope.launch { loadFromDisk() }
+        scope.launch { footballBackground() }
         scope.launch {
             var ticks = 0
             while (true) {
@@ -571,6 +624,227 @@ class AppState {
     fun titleOf(movie: Movie): String = versions.titleOf(movie)
 
     fun titleOf(series: Series): String = versions.titleOf(series)
+
+    // --- Fotboll ----------------------------------------------------------------------
+
+    /**
+     * Håller fliken Fotboll färsk medan den syns: var 45:e sekund när något
+     * är live, varannan minut nära avspark (startelvorna), annars var tionde.
+     * Hela perioden hämtas var tionde minut, däremellan bara dagarna kring idag.
+     */
+    suspend fun footballLoop() {
+        footballVisible = true
+        try {
+            while (true) {
+                val full = footballMatches.isEmpty() || System.currentTimeMillis() - footballFullAt > FOOTBALL_FULL_MS
+                safely { refreshFootball(full = full, foreground = true) }
+                val now = System.currentTimeMillis()
+                val live = footballMatches.any { it.state == MatchState.LIVE || it.shouldHaveStarted(now) }
+                val soon = footballMatches.any { it.state == MatchState.UPCOMING && it.kickoff - now in 0L..LINEUP_WATCH_MS }
+                delay(
+                    when {
+                        live -> 45_000L
+                        soon -> 120_000L
+                        else -> 600_000L
+                    },
+                )
+            }
+        } finally {
+            footballVisible = false
+        }
+    }
+
+    /**
+     * Utan fliken öppen räcker det att ställningen stämmer för siffran vid
+     * Fotboll i menyn: dagarna kring idag var femte minut medan matcher pågår,
+     * hela perioden var tredje timme. Inget hämtas medan en film eller kanal
+     * fyller skärmen, eller när appen inte syns.
+     */
+    private suspend fun footballBackground() {
+        delay(FOOTBALL_START_DELAY_MS)
+        while (true) {
+            val now = System.currentTimeMillis()
+            val watching = nowPlaying != null && !miniPlayer
+            if (!footballVisible && appVisible && !watching) {
+                val ongoing = footballMatches.any { it.state == MatchState.LIVE || it.shouldHaveStarted(now) }
+                when {
+                    now - footballFullAt > FOOTBALL_BACKGROUND_FULL_MS && now - footballTriedAt > FOOTBALL_RETRY_MS ->
+                        safely { refreshFootball(full = true, foreground = false) }
+                    ongoing && now - footballUpdatedAt >= FOOTBALL_BACKGROUND_LIVE_MS ->
+                        safely { refreshFootball(full = false, foreground = false) }
+                }
+            }
+            delay(60_000L)
+        }
+    }
+
+    /** Ett oväntat fel i en hämtning ska inte stoppa slingan; nästa varv försöker igen. */
+    private inline fun safely(block: () -> Unit) {
+        try {
+            block()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            error.printStackTrace()
+        }
+    }
+
+    /** Avspark har varit, men matchen står fortfarande som kommande: den har nog börjat. */
+    private fun FootballMatch.shouldHaveStarted(now: Long): Boolean =
+        state == MatchState.UPCOMING && kickoff in (now - FOOTBALL_LIVE_WINDOW_MS)..now
+
+    private suspend fun refreshFootball(full: Boolean, foreground: Boolean) {
+        footballMutex.withLock { refreshFootballLocked(full, foreground) }
+    }
+
+    private suspend fun refreshFootballLocked(full: Boolean, foreground: Boolean) {
+        val today = LocalDate.now()
+        val from = if (full) today.minusDays(7) else today.minusDays(1)
+        val to = if (full) today.plusDays(14) else today.plusDays(1)
+        if (full) footballTriedAt = System.currentTimeMillis()
+        val results = coroutineScope {
+            League.entries.map { league ->
+                async(Dispatchers.IO) { league to runCatching { footballClient.matches(league, from, to) } }
+            }.awaitAll()
+        }
+        val fetched = results.filter { it.second.isSuccess }
+        if (fetched.isEmpty()) {
+            footballError = "Matcherna gick inte att hämta just nu. Appen försöker igen om en stund."
+            return
+        }
+        footballError = null
+        val fresh = fetched.flatMap { it.second.getOrDefault(emptyList()) }
+        val merged = if (full) {
+            // En liga som inte gick att hämta den här gången behåller sina matcher.
+            val failed = results.filter { it.second.isFailure }.map { it.first }.toSet()
+            fresh + footballMatches.filter { it.league in failed }
+        } else {
+            // Bara dagarna kring idag: de nya ersätter sina gamla, resten står kvar.
+            val ids = fresh.mapTo(HashSet()) { it.id }
+            footballMatches.filter { it.id !in ids } + fresh
+        }
+        footballMatches = merged.sortedBy { it.kickoff }
+        val now = System.currentTimeMillis()
+        footballUpdatedAt = now
+        if (full) footballFullAt = now
+        if (!foreground) return
+
+        if (footballTables.isEmpty() || now - tablesAt > TABLES_MAX_AGE_MS) {
+            val tables = coroutineScope {
+                League.entries.map { league ->
+                    async(Dispatchers.IO) { league to runCatching { footballClient.table(league) }.getOrNull() }
+                }.awaitAll()
+            }
+            footballTables = footballTables + tables.mapNotNull { (league, rows) -> rows?.takeIf { it.isNotEmpty() }?.let { league to it } }
+            tablesAt = System.currentTimeMillis()
+        }
+
+        // Den öppna matchen: ny ställning, och startelvorna så fort de släpps.
+        selectedMatch?.let { open ->
+            footballMatches.firstOrNull { it.id == open.id }?.let { selectedMatch = it }
+            loadMatchDetail(quiet = true)
+        }
+        checkLineups()
+        refreshMatchChannels()
+    }
+
+    /** Kommande matcher inom 75 minuter: är startelvan släppt? */
+    private suspend fun checkLineups() {
+        val now = System.currentTimeMillis()
+        val candidates = footballMatches.filter {
+            it.state == MatchState.UPCOMING && it.kickoff - now in 0L..LINEUP_WATCH_MS && it.id !in lineupsReady
+        }.take(6)
+        if (candidates.isEmpty()) return
+        val ready = coroutineScope {
+            candidates.map { match ->
+                async(Dispatchers.IO) {
+                    val released = runCatching { footballClient.detail(match.league, match.id, match.home.id).lineupsReleased }.getOrDefault(false)
+                    match.id.takeIf { released }
+                }
+            }.awaitAll()
+        }.filterNotNull()
+        if (ready.isNotEmpty()) lineupsReady = lineupsReady + ready
+    }
+
+    /**
+     * Kanalerna som visar matcherna enligt tablån. Räknas om bara när
+     * matcherna, kanalerna, de dolda kategorierna eller tablån har ändrats.
+     */
+    suspend fun refreshMatchChannels() {
+        channelsMutex.withLock {
+            val now = System.currentTimeMillis()
+            // Tablåerna brukar inte nå längre än några dygn fram.
+            val matches = footballMatches.filter {
+                it.state == MatchState.LIVE ||
+                    (it.state == MatchState.UPCOMING && it.kickoff in (now - FOOTBALL_LIVE_WINDOW_MS)..(now + BROADCAST_HORIZON_MS))
+            }
+            val key = BroadcastKey(guide, library.channels, hiddenGroups, matches.map { it.id to it.kickoff })
+            if (key.sameAs(channelsKey)) return
+            val found = withContext(Dispatchers.Default) {
+                runCatching {
+                    val visible = key.channels.filter { LibraryFilter.groupKey(LibraryFilter.LIVE, it.group) !in key.hidden }
+                    // Svenska och nordiska kanaler först, när flera visar samma match.
+                    findBroadcasts(matches, visible, key.guide).mapValues { (_, list) ->
+                        list.sortedBy { VersionTags.isForeignGroup(it.group) }
+                    }
+                }.getOrNull()
+            } ?: return
+            matchChannels = found
+            channelsKey = key
+        }
+    }
+
+    fun openMatch(match: FootballMatch) {
+        selectedMatch = match
+        matchDetail = null
+        previousLineups = emptyMap()
+        scope.launch { loadMatchDetail(quiet = false) }
+    }
+
+    fun closeMatch() {
+        selectedMatch = null
+        matchDetail = null
+        previousLineups = emptyMap()
+    }
+
+    private suspend fun loadMatchDetail(quiet: Boolean) {
+        val match = selectedMatch ?: return
+        if (!quiet) matchDetailLoading = true
+        val detail = withContext(Dispatchers.IO) {
+            runCatching { footballClient.detail(match.league, match.id, match.home.id) }.getOrNull()
+        }
+        if (selectedMatch?.id != match.id) return
+        matchDetailLoading = false
+        if (detail != null) matchDetail = detail
+        if (detail?.lineupsReleased == true) {
+            if (match.state == MatchState.UPCOMING) lineupsReady = lineupsReady + match.id
+        } else if (previousLineups.isEmpty() && match.state == MatchState.UPCOMING) {
+            // Före släppet: lagens startelvor från förra matchen, som en försmak.
+            val previous = loadPreviousLineups(match)
+            if (selectedMatch?.id == match.id) previousLineups = previous
+        }
+    }
+
+    private suspend fun loadPreviousLineups(match: FootballMatch): Map<String, Lineup> {
+        val result = HashMap<String, Lineup>()
+        for (team in listOf(match.home, match.away)) {
+            val last = footballMatches
+                .filter { it.state == MatchState.FINISHED && it.kickoff < match.kickoff && (it.home.id == team.id || it.away.id == team.id) }
+                .maxByOrNull { it.kickoff } ?: continue
+            val detail = withContext(Dispatchers.IO) {
+                runCatching { footballClient.detail(last.league, last.id, last.home.id) }.getOrNull()
+            } ?: continue
+            detail.lineups.firstOrNull { it.teamId == team.id && it.starters.isNotEmpty() }?.let { result[team.id] = it }
+        }
+        return result
+    }
+
+    /** Titta på matchen: kanalen tablån säger visar den. */
+    fun watchMatch(match: FootballMatch) {
+        val channels = matchChannels[match.id].orEmpty()
+        val first = channels.firstOrNull() ?: return
+        playChannel(first, channels)
+    }
 
     // --- Loggor från TMDB --------------------------------------------------------------
 
@@ -2236,6 +2510,31 @@ private const val PROVIDER_VOTES = 30
 private const val TMDB_WORKERS = 6
 /** Minsta tid mellan två ombyggnader av versionerna medan TMDB-svar strömmar in. */
 private const val VERSIONS_PAUSE_MS = 5_000L
+/** Startelvan släpps oftast en timme före avspark: appen börjar titta efter den lite innan. */
+private const val LINEUP_WATCH_MS = 75 * 60_000L
+private const val TABLES_MAX_AGE_MS = 30 * 60_000L
+/** Medan fliken Fotboll syns hämtas hela perioden, en vecka bakåt och två fram, så här ofta. */
+private const val FOOTBALL_FULL_MS = 10 * 60_000L
+/** Utan fliken: hela perioden var tredje timme, ställningen var femte minut medan matcher pågår. */
+private const val FOOTBALL_BACKGROUND_FULL_MS = 3 * 60 * 60_000L
+private const val FOOTBALL_BACKGROUND_LIVE_MS = 5 * 60_000L
+private const val FOOTBALL_RETRY_MS = 10 * 60_000L
+private const val FOOTBALL_START_DELAY_MS = 25_000L
+/** En match räknas som pågående upp till tre timmar efter avspark. */
+private const val FOOTBALL_LIVE_WINDOW_MS = 3 * 60 * 60_000L
+/** "Visas på" letas för matcherna de närmaste fyra dygnen. */
+private const val BROADCAST_HORIZON_MS = 4 * DAY_MS
+
+/** Det "Visas på" senast räknades fram för. Allt utom matcherna jämförs som samma objekt. */
+private class BroadcastKey(
+    val guide: GuideIndex,
+    val channels: List<LiveChannel>,
+    val hidden: Set<String>,
+    val matches: List<Pair<String, Long>>,
+) {
+    fun sameAs(other: BroadcastKey?): Boolean =
+        other != null && other.guide === guide && other.channels === channels && other.hidden === hidden && other.matches == matches
+}
 private const val DAY_MS = 24L * 60 * 60 * 1000
 /** "Ny": högst en månad bakåt, och tre dagar första gången. */
 private const val NEW_MAX_AGE_MS = 30 * DAY_MS

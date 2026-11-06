@@ -135,9 +135,12 @@ class MainActivity : ComponentActivity() {
                         playing != null && !state.miniPlayer && state.dismissPlayerPrompt() -> Unit
                         // Som Esc i Windows: bilden krymper upp i sidofältet och fortsätter där.
                         playing != null && !state.miniPlayer -> state.minimizePlayer()
+                        state.selectedMatch != null -> state.closeMatch()
                         state.selectedMovie != null -> state.closeMovie()
                         state.selectedSeries != null -> state.closeSeries()
                         playing != null -> state.closePlayer()
+                        // Fotboll: från en liga tillbaka till översikten.
+                        state.screen == Screen.FOOTBALL && state.footballLeague != null -> state.footballLeague = null
                         // Som på andra tv-appar: Tillbaka leder till startsidan innan appen stängs.
                         state.screen != Screen.HOME -> state.screen = Screen.HOME
                         else -> {
@@ -215,6 +218,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         Images.appHidden = false
+        if (ready) state.appVisible = true
     }
 
     override fun onStop() {
@@ -223,8 +227,9 @@ class MainActivity : ComponentActivity() {
             state.saveProgressNow()
             state.pausePlayback()
         }
-        // Omslagen hämtas inte i förväg medan appen inte syns.
+        // Omslagen och fotbollen hämtas inte i förväg medan appen inte syns.
         Images.appHidden = true
+        if (ready) state.appVisible = false
         super.onStop()
     }
 
