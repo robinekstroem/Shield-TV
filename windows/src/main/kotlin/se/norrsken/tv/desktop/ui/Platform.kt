@@ -309,3 +309,7 @@ internal val separateFullscreenWindow: Boolean = !WindowsIntegration.isMac
 /** Bilder läggs till med fildialogen i Windows; på Shield skickas de från telefonen. */
 @Composable
 internal fun BackgroundUploadHint(state: AppState) = Unit
+
+/** TMDB-nyckeln skrivs med tangentbordet i Windows; på Shield kan den skickas från telefonen. */
+@Composable
+internal fun TmdbPhoneHint(state: AppState) = Unit

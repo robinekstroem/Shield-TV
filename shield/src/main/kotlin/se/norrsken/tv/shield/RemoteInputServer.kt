@@ -143,6 +143,12 @@ class RemoteInputServer(private val state: AppState) {
                 val (code, text) = receiveSource(form)
                 respondText(output, code, text)
             }
+            method == "POST" && path == "/tmdb" -> {
+                if (length !in 1..MAX_FORM) return respondText(output, 413, "För mycket text.")
+                val form = parseForm(String(readBody(input, length.toInt()), Charsets.UTF_8))
+                val (code, text) = receiveTmdbKey(form)
+                respondText(output, code, text)
+            }
             method == "POST" && path == "/bild" -> {
                 if (length !in 1..MAX_IMAGE) return respondText(output, 413, "Bilden är för stor. Högst 25 MB.")
                 if (!pinOk(query["kod"])) return respondText(output, 403, WRONG_PIN)
@@ -179,6 +185,18 @@ class RemoteInputServer(private val state: AppState) {
             }
         }
         return 200 to "Skickat! Importen syns nu på tv:n."
+    }
+
+    /** TMDB-nyckeln, inklistrad i telefonen i stället för skriven med fjärrkontrollen. */
+    private fun receiveTmdbKey(form: Map<String, String>): Pair<Int, String> {
+        if (!pinOk(form["kod"])) return 403 to WRONG_PIN
+        val key = form["nyckel"].orEmpty().trim()
+        if (key.length < 20) return 400 to "Nyckeln ser för kort ut. Den står under Inställningar → API på themoviedb.org."
+        main.post {
+            state.connectTmdb(key)
+            lastMessage = "TMDB-nyckeln togs emot."
+        }
+        return 200 to "Skickat! Tv:n ansluter till TMDB och börjar hämta bilder och beskrivningar."
     }
 
     private fun receiveImage(bytes: ByteArray, type: String?): Pair<Int, String> {
@@ -329,6 +347,14 @@ button{width:100%;margin-top:16px;padding:14px;border:0;border-radius:12px;backg
 </form>
 </section>
 <section>
+<h2>TMDB-nyckel</h2>
+<p>Ger bakgrundsbilder, svenska beskrivningar, genrer och betyg. Nyckeln står under Inställningar → API på themoviedb.org.</p>
+<label for="nyckel">API-nyckel</label>
+<input id="nyckel" autocomplete="off" autocapitalize="off" spellcheck="false">
+<button id="skicka-nyckel" type="button">Skicka nyckeln</button>
+<div class="svar" id="svar-nyckel"></div>
+</section>
+<section>
 <h2>Bakgrundsbild</h2>
 <p>Högst tre bilder. De visas bakom appen och byter av varandra. Du kan välja flera på en gång.</p>
 <input id="bild" type="file" accept="image/*" multiple>
@@ -358,6 +384,19 @@ el('kalla').addEventListener('submit', function (e) {
       if (svar.ok) { el('lank').value = ''; el('losenord').value = ''; }
     }); })
     .catch(function () { visa(el('svar-kalla'), false, fel); });
+});
+el('skicka-nyckel').addEventListener('click', function () {
+  var nyckel = el('nyckel').value.trim();
+  if (!nyckel) { visa(el('svar-nyckel'), false, 'Klistra in nyckeln först.'); return; }
+  var data = new URLSearchParams();
+  data.set('kod', el('kod').value.trim());
+  data.set('nyckel', nyckel);
+  fetch('/tmdb', { method: 'POST', body: data })
+    .then(function (svar) { return svar.text().then(function (t) {
+      visa(el('svar-nyckel'), svar.ok, t);
+      if (svar.ok) { el('nyckel').value = ''; }
+    }); })
+    .catch(function () { visa(el('svar-nyckel'), false, fel); });
 });
 el('skicka-bild').addEventListener('click', function () {
   var filer = Array.prototype.slice.call(el('bild').files);

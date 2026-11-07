@@ -1,10 +1,14 @@
 package se.norrsken.tv.desktop.ui
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -25,6 +29,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -42,11 +47,21 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldColors
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
@@ -57,6 +72,7 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -410,6 +426,10 @@ fun GroupColumn(
     onSelect: (String?) -> Unit,
     title: String = "KATEGORIER",
 ) {
+    if (tvLayout) {
+        TvGroupPanel(allLabel, total, groups, counts, selected, onSelect, title)
+        return
+    }
     val palette = LocalPalette.current
     val listState = rememberLazyListState()
     Column(Modifier.width(264.dp).fillMaxHeight().background(palette.surface)) {
@@ -458,6 +478,143 @@ private fun GroupRow(name: String, count: Int, selected: Boolean, onClick: () ->
         }
     }
 }
+
+/**
+ * Tv: kategorierna som en smal kant till vänster om innehållet. Pil vänster
+ * från omslagen fäller ut listan över innehållet, med markeringen på den
+ * valda kategorin; pil höger tillbaka fäller in den. Ett steg till vänster
+ * till går till menyn.
+ */
+@Composable
+private fun TvGroupPanel(
+    allLabel: String,
+    total: Int,
+    groups: List<String>,
+    counts: Map<String, Int>,
+    selected: String?,
+    onSelect: (String?) -> Unit,
+    title: String,
+) {
+    val palette = LocalPalette.current
+    val listState = rememberLazyListState()
+    val selectedRow = remember { FocusRequester() }
+    var open by remember { mutableStateOf(false) }
+    // Från menyn går pil höger förbi kanten, rakt till innehållet.
+    val enterable = open || !LocalMenuFocused.current
+    val width by animateDpAsState(
+        targetValue = if (open) TV_GROUPS_OPEN else TV_GROUPS_CLOSED,
+        animationSpec = tween(240, easing = FastOutSlowInEasing),
+        label = "kategorier",
+    )
+    val textAlpha = animateFloatAsState(if (open) 1f else 0f, tween(if (open) 260 else 120), label = "kategoritext")
+    val shown = remember(textAlpha) { { textAlpha.value } }
+    // "Alla" står först, sedan kategorierna.
+    val selectedIndex = if (selected == null) 0 else (groups.indexOf(selected) + 1).coerceAtLeast(0)
+    LaunchedEffect(open) {
+        if (!open) return@LaunchedEffect
+        // Markeringen hoppar till den valda kategorin, inte till raden man råkade komma in vid.
+        if (listState.layoutInfo.visibleItemsInfo.none { it.index == selectedIndex }) {
+            listState.scrollToItem((selectedIndex - 3).coerceAtLeast(0))
+        }
+        withFrameNanos { }
+        runCatching { selectedRow.requestFocus() }
+    }
+    // Platsen i raden är kantens bredd; utfälld lägger sig listan över innehållet.
+    Box(Modifier.width(TV_GROUPS_CLOSED).fillMaxHeight().zIndex(1f)) {
+        Column(
+            Modifier
+                .wrapContentWidth(Alignment.Start, unbounded = true)
+                .width(width)
+                .fillMaxHeight()
+                .shadow(if (open) 24.dp else 0.dp)
+                .background(if (open) palette.background else Color.Transparent)
+                .background(palette.surface)
+                .onFocusChanged { open = it.hasFocus }
+                .focusGroup(),
+        ) {
+            Text(
+                title,
+                style = MaterialTheme.typography.labelSmall,
+                color = palette.textTertiary,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.padding(start = 22.dp, top = 28.dp, bottom = 10.dp).graphicsLayer { alpha = shown() },
+            )
+            LazyColumn(
+                state = listState,
+                contentPadding = PaddingValues(start = 6.dp, end = 6.dp, bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                item {
+                    TvGroupRow(allLabel, total, selected == null, shown, enterable, if (selectedIndex == 0) selectedRow else null) {
+                        onSelect(null)
+                    }
+                }
+                items(groups, key = { it }) { group ->
+                    TvGroupRow(group, counts[group] ?: 0, selected == group, shown, enterable, if (group == selected) selectedRow else null) {
+                        onSelect(group)
+                    }
+                }
+            }
+        }
+        // Infälld: en pil som visar att kategorierna finns här.
+        if (!open) {
+            Icon(
+                Glyphs.ChevronDown,
+                contentDescription = null,
+                tint = palette.textTertiary,
+                modifier = Modifier.align(Alignment.Center).rotate(-90f).size(20.dp),
+            )
+        }
+    }
+}
+
+/** En kategori i tv-listan. Texten syns bara utfälld; den valda raden syns som en ljus fläck i kanten. */
+@Composable
+private fun TvGroupRow(
+    name: String,
+    count: Int,
+    selected: Boolean,
+    shown: () -> Float,
+    enterable: Boolean,
+    focus: FocusRequester?,
+    onClick: () -> Unit,
+) {
+    val palette = LocalPalette.current
+    Pressable(
+        onClick = onClick,
+        selected = selected,
+        modifier = Modifier
+            .fillMaxWidth()
+            .focusProperties { canFocus = enterable }
+            .then(if (focus != null) Modifier.focusRequester(focus) else Modifier),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp).graphicsLayer { alpha = shown() },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                name,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (selected) palette.textPrimary else palette.textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                count.grouped(),
+                style = MaterialTheme.typography.labelSmall,
+                color = palette.textTertiary,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+    }
+}
+
+private val TV_GROUPS_CLOSED = 36.dp
+private val TV_GROUPS_OPEN = 340.dp
 
 /** Liten etikett: LIVE-märket, betyg. */
 @Composable

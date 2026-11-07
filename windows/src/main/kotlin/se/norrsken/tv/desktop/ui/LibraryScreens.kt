@@ -150,7 +150,11 @@ fun MoviesScreen(state: AppState) {
         Box(Modifier.weight(1f).fillMaxHeight()) {
             if (spotlight != null) {
                 val tmdb = state.tmdbFor(spotlight)
-                SpotlightBackdrop(tmdb?.backdrop, running = state.nowPlaying == null || state.miniPlayer)
+                SpotlightBackdrop(
+                    url = tmdb?.backdrop,
+                    fallback = state.posterCandidates(spotlight).firstOrNull(),
+                    running = state.nowPlaying == null || state.miniPlayer,
+                )
             }
             Column(Modifier.fillMaxSize()) {
                 ScreenHeader(
@@ -182,7 +186,7 @@ fun MoviesScreen(state: AppState) {
                 } else {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         LazyVerticalGrid(
-                            columns = GridCells.Adaptive(if (tvLayout) 164.dp else 152.dp),
+                            columns = GridCells.Adaptive(if (tvLayout) TV_POSTER_MIN else 152.dp),
                             state = gridState,
                             // Tv: luft runt omslagen, så att det markerade har plats att växa.
                             contentPadding = if (tvLayout) {
@@ -203,7 +207,6 @@ fun MoviesScreen(state: AppState) {
                                         state.showMovie(movie)
                                     },
                                     modifier = if (movie.key == openedKey) Modifier.focusRequester(restore) else Modifier,
-                                    dimmed = tvLayout && focusedKey != null && focusedKey != movie.key,
                                     onFocusChange = { has ->
                                         if (has) focusedKey = movie.key else if (focusedKey == movie.key) focusedKey = null
                                     },
@@ -469,7 +472,11 @@ fun SeriesScreen(state: AppState) {
         Box(Modifier.weight(1f).fillMaxHeight()) {
             if (spotlight != null) {
                 val tmdb = state.tmdbFor(spotlight)
-                SpotlightBackdrop(spotlight.backdrop ?: tmdb?.backdrop, running = state.nowPlaying == null || state.miniPlayer)
+                SpotlightBackdrop(
+                    url = spotlight.backdrop ?: tmdb?.backdrop,
+                    fallback = state.posterCandidates(spotlight).firstOrNull(),
+                    running = state.nowPlaying == null || state.miniPlayer,
+                )
             }
             Column(Modifier.fillMaxSize()) {
                 ScreenHeader(
@@ -500,7 +507,7 @@ fun SeriesScreen(state: AppState) {
                 } else {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         LazyVerticalGrid(
-                            columns = GridCells.Adaptive(if (tvLayout) 164.dp else 152.dp),
+                            columns = GridCells.Adaptive(if (tvLayout) TV_POSTER_MIN else 152.dp),
                             state = gridState,
                             contentPadding = if (tvLayout) {
                                 PaddingValues(start = 24.dp, end = 32.dp, top = 14.dp, bottom = 40.dp)
@@ -520,7 +527,6 @@ fun SeriesScreen(state: AppState) {
                                         state.showSeries(item)
                                     },
                                     modifier = if (item.key == openedKey) Modifier.focusRequester(restore) else Modifier,
-                                    dimmed = tvLayout && focusedKey != null && focusedKey != item.key,
                                     onFocusChange = { has ->
                                         if (has) focusedKey = item.key else if (focusedKey == item.key) focusedKey = null
                                     },
@@ -908,10 +914,11 @@ private fun SortRow(current: SortOrder, series: Boolean, onSelect: (SortOrder) -
 /**
  * Tv: titeln man står på som bakgrundsbild upptill, utan att täcka appens
  * vanliga bakgrund: bilden tonar ut mot vänster och nedåt. Utan en riktig
- * bakgrundsbild visas ingen.
+ * bakgrundsbild blir omslaget ett mjukt färgsken: några få bildpunkter stort,
+ * så att det blir oskarpt på alla enheter.
  */
 @Composable
-private fun SpotlightBackdrop(url: String?, running: Boolean) {
+private fun SpotlightBackdrop(url: String?, fallback: String?, running: Boolean) {
     Box(
         Modifier
             .fillMaxWidth()
@@ -929,9 +936,21 @@ private fun SpotlightBackdrop(url: String?, running: Boolean) {
                 )
             },
     ) {
-        LivingBackdrop(url = url, modifier = Modifier.fillMaxSize(), running = running)
+        if (url != null || fallback == null) {
+            LivingBackdrop(url = url, modifier = Modifier.fillMaxSize(), running = running)
+        } else {
+            RemoteImage(
+                url = fallback,
+                modifier = Modifier.fillMaxSize().graphicsLayer { alpha = 0.55f },
+                maxSide = 32,
+                contentScale = ContentScale.Crop,
+            )
+        }
     }
 }
+
+/** Tv: minsta omslagsbredd. Med infälld meny och kategorier blir det sex omslag i bredd vid 1600. */
+private val TV_POSTER_MIN = 200.dp
 
 /**
  * Titeln man står på, med logga, år, betyg, genrer och handling. Fast höjd,

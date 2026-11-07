@@ -532,6 +532,8 @@ private fun TmdbCard(state: AppState) {
         } else {
             LabeledField("API-nyckel", key, { key = it }, placeholder = "32 tecken från themoviedb.org → Inställningar → API", password = true)
             PrimaryButton("Anslut", onClick = { state.connectTmdb(key) }, icon = Glyphs.Add)
+            // Shield: nyckeln kan klistras in från telefonen i stället.
+            TmdbPhoneHint(state)
         }
         state.tmdbStatus?.let { message ->
             Text(

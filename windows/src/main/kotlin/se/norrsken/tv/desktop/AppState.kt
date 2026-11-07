@@ -310,6 +310,9 @@ class AppState {
         private set
     var footballTables by mutableStateOf<Map<League, List<TableRow>>>(emptyMap())
         private set
+    /** Tabellerna har hämtats minst en gång, lyckat eller inte. */
+    var footballTablesTried by mutableStateOf(false)
+        private set
     /** När matcherna senast hämtades. 0: aldrig. */
     var footballUpdatedAt by mutableStateOf(0L)
         private set
@@ -337,6 +340,7 @@ class AppState {
     /** När hela perioden senast hämtades; däremellan hämtas bara dagarna kring idag. */
     private var footballFullAt = 0L
     private var footballTriedAt = 0L
+    private var lineupsCheckedAt = 0L
     private val footballMutex = Mutex()
     private val channelsMutex = Mutex()
     private var channelsKey: BroadcastKey? = null
@@ -628,19 +632,25 @@ class AppState {
     // --- Fotboll ----------------------------------------------------------------------
 
     /**
-     * Håller fliken Fotboll färsk medan den syns: var 45:e sekund när något
+     * Håller fliken Fotboll färsk medan den syns: varje minut när något
      * är live, varannan minut nära avspark (startelvorna), annars var tionde.
-     * Hela perioden hämtas var tionde minut, däremellan bara dagarna kring idag.
+     * Hela perioden hämtas varje halvtimme, däremellan bara dagens matcher.
      */
     suspend fun footballLoop() {
         footballVisible = true
         var failures = 0
         try {
             while (true) {
+                // Appen syns inte (Shield vilar eller står på hemskärmen): inget hämtas.
+                if (!appVisible) {
+                    delay(15_000L)
+                    continue
+                }
                 val full = footballMatches.isEmpty() || System.currentTimeMillis() - footballFullAt > FOOTBALL_FULL_MS
                 safely { refreshFootball(full = full, foreground = true) }
-                // Gick inget att hämta: nytt försök snart, sedan allt glesare upp till var tionde minut.
-                if (footballError != null && footballMatches.isEmpty()) {
+                // Gick hämtningen inte: nytt försök snart, sedan allt glesare upp till var tionde
+                // minut, så att appen inte fortsätter fråga ESPN i samma takt om de spärrar.
+                if (footballError != null) {
                     failures++
                     delay((30_000L shl (failures - 1).coerceAtMost(4)).coerceAtMost(600_000L))
                     continue
@@ -651,7 +661,7 @@ class AppState {
                 val soon = footballMatches.any { it.state == MatchState.UPCOMING && it.kickoff - now in 0L..LINEUP_WATCH_MS }
                 delay(
                     when {
-                        live -> 45_000L
+                        live -> 60_000L
                         soon -> 120_000L
                         else -> 600_000L
                     },
@@ -716,12 +726,25 @@ class AppState {
 
     private suspend fun refreshFootballLocked(full: Boolean, foreground: Boolean) {
         val today = LocalDate.now()
-        val from = if (full) today.minusDays(7) else today.minusDays(1)
-        val to = if (full) today.plusDays(14) else today.plusDays(1)
-        if (full) footballTriedAt = System.currentTimeMillis()
+        val started = System.currentTimeMillis()
+        if (full) footballTriedAt = started
+        // Mellan de hela hämtningarna räcker idag, och dagen då en pågående match började.
+        val days = (
+            listOf(today) + footballMatches
+                .filter { it.state == MatchState.LIVE || it.shouldHaveStarted(started) }
+                .map { Instant.ofEpochMilli(it.kickoff).atZone(ZoneId.systemDefault()).toLocalDate() }
+            ).distinct()
         val results = coroutineScope {
             League.entries.map { league ->
-                async(Dispatchers.IO) { league to runCatching { footballClient.matches(league, from, to) } }
+                async(Dispatchers.IO) {
+                    league to runCatching {
+                        if (full) {
+                            footballClient.matches(league, today.minusDays(7), today.plusDays(14))
+                        } else {
+                            footballClient.matchesOn(league, days)
+                        }
+                    }
+                }
             }.awaitAll()
         }
         val fetched = results.filter { it.second.isSuccess }
@@ -757,6 +780,7 @@ class AppState {
             }
             footballTables = footballTables + tables.mapNotNull { (league, rows) -> rows?.takeIf { it.isNotEmpty() }?.let { league to it } }
             tablesAt = System.currentTimeMillis()
+            footballTablesTried = true
         }
 
         // Den öppna matchen: ny ställning, och startelvorna så fort de släpps.
@@ -768,9 +792,11 @@ class AppState {
         refreshMatchChannels()
     }
 
-    /** Kommande matcher inom 75 minuter: är startelvan släppt? */
+    /** Kommande matcher inom 75 minuter: är startelvan släppt? Högst var femte minut. */
     private suspend fun checkLineups() {
         val now = System.currentTimeMillis()
+        if (now - lineupsCheckedAt < LINEUP_CHECK_MS) return
+        lineupsCheckedAt = now
         val candidates = footballMatches.filter {
             it.state == MatchState.UPCOMING && it.kickoff - now in 0L..LINEUP_WATCH_MS && it.id !in lineupsReady
         }.take(6)
@@ -2532,9 +2558,14 @@ private const val TMDB_WORKERS = 6
 private const val VERSIONS_PAUSE_MS = 5_000L
 /** Startelvan släpps oftast en timme före avspark: appen börjar titta efter den lite innan. */
 private const val LINEUP_WATCH_MS = 75 * 60_000L
+/** Startelvorna kollas högst så här ofta: varje koll hämtar en hel matchsida per match. */
+private const val LINEUP_CHECK_MS = 5 * 60_000L
 private const val TABLES_MAX_AGE_MS = 30 * 60_000L
-/** Medan fliken Fotboll syns hämtas hela perioden, en vecka bakåt och två fram, så här ofta. */
-private const val FOOTBALL_FULL_MS = 10 * 60_000L
+/**
+ * Medan fliken Fotboll syns hämtas hela perioden, en vecka bakåt och två fram,
+ * så här ofta. Det är hela månader hos ESPN; däremellan hämtas bara idag.
+ */
+private const val FOOTBALL_FULL_MS = 30 * 60_000L
 /** Utan fliken: hela perioden var tredje timme, ställningen var femte minut medan matcher pågår. */
 private const val FOOTBALL_BACKGROUND_FULL_MS = 3 * 60 * 60_000L
 private const val FOOTBALL_BACKGROUND_LIVE_MS = 5 * 60_000L

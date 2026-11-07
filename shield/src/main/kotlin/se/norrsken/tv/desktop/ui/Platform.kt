@@ -235,6 +235,37 @@ private fun rememberRemoteInput(state: AppState): RemoteInputServer {
     return server
 }
 
+/** TMDB-nyckeln på Shield: klistras in i telefonen, på samma sida som spellistorna. */
+@Composable
+internal fun TmdbPhoneHint(state: AppState) {
+    val palette = LocalPalette.current
+    val server = rememberRemoteInput(state)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            "Enklast: öppna adressen i webbläsaren på telefonen, skriv koden och klistra in nyckeln under TMDB-nyckel.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = palette.textSecondary,
+        )
+        val address = server.address
+        if (address != null) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(
+                    address,
+                    style = MaterialTheme.typography.titleLarge.copy(fontFamily = FontFamily.Monospace, fontStyle = FontStyle.Normal, shadow = null),
+                    color = palette.focus,
+                )
+                Text(
+                    "Kod ${server.pin}",
+                    style = MaterialTheme.typography.titleLarge.copy(fontFamily = FontFamily.Monospace, fontStyle = FontStyle.Normal, shadow = null),
+                    color = palette.textPrimary,
+                )
+            }
+        } else {
+            Text(server.problem ?: "Startar…", style = MaterialTheme.typography.bodyMedium, color = palette.textTertiary)
+        }
+    }
+}
+
 /** Egna bakgrundsbilder på Shield: skickas från telefonen eller datorn, till samma sida som spellistorna. */
 @Composable
 internal fun BackgroundUploadHint(state: AppState) {

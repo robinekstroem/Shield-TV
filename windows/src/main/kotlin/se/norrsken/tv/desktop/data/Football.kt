@@ -8,8 +8,11 @@ import java.net.URL
 import java.text.Normalizer
 import java.util.IdentityHashMap
 import java.util.concurrent.ConcurrentHashMap
+import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
+import java.time.YearMonth
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
 
@@ -116,17 +119,53 @@ class MatchDetail(
 
 class FootballClient {
 
-    /** Ligans matcher mellan två dagar, båda medräknade. */
+    /**
+     * Ligans matcher mellan två dagar, båda medräknade. Sedan september 2026
+     * svarar ESPN 400 på datumintervall ("20261030-20261120"), så perioden
+     * hämtas som hela månader ("202610", "202611") och sållas här.
+     */
     fun matches(league: League, from: LocalDate, to: LocalDate): List<FootballMatch> {
-        val dates = from.format(DateTimeFormatter.BASIC_ISO_DATE) + "-" + to.format(DateTimeFormatter.BASIC_ISO_DATE)
-        val root = get("$SITE/${league.slug}/scoreboard?dates=$dates&limit=300")
-        val events = root.optJSONArray("events") ?: return emptyList()
-        return objects(events).mapNotNull { runCatching { parseMatch(league, it) }.getOrNull() }
+        val last = YearMonth.from(to)
+        val months = generateSequence(YearMonth.from(from)) { it.plusMonths(1) }
+            .takeWhile { !it.isAfter(last) }
+            .map { it.format(MONTH) }
+            .toList()
+        return scoreboard(league, months).filter { localDay(it.kickoff) in from..to }
     }
 
-    /** Ligatabellen, bäst först. */
+    /** Ligans matcher de här dagarna, en fråga per dag: ställningen medan matcher pågår. */
+    fun matchesOn(league: League, days: List<LocalDate>): List<FootballMatch> =
+        scoreboard(league, days.distinct().map { it.format(DateTimeFormatter.BASIC_ISO_DATE) })
+
+    /** En fråga per datum, "20261106" eller "202611". Samma match i två svar räknas en gång. */
+    private fun scoreboard(league: League, dates: List<String>): List<FootballMatch> {
+        val found = LinkedHashMap<String, FootballMatch>()
+        for (value in dates) {
+            val root = get("$SITE/${league.slug}/scoreboard?dates=$value&limit=1000")
+            val events = root.optJSONArray("events") ?: continue
+            for (event in objects(events)) {
+                val match = runCatching { parseMatch(league, event) }.getOrNull() ?: continue
+                found[match.id] = match
+            }
+        }
+        return found.values.toList()
+    }
+
+    private fun localDay(ms: Long): LocalDate = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()
+
+    /** Ligatabellen, bäst först. ESPN har den under två sökvägar; den andra är reserv. */
     fun table(league: League): List<TableRow> {
-        val root = get("$STANDINGS/${league.slug}/standings")
+        val first = runCatching { parseTable(get("$STANDINGS/${league.slug}/standings")) }
+        first.getOrNull()?.takeIf { it.isNotEmpty() }?.let { return it }
+        val second = runCatching { parseTable(get("$SITE/${league.slug}/standings")) }
+        second.getOrNull()?.takeIf { it.isNotEmpty() }?.let { return it }
+        // Inget att visa: felet från den första vägen säger mest.
+        first.exceptionOrNull()?.let { throw it }
+        second.exceptionOrNull()?.let { throw it }
+        return emptyList()
+    }
+
+    private fun parseTable(root: JSONObject): List<TableRow> {
         val entries = ArrayList<JSONObject>()
         val groups = root.optJSONArray("children")
         if (groups != null) {
@@ -178,7 +217,10 @@ class FootballClient {
             for (k in objects(list)) {
                 val type = k.optJSONObject("type")
                 val what = ((type?.text("type") ?: "") + " " + (type?.text("text") ?: "")).lowercase()
+                val words = what.split(' ', '-', '_', '/')
                 val kind = when {
+                    // VAR-beslut och bortdömda mål är inga mål.
+                    "var" in words || "disallowed" in what || "cancelled" in what || "canceled" in what -> continue
                     "own" in what && "goal" in what -> EventKind.OWN_GOAL
                     "penalty" in what && ("scored" in what || "goal" in what) -> EventKind.PENALTY
                     "penalty" in what -> continue
@@ -276,7 +318,7 @@ class FootballClient {
         val name = (type?.text("name") ?: "").uppercase()
         val detail = (type?.text("shortDetail") ?: "").uppercase()
         val state = when {
-            "POSTPON" in name || "CANCEL" in name || "ABANDON" in name || "SUSPEND" in name || "DELAY" in name -> MatchState.POSTPONED
+            "POSTPON" in name || "CANCEL" in name || "ABANDON" in name || "SUSPEND" in name -> MatchState.POSTPONED
             type?.text("state") == "in" -> MatchState.LIVE
             type?.text("state") == "post" -> MatchState.FINISHED
             else -> MatchState.UPCOMING
@@ -284,6 +326,7 @@ class FootballClient {
         val statusText = when (state) {
             MatchState.LIVE -> when {
                 "HALFTIME" in name || detail == "HT" -> "Halvtid"
+                "SHOOTOUT" in name -> "Straffar"
                 else -> status?.text("displayClock") ?: type?.text("shortDetail") ?: ""
             }
             MatchState.FINISHED -> when {
@@ -431,6 +474,7 @@ class FootballClient {
         const val STANDINGS = "/apis/v2/sports/soccer"
         val HOSTS = listOf("site.web.api.espn.com", "site.api.espn.com")
         const val USER_AGENT = "Tv/1.0 (fotboll)"
+        val MONTH: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMM")
 
         val STAT_LABELS = listOf(
             "possessionPct" to "Bollinnehav",
@@ -469,11 +513,20 @@ fun findBroadcasts(matches: List<FootballMatch>, channels: List<LiveChannel>, gu
     if (matches.isEmpty()) return emptyMap()
     val withGuide = channels.filter { guide.hasSchedule(it) }
     if (withGuide.isEmpty()) return emptyMap()
+    // Ett ord som flera lag har i namnet säger inte vilket lag det är: "madrid", "manchester".
+    val teams = matches.flatMap { listOf(it.home, it.away) }.distinctBy { it.id }
+    val shared = teams
+        .flatMap { team -> nameWords(team).map { it to team.id } }
+        .distinct()
+        .groupingBy { it.first }
+        .eachCount()
+        .filterValues { it > 1 }
+        .keys
     val names = HashMap<String, Pair<List<String>, List<String>>>()
     for (match in matches) {
         // Med mellanslag runt om: "inter" ska inte träffa "winterstudion".
-        val home = teamKeys(match.home).map { " $it " }
-        val away = teamKeys(match.away).map { " $it " }
+        val home = teamKeys(match.home, shared).map { " $it " }
+        val away = teamKeys(match.away, shared).map { " $it " }
         if (home.isNotEmpty() && away.isNotEmpty()) names[match.id] = home to away
     }
     val byKickoff = matches.filter { it.id in names }.groupBy { it.kickoff }
@@ -533,8 +586,15 @@ private fun programmesAround(schedule: List<Programme>, kickoff: Long): List<Pro
     return result
 }
 
-/** Namnen laget kan stå under i tablån: "manchester united", "man utd", "arsenal". */
-private fun teamKeys(team: FootballTeam): List<String> {
+/** Orden i lagets namn, så som de står i tablån. */
+private fun nameWords(team: FootballTeam): Set<String> =
+    listOf(team.name, team.short).flatMap { normalizeName(it).split(' ') }.filter { it.length >= 5 }.toSet()
+
+/**
+ * Namnen laget kan stå under i tablån: "manchester united", "man utd",
+ * "arsenal". Ett ord som flera av lagen har ([shared]) räknas bara i hela namnet.
+ */
+private fun teamKeys(team: FootballTeam, shared: Set<String>): List<String> {
     val keys = LinkedHashSet<String>()
     for (name in listOf(team.name, team.short)) {
         val n = normalizeName(name)
@@ -542,16 +602,41 @@ private fun teamKeys(team: FootballTeam): List<String> {
         if ("united" in n) keys += n.replace("united", "utd")
         // Ett eget ord räcker när det säger vem det är: "Liverpool", "Hammarby", "Bayern".
         for (word in n.split(' ')) {
-            if (word.length >= 5 && word !in COMMON_WORDS) {
+            if (word.length >= 5 && word !in COMMON_WORDS && word !in shared) {
                 keys += word
                 if (word.length >= 7 && word.endsWith("s")) keys += word.dropLast(1)
             }
         }
+        // Namnen svenska tablåer brukar använda: "Athletic Bilbao", "Inter", "Köpenhamn".
+        ALIASES[n]?.let { keys += it }
     }
     val abbreviation = normalizeName(team.abbreviation)
-    if (abbreviation.length >= 3 && abbreviation !in COMMON_WORDS) keys += abbreviation
+    if (abbreviation.length >= 3 && abbreviation !in COMMON_WORDS && abbreviation !in shared) keys += abbreviation
     return keys.toList()
 }
+
+/** ESPN:s namn → andra namn på laget i tablåer. Allt i små bokstäver utan accenter. */
+private val ALIASES: Map<String, List<String>> = mapOf(
+    "athletic club" to listOf("athletic bilbao", "bilbao"),
+    "atletico madrid" to listOf("atletico de madrid", "atletico"),
+    "internazionale" to listOf("inter", "inter milan", "inter milano"),
+    "fc copenhagen" to listOf("fc kobenhavn", "kopenhamn", "fc kopenhamn"),
+    "sporting cp" to listOf("sporting lissabon", "sporting lisbon"),
+    "bayern munich" to listOf("bayern munchen", "bayern"),
+    "paris saint germain" to listOf("psg", "paris sg", "paris saint germain"),
+    "tottenham hotspur" to listOf("tottenham", "spurs"),
+    "wolverhampton wanderers" to listOf("wolves", "wolverhampton"),
+    "brighton hove albion" to listOf("brighton"),
+    "nottingham forest" to listOf("nottingham", "nottm forest"),
+    "newcastle united" to listOf("newcastle"),
+    "west ham united" to listOf("west ham"),
+    "manchester united" to listOf("man united", "man utd", "manchester utd"),
+    "manchester city" to listOf("man city"),
+    "real betis" to listOf("betis"),
+    "real sociedad" to listOf("sociedad"),
+    "celta vigo" to listOf("celta"),
+    "rayo vallecano" to listOf("rayo"),
+)
 
 /**
  * Gemener utan accenter, bara bokstäver och siffror med ett mellanslag
@@ -594,7 +679,7 @@ private val SPECIAL_LETTERS = mapOf(
 )
 
 private val COMMON_WORDS = setOf(
-    "united", "city", "town", "real", "club", "sporting", "athletic", "atletico", "olympique", "borussia",
+    "united", "city", "town", "real", "club", "sporting", "athletic", "olympique", "borussia",
     "rovers", "wanderers", "albion", "county", "saint", "football", "calcio", "inter", "internacional",
     "deportivo", "union", "dynamo", "racing", "hotspur", "national", "fotboll", "fotbollsforening",
 )

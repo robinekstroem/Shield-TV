@@ -871,7 +871,11 @@ private fun TableCard(
     ) {
         if (rows.isEmpty()) {
             Text(
-                if (state.footballTables.isEmpty()) "Tabellen hämtas…" else "Tabellen finns inte just nu.",
+                when {
+                    !state.footballTablesTried -> "Tabellen hämtas…"
+                    state.footballTables.isEmpty() -> "Tabellen gick inte att hämta just nu. Appen försöker igen om en stund."
+                    else -> "Tabellen finns inte just nu."
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = palette.textTertiary,
                 modifier = Modifier.padding(18.dp),
