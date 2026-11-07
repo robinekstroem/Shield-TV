@@ -118,6 +118,10 @@ enum class SortOrder(val label: String) {
 }
 
 private const val HOUR = 3_600_000L
+/** Kommer appen fram igen efter så här länge hämtas kanalerna och tablån om. */
+private const val CHANNELS_FRESH_MS = 20 * 60_000L
+/** Står appen framme hela tiden hämtas kanalerna om så här ofta. */
+private const val CHANNELS_STALE_MS = 3 * HOUR
 private val SWEDISH: Locale = Locale.forLanguageTag("sv-SE")
 private val GUIDE_STAMP: DateTimeFormatter =
     DateTimeFormatter.ofPattern("d MMM 'kl.' HH:mm", SWEDISH).withZone(ZoneId.systemDefault())
@@ -486,8 +490,12 @@ class AppState {
             while (true) {
                 delay(30_000)
                 clock = System.currentTimeMillis()
-                // Var tionde minut: är någon tablå äldre än tolv timmar hämtas den om.
-                if (++ticks % 20 == 0) queueStaleGuides()
+                // Var tionde minut: är någon tablå äldre än tolv timmar hämtas den om,
+                // och står appen framme länge hämtas kanalerna om var tredje timme.
+                if (++ticks % 20 == 0) {
+                    queueStaleGuides()
+                    if (appVisible) refreshChannelsAndGuide(CHANNELS_STALE_MS)
+                }
             }
         }
     }
@@ -556,6 +564,8 @@ class AppState {
             // av appen, eller en cache som inte gick att läsa — hämtas om, en i taget.
             refreshQueue.addAll(sources.filter { it.id !in contents }.map { it.id })
             refreshNextQueued()
+            // Övriga källor: kanalerna och tablån hämtas om vid varje start.
+            refreshChannelsAndGuide()
         }
     }
 
@@ -1514,7 +1524,10 @@ class AppState {
             result.onSuccess { content ->
                 val wasEmpty = sources.isEmpty()
                 val updated = source.copy(lastSyncUtc = System.currentTimeMillis())
+                val before = contents[source.id]?.channels.orEmpty()
                 contents[source.id] = content
+                followMovedChannels(before, content.channels)
+                channelsFetchedAt[source.id] = System.currentTimeMillis()
                 sources = if (isNew) sources + updated else sources.map { if (it.id == updated.id) updated else it }
                 persistSources()
                 rebuildLibrary()
@@ -1533,6 +1546,110 @@ class AppState {
             refreshNextQueued()
         }
     }
+
+    // --- Kanaler och tablå vid start -------------------------------------------------
+
+    /** När kanalerna senast hämtades, per källa. Tomt vid varje start: då hämtas de. */
+    private val channelsFetchedAt = HashMap<String, Long>()
+    private var channelsJob: Job? = null
+
+    /**
+     * Kanallistan och tablån på nytt för alla källor: vid varje start, när
+     * appen kommer fram igen efter en stund ([maxAgeMs]) och var tredje timme
+     * medan den står framme. Evenemangskanalerna byter namn efter dagens
+     * matcher, så Fotboll hittar då rätt kanaler direkt. Filmerna och serierna
+     * står kvar — de hämtas om som förut, med Uppdatera i Inställningar.
+     */
+    fun refreshChannelsAndGuide(maxAgeMs: Long = CHANNELS_FRESH_MS) {
+        if (channelsJob?.isActive == true) return
+        val now = System.currentTimeMillis()
+        val due = sources.filter { it.id in contents && now - (channelsFetchedAt[it.id] ?: 0L) > maxAgeMs }
+        if (due.isEmpty()) return
+        channelsJob = scope.launch {
+            for (source in due) {
+                // En hel hämtning av källan pågår redan: den tar med kanalerna och tablån.
+                if (importingId == source.id) continue
+                channelsFetchedAt[source.id] = System.currentTimeMillis()
+                val fresh = fetchChannels(source)
+                val current = contents[source.id]
+                if (fresh != null && current != null && importingId != source.id) {
+                    contents[source.id] = SourceContent(
+                        channels = fresh.channels,
+                        movies = current.movies,
+                        series = current.series,
+                        liveGroups = fresh.groups,
+                        movieGroups = current.movieGroups,
+                        seriesGroups = current.seriesGroups,
+                        epgUrl = fresh.epgUrl ?: current.epgUrl,
+                    )
+                    followMovedChannels(current.channels, fresh.channels)
+                    rebuildChannels()
+                    val saved = contents[source.id]
+                    if (saved != null) withContext(Dispatchers.IO) { runCatching { storage.saveContent(source.id, saved) } }
+                }
+                // Tablån hämtas om även när kanalerna inte gick att hämta.
+                queueGuide(source.id, force = true)
+            }
+        }
+    }
+
+    private class ChannelList(val channels: List<LiveChannel>, val groups: List<String>, val epgUrl: String?)
+
+    /** Bara kanalerna för en källa. Null om de inte gick att hämta, eller om listan kom tom. */
+    private suspend fun fetchChannels(source: Source): ChannelList? {
+        val secret = plainSecret(source) ?: return null
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                when (source.type) {
+                    SourceType.M3U -> importer.importM3u(source.id, secret, userAgent) { }.let {
+                        ChannelList(it.channels, it.liveGroups, it.epgUrl)
+                    }
+                    SourceType.XTREAM -> importer.importXtreamLive(
+                        source.id,
+                        XtreamCredentials(
+                            baseUrl = source.displayUrl,
+                            username = source.username.orEmpty(),
+                            password = secret,
+                            userAgent = userAgent,
+                        ),
+                    ).let { (channels, groups) -> ChannelList(channels, groups, null) }
+                }
+            }.getOrNull()?.takeIf { it.channels.isNotEmpty() }
+        }
+    }
+
+    /** Som rebuildLibrary när bara kanalerna ändrats: filmerna och serierna behöver inte gås igenom igen. */
+    private fun rebuildChannels() {
+        val merged = Library.merge(sources.mapNotNull { contents[it.id] })
+        library = merged
+        if (liveGroup?.let { merged.liveCounts.containsKey(it) } == false) liveGroup = null
+        rebuildGuide()
+    }
+
+    /**
+     * Kanalerna kan ha fått nya platser i listan. Kanaler i Min lista följer
+     * med, efter stream-id (Xtream) eller adress (M3U), i stället för att
+     * hamna på kanalen som nu står på deras gamla plats.
+     */
+    private fun followMovedChannels(old: List<LiveChannel>, new: List<LiveChannel>) {
+        if (old.isEmpty() || myList.none { it.kind == ListKind.CHANNEL }) return
+        val newKeys = HashMap<String, String>(new.size * 2)
+        for (channel in new) newKeys.putIfAbsent(channelIdentity(channel), channel.key)
+        val moved = HashMap<String, String>()
+        for (channel in old) {
+            val target = newKeys[channelIdentity(channel)] ?: continue
+            if (target != channel.key) moved[channel.key] = target
+        }
+        if (moved.isEmpty()) return
+        myList = myList.map { entry ->
+            if (entry.kind == ListKind.CHANNEL) moved[entry.key]?.let { entry.copy(key = it) } ?: entry else entry
+        }
+        val snapshot = myList
+        scope.launch(Dispatchers.IO) { myListStore.save(snapshot) }
+    }
+
+    private fun channelIdentity(channel: LiveChannel): String =
+        channel.streamId?.let { "s$it" } ?: channel.url ?: ("n" + channel.name)
 
     private fun refreshNextQueued() {
         if (importingId != null) return
@@ -1975,7 +2092,7 @@ class AppState {
             guideStatus[id] = describeGuide(guide)
         }
         rebuildGuide()
-        queueStaleGuides()
+        // Tablåerna hämtas om vid starten, efter kanalerna (refreshChannelsAndGuide).
     }
 
     /** Tablåer som saknas eller är äldre än tolv timmar. Misslyckade försök väntar en timme. */

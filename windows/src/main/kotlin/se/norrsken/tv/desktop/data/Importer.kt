@@ -67,21 +67,7 @@ class Importer(
         xtream.authenticate(credentials)
 
         report(ImportState.Fetching("kanaler"))
-        val liveCategories = xtream.liveCategories(credentials)
-        val liveNames = liveCategories.associate { it.id to it.name }
-        val channels = xtream.liveStreams(credentials).mapIndexed { index, stream ->
-            LiveChannel(
-                key = "$sourceId:c$index",
-                sourceId = sourceId,
-                name = stream.name,
-                group = stream.categoryId?.let(liveNames::get) ?: UNCATEGORIZED,
-                logo = stream.icon,
-                number = stream.number,
-                epgId = stream.epgChannelId,
-                url = null,
-                streamId = stream.streamId,
-            )
-        }
+        val (channels, liveGroups) = importXtreamLive(sourceId, credentials)
         report(ImportState.Parsing("kanaler", channels.size))
 
         report(ImportState.Fetching("filmer"))
@@ -130,12 +116,35 @@ class Importer(
             channels = channels,
             movies = movies,
             series = series,
-            liveGroups = liveCategories.map { it.name },
+            liveGroups = liveGroups,
             movieGroups = vodCategories.map { it.name },
             seriesGroups = seriesCategories.map { it.name },
             // Tablån kommer i en senare fas. Adressen bär lösenordet och
             // sparas därför inte i onödan.
             epgUrl = null,
         )
+    }
+
+    /**
+     * Bara kanalerna och deras kategorier. Vid varje start hämtas de om, så
+     * att evenemangskanalerna har dagens namn; filmerna och serierna står kvar.
+     */
+    fun importXtreamLive(sourceId: String, credentials: XtreamCredentials): Pair<List<LiveChannel>, List<String>> {
+        val liveCategories = xtream.liveCategories(credentials)
+        val liveNames = liveCategories.associate { it.id to it.name }
+        val channels = xtream.liveStreams(credentials).mapIndexed { index, stream ->
+            LiveChannel(
+                key = "$sourceId:c$index",
+                sourceId = sourceId,
+                name = stream.name,
+                group = stream.categoryId?.let(liveNames::get) ?: UNCATEGORIZED,
+                logo = stream.icon,
+                number = stream.number,
+                epgId = stream.epgChannelId,
+                url = null,
+                streamId = stream.streamId,
+            )
+        }
+        return channels to liveCategories.map { it.name }
     }
 }

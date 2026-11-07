@@ -229,7 +229,12 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         Images.appHidden = false
-        if (ready) state.appVisible = true
+        if (ready) {
+            state.appVisible = true
+            // Tillbaka efter en stund: kanalerna och tablån hämtas om, så att
+            // Fotboll hittar dagens kanaler direkt.
+            state.refreshChannelsAndGuide()
+        }
     }
 
     override fun onStop() {
