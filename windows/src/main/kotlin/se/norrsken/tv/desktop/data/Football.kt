@@ -13,7 +13,9 @@ import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.YearMonth
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
@@ -23,6 +25,9 @@ import kotlin.math.roundToInt
  */
 enum class League(val slug: String, val title: String, val short: String, val accent: Long) {
     CHAMPIONS_LEAGUE("uefa.champions", "Champions League", "CL", 0xFF3D6BFF),
+    // Europa- och Conference League: Disney+ i Sverige.
+    EUROPA_LEAGUE("uefa.europa", "Europa League", "EL", 0xFFFF7A1A),
+    CONFERENCE_LEAGUE("uefa.europa.conf", "Conference League", "ECL", 0xFF2BD46B),
     PREMIER_LEAGUE("eng.1", "Premier League", "PL", 0xFFA24DFF),
     LA_LIGA("esp.1", "LaLiga", "LaLiga", 0xFFFF5A4E),
     ALLSVENSKAN("swe.1", "Allsvenskan", "Allsvenskan", 0xFF2E9BFF),
@@ -535,7 +540,6 @@ private fun JSONObject.text(key: String): String? {
 fun findBroadcasts(matches: List<FootballMatch>, channels: List<LiveChannel>, guide: GuideIndex): Map<String, List<LiveChannel>> {
     if (matches.isEmpty()) return emptyMap()
     val withGuide = channels.filter { guide.hasSchedule(it) }
-    if (withGuide.isEmpty()) return emptyMap()
     // Ett ord som flera lag har i namnet säger inte vilket lag det är: "madrid", "manchester".
     val teams = matches.flatMap { listOf(it.home, it.away) }.distinctBy { it.id }
     val shared = teams
@@ -556,6 +560,9 @@ fun findBroadcasts(matches: List<FootballMatch>, channels: List<LiveChannel>, gu
     val leagues = League.entries.associateWith { " " + normalizeName(it.title) + " " }
     val texts = IdentityHashMap<Programme, String>()
     val found = HashMap<String, MutableList<Pair<Int, LiveChannel>>>()
+    // Streamingtjänsterna (Disney+, Prime Video, TV4 Play, Viaplay) ligger ofta
+    // som evenemangskanaler med matchen i namnet, och sällan med tablå.
+    findEventChannels(matches, channels, names, found)
     for (channel in withGuide) {
         val schedule = guide.schedule(channel)
         for ((kickoff, group) in byKickoff) {
@@ -585,6 +592,63 @@ fun findBroadcasts(matches: List<FootballMatch>, channels: List<LiveChannel>, gu
         }
     }
     return found.mapValues { (_, list) -> rankBroadcasts(list) }
+}
+
+/**
+ * Evenemangskanaler: "SE: Disney+ 03 | Malmö FF vs Lyon 18:45". Båda lagen
+ * ska stå i kanalens namn, och står ett klockslag där ska det stämma med
+ * avsparken. Säkrare än tablån, så de går före den.
+ */
+private fun findEventChannels(
+    matches: List<FootballMatch>,
+    channels: List<LiveChannel>,
+    names: Map<String, Pair<List<String>, List<String>>>,
+    found: HashMap<String, MutableList<Pair<Int, LiveChannel>>>,
+) {
+    if (names.isEmpty()) return
+    // Orden i lagens namn. En kanal med färre än två av dem kan inte nämna en match,
+    // så de allra flesta kanaler släpps efter en snabb koll.
+    val anchors = HashSet<String>()
+    for ((home, away) in names.values) {
+        for (key in home + away) key.trim().split(' ').forEach { if (it.length >= 3) anchors += it }
+    }
+    val byId = matches.associateBy { it.id }
+    for (channel in channels) {
+        val words = normalizeName(channel.name)
+        if (words.length < 8) continue
+        var hits = 0
+        for (word in words.split(' ')) if (word in anchors) hits++
+        if (hits < 2) continue
+        val name = " $words "
+        for ((id, sides) in names) {
+            val (home, away) = sides
+            if (home.none { it in name } || away.none { it in name }) continue
+            val match = byId[id] ?: continue
+            if (!clockFits(channel.name, match.kickoff)) continue
+            found.getOrPut(id) { ArrayList() }.add(EVENT_SCORE to channel)
+        }
+    }
+}
+
+/** Klockslag i kanalnamnet: "18:45". Bara med kolon, så att datum som "07.11" inte tas för tider. */
+private val CLOCK = Regex("""(?<!\d)([01]?\d|2[0-3]):([0-5]\d)(?!\d)""")
+private val LONDON: ZoneId = ZoneId.of("Europe/London")
+private const val EVENT_SCORE = 4
+private const val CLOCK_SLACK_MIN = 100
+
+/** Står ett klockslag i namnet ska det ligga nära avsparken — i svensk, brittisk eller UTC-tid. */
+private fun clockFits(name: String, kickoff: Long): Boolean {
+    val times = CLOCK.findAll(name).map { it.groupValues[1].toInt() * 60 + it.groupValues[2].toInt() }.toList()
+    if (times.isEmpty()) return true
+    val instant = Instant.ofEpochMilli(kickoff)
+    return listOf(ZoneId.systemDefault(), LONDON, ZoneOffset.UTC).any { zone ->
+        val local = instant.atZone(zone)
+        val minutes = local.hour * 60 + local.minute
+        times.any { time ->
+            val difference = abs(time - minutes)
+            minOf(difference, 1440 - difference) <= CLOCK_SLACK_MIN
+        }
+    }
 }
 
 /**
@@ -632,11 +696,23 @@ private fun broadcastRegion(channel: LiveChannel): Int {
     }
 }
 
-/** Kanaler som bara finns i Sverige. Med mellanslag runt, mot normaliserade namn. */
-private val SWEDISH_BRANDS = listOf(" tv4 ", " tv4 sport", " tv4 fotboll", " c more", " cmore", " svt", " sportkanalen", " kanal 5", " kanal5", " tv12 ")
+/**
+ * Kanaler som bara finns i Sverige. Med mellanslag runt, mot normaliserade namn.
+ * TV4 (Allsvenskan, LaLiga, Serie A) och Telia (Allsvenskan).
+ */
+private val SWEDISH_BRANDS = listOf(
+    " tv4 ", " tv4 sport", " tv4 fotboll", " tv4 play", " c more", " cmore", " svt", " sportkanalen", " kanal 5", " kanal5",
+    " tv12 ", " telia",
+)
 
-/** Kanaler i hela Norden, oftast den svenska när inget land står. */
-private val NORDIC_BRANDS = listOf(" v sport", " vsport", " viaplay", " eurosport", " max sport", " discovery")
+/**
+ * Tjänster i hela Norden, oftast den svenska när inget land står: Viaplay och
+ * V Sport (Premier League, Champions League, Bundesliga), Disney+ (Europa- och
+ * Conference League) och Prime Video (utvalda Premier League-matcher).
+ */
+private val NORDIC_BRANDS = listOf(
+    " v sport", " vsport", " viaplay", " disney", " prime video", " amazon prime", " eurosport", " max sport", " discovery",
+)
 
 /** Reservkanaler och tidsförskjutna kanaler sist. */
 private fun broadcastPenalty(name: String): Int {
