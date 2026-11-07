@@ -46,9 +46,10 @@ import se.norrsken.tv.desktop.ui.TvTheme
  * - Vänster och höger (film): spolar tio sekunder; snabbspolning trettio.
  * - Play/paus: paus. I minispelaren: tillbaka till helskärm.
  * - ≡: ljud och undertext.
- * - Tillbaka: stänger listan eller panelen, krymper sedan bilden upp i
- *   sidofältet, stänger den, och leder till startsidan innan appen stängs.
- *   Den lilla bilden nås med pil upp från menyn; OK eller play gör den stor.
+ * - Tillbaka: stänger listan eller panelen, krymper sedan bilden till en
+ *   liten bild nere i högra hörnet, stänger den, och leder till startsidan
+ *   innan appen stängs. Play (eller OK på den lilla bilden) gör den stor
+ *   igen; menyn har dess knappar överst medan den spelar.
  */
 class MainActivity : ComponentActivity() {
     private lateinit var state: AppState

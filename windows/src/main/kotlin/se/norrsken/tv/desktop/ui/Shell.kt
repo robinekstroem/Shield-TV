@@ -180,8 +180,9 @@ fun AppRoot(state: AppState) {
         derivedStateOf { state.nowPlaying != null && (state.miniPlayer || collapse.value > 0f) }
     }
     val focusManager = LocalFocusManager.current
-    // Tv utan minispelare: menyn och kategorierna göms medan man är i innehållet.
-    val drawers = tvLayout && !docked
+    // Tv: menyn och kategorierna göms medan man är i innehållet — också när
+    // minispelaren går, som då ligger som en liten bild i hörnet.
+    val drawers = tvLayout
     Box(Modifier.fillMaxSize().background(palette.background)) {
         // Temats dekor rör sig bara när spelaren inte täcker allt.
         val decorated = state.nowPlaying == null || state.miniPlayer
@@ -210,7 +211,7 @@ fun AppRoot(state: AppState) {
                         },
                     ),
             ) {
-                CompositionLocalProvider(LocalTvDocked provides (tvLayout && docked)) {
+                CompositionLocalProvider(LocalTvDocked provides (!drawers && tvLayout && docked)) {
                     if (state.loading) {
                         Spinner(Modifier.align(Alignment.Center))
                     } else {
@@ -355,6 +356,12 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
                     )
                 }
             }
+        }
+        // Tv: bilden ligger i hörnet medan man bläddrar. Menyn har dess knappar
+        // överst: vad som spelas, paus, förstora och stäng.
+        if (tv && state.nowPlaying != null && state.miniPlayer) {
+            MiniPlayerCard(state, Modifier.fillMaxWidth().padding(start = 4.dp, top = 2.dp, bottom = 12.dp))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(palette.hairline))
         }
         // Minispelaren: facket för bilden, som spelaren själv ritar ovanpå, och
         // under det vad som spelas, med paus, förstora och stäng.

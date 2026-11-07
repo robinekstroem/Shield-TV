@@ -592,17 +592,22 @@ fun PlayerHost(state: AppState, collapse: () -> Float) {
         }
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        // Liten: överst i sidofältet, i facket det håller fritt.
+        // Liten: överst i sidofältet, i facket det håller fritt. Tv: nere i
+        // högra hörnet, ovanpå det man bläddrar i — menyn är gömd där.
         val shape = RoundedCornerShape(lerp(0.dp, MiniDock.radius, progress))
+        val miniWidth = if (tvLayout) TV_PIP_WIDTH else MiniDock.videoWidth
+        val miniHeight = if (tvLayout) TV_PIP_HEIGHT else MiniDock.videoHeight
+        val miniX = if (tvLayout) maxWidth - TV_PIP_WIDTH - TV_PIP_MARGIN else MiniDock.inset
+        val miniY = if (tvLayout) maxHeight - TV_PIP_HEIGHT - TV_PIP_MARGIN else MiniDock.top
         Box(
             Modifier
                 .offset(
-                    x = lerp(0.dp, MiniDock.inset, progress),
-                    y = lerp(0.dp, MiniDock.top, progress),
+                    x = lerp(0.dp, miniX, progress),
+                    y = lerp(0.dp, miniY, progress),
                 )
                 .size(
-                    width = lerp(maxWidth, MiniDock.videoWidth, progress),
-                    height = lerp(maxHeight, MiniDock.videoHeight, progress),
+                    width = lerp(maxWidth, miniWidth, progress),
+                    height = lerp(maxHeight, miniHeight, progress),
                 )
                 .glow(palette.glowOf((if (focused) 1f else 0.55f) * progress), shape, 22.dp)
                 .shadow(lerp(0.dp, 14.dp, progress), shape)
@@ -624,6 +629,11 @@ fun PlayerHost(state: AppState, collapse: () -> Float) {
         }
     }
 }
+
+/** Tv: minispelaren som en bild i hörnet, i 16:9. */
+private val TV_PIP_WIDTH = 400.dp
+private val TV_PIP_HEIGHT = 225.dp
+private val TV_PIP_MARGIN = 36.dp
 
 /** Filmens tid, eller hur långt programmet som sänds just nu på kanalen kommit. */
 private fun miniProgress(state: AppState, playing: NowPlaying, status: VideoPlayer.Status, now: Long): Float? = when {
