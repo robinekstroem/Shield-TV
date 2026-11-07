@@ -24,11 +24,14 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import se.norrsken.tv.desktop.AppState
 import se.norrsken.tv.desktop.data.AppDirs
+import se.norrsken.tv.desktop.data.DisneyShelf
 import se.norrsken.tv.desktop.platform.WindowsIntegration
 import se.norrsken.tv.desktop.ui.AppRoot
 import se.norrsken.tv.desktop.ui.AppTheme
 import se.norrsken.tv.desktop.ui.CoverPrefetch
 import se.norrsken.tv.desktop.ui.Images
+import se.norrsken.tv.desktop.ui.TvDrawer
+import se.norrsken.tv.desktop.ui.TvNav
 import se.norrsken.tv.desktop.ui.TvTheme
 
 /**
@@ -135,12 +138,19 @@ class MainActivity : ComponentActivity() {
                         playing != null && !state.miniPlayer && state.dismissPlayerPrompt() -> Unit
                         // Som Esc i Windows: bilden krymper upp i sidofältet och fortsätter där.
                         playing != null && !state.miniPlayer -> state.minimizePlayer()
+                        // Kategorierna framme: tillbaka in i innehållet, som pil höger.
+                        TvNav.drawer == TvDrawer.CATEGORIES && TvNav.leaveCategories != null -> TvNav.leaveCategories?.invoke()
                         state.selectedMatch != null -> state.closeMatch()
                         state.selectedMovie != null -> state.closeMovie()
                         state.selectedSeries != null -> state.closeSeries()
                         playing != null -> state.closePlayer()
                         // Fotboll: från en liga tillbaka till översikten.
                         state.screen == Screen.FOOTBALL && state.footballLeague != null -> state.footballLeague = null
+                        // Disney: från en samling tillbaka till alla tre.
+                        state.screen == Screen.MOVIES && DisneyShelf.of(state.movieGroup) != null -> {
+                            state.movieGroup = DisneyShelf.ALL_KEY
+                            state.disneyCharacter = null
+                        }
                         // Som på andra tv-appar: Tillbaka leder till startsidan innan appen stängs.
                         state.screen != Screen.HOME -> state.screen = Screen.HOME
                         else -> {

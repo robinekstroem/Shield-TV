@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -39,6 +40,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
@@ -56,16 +58,21 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import se.norrsken.tv.data.xtream.XtreamEpisode
 import se.norrsken.tv.data.xtream.XtreamVodInfo
 import se.norrsken.tv.desktop.AppState
@@ -110,6 +117,10 @@ fun MoviesScreen(state: AppState) {
     var openedKey by remember { mutableStateOf<String?>(null) }
     // Kortfilmer som ligger som serier öppnas härifrån, i Disneys samlingar.
     var seriesFromHere by remember { mutableStateOf(false) }
+    // Tv: var markeringen landar från kategorierna, och Disneys samlingskort.
+    val entry = remember { TvEntry() }
+    val shelfFocus = remember { FocusRequester() }
+    val scope = rememberCoroutineScope()
 
     val selected = state.selectedMovie
     if (selected != null) {
@@ -156,6 +167,21 @@ fun MoviesScreen(state: AppState) {
             }
         }
     }
+    // Tv: från kategorierna in till omslagen — eller till samlingskorten i Disney.
+    val enterGrid: () -> Unit = {
+        scope.launch {
+            if (DisneyShelf.isDisney(state.movieGroup)) {
+                repeat(2) { withFrameNanos { } }
+                if (gridState.firstVisibleItemIndex == 0 && runCatching { shelfFocus.requestFocus() }.isSuccess) return@launch
+            }
+            entry.enter { posterKeys(gridState) }
+        }
+    }
+    // Tv: "8 / 551" — var i kategorin det markerade omslaget står.
+    val position = remember(movies, focusedKey) {
+        val index = if (focusedKey == null) -1 else movies.indexOfFirst { it.key == focusedKey }
+        if (index >= 0 && !disneyView) "${(index + 1).grouped()} / ${movies.size.grouped()}" else null
+    }
 
     Row(Modifier.fillMaxSize()) {
         GroupColumn(
@@ -163,12 +189,14 @@ fun MoviesScreen(state: AppState) {
             total = if (state.versions.isEmpty) library.movies.size else state.versions.movieCount,
             groups = state.visibleGroups(LibraryFilter.MOVIE, library.movieGroups),
             counts = library.movieCounts,
-            selected = group,
+            // Inne i en av Disneys samlingar är det Disney som är valt i listan.
+            selected = if (disneyView) DisneyShelf.ALL_KEY else group,
             onSelect = {
                 state.movieGroup = it
                 state.disneyCharacter = null
             },
             pinned = disneyPinned(state),
+            onEnterContent = enterGrid,
         )
         Box(Modifier.weight(1f).fillMaxHeight()) {
             if (spotlight != null) {
@@ -180,22 +208,37 @@ fun MoviesScreen(state: AppState) {
                 )
             }
             Column(Modifier.fillMaxSize()) {
-                ScreenHeader(
-                    title = when {
-                        disneyShelf != null -> disneyShelf.title
-                        disneyView -> "Disney"
-                        else -> group ?: "Alla filmer"
-                    },
-                    subtitle = if (disneyView) {
-                        disneySubtitle(state, disneyShelf, movies, movies.size + disneySeries.size)
-                    } else {
-                        "${movies.size.grouped()} filmer"
-                    },
-                    query = query,
-                    onQuery = { state.movieQuery = it },
-                    placeholder = "Sök film",
-                )
-                SortRow(state.movieSort, series = false, onSelect = { state.sortMovies(it) })
+                val title = when {
+                    disneyShelf != null -> disneyShelf.title
+                    disneyView -> "Disney"
+                    else -> group ?: "Alla filmer"
+                }
+                val subtitle = if (disneyView) {
+                    disneySubtitle(state, disneyShelf, movies, movies.size + disneySeries.size)
+                } else {
+                    "${movies.size.grouped()} filmer"
+                }
+                if (tvLayout) {
+                    TvLibraryBar(
+                        title = title,
+                        position = position ?: subtitle,
+                        sort = state.movieSort,
+                        series = false,
+                        onSort = { state.sortMovies(it) },
+                        query = query,
+                        onQuery = { state.movieQuery = it },
+                        placeholder = "Sök film",
+                    )
+                } else {
+                    ScreenHeader(
+                        title = title,
+                        subtitle = subtitle,
+                        query = query,
+                        onQuery = { state.movieQuery = it },
+                        placeholder = "Sök film",
+                    )
+                    SortRow(state.movieSort, series = false, onSelect = { state.sortMovies(it) })
+                }
                 if (disneyShelf == DisneyShelf.SHORTS) DisneyCharacterChips(state)
                 if (spotlight != null) {
                     val tmdb = state.tmdbFor(spotlight)
@@ -206,6 +249,7 @@ fun MoviesScreen(state: AppState) {
                         tmdbId = tmdb?.id,
                         title = state.titleOf(spotlight),
                         meta = listOfNotNull(
+                            if (disneyView) state.disney.numberOf(spotlight)?.let { "Nr $it" } else null,
                             (tmdb?.year ?: facts?.year)?.toString(),
                             formatRating(tmdb?.rating ?: spotlight.rating),
                             tmdb?.genres?.ifBlank { null } ?: facts?.genre?.ifBlank { null },
@@ -217,72 +261,92 @@ fun MoviesScreen(state: AppState) {
                     EmptyState(title = "Inga träffar", body = "Ingen film matchar sökningen.")
                 } else {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        LazyVerticalGrid(
-                            columns = GridCells.Adaptive(if (tvLayout) TV_POSTER_MIN else 152.dp),
-                            state = gridState,
-                            // Tv: luft runt omslagen, så att det markerade har plats att växa.
-                            contentPadding = if (tvLayout) {
-                                PaddingValues(start = 24.dp, end = 32.dp, top = 14.dp, bottom = 40.dp)
-                            } else {
-                                PaddingValues(start = 20.dp, end = 28.dp, bottom = 28.dp)
-                            },
-                            horizontalArrangement = Arrangement.spacedBy(if (tvLayout) 14.dp else 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(if (tvLayout) 18.dp else 12.dp),
-                        ) {
-                            val movieCell: @Composable (Movie) -> Unit = { movie ->
-                                PosterCard(
-                                    title = state.titleOf(movie),
-                                    images = state.posterCandidates(movie),
-                                    meta = if (disneyView) disneyMeta(state, movie) else movieMeta(state, movie),
-                                    onClick = {
-                                        openedKey = movie.key
-                                        state.showMovie(movie)
-                                    },
-                                    modifier = if (movie.key == openedKey) Modifier.focusRequester(restore) else Modifier,
-                                    onFocusChange = { has ->
-                                        if (has) focusedKey = movie.key else if (focusedKey == movie.key) focusedKey = null
-                                    },
-                                    onActive = { if (!tvLayout) hoveredKey = movie.key },
-                                    badge = state.badgeFor(movie),
-                                )
-                            }
-                            if (!disneyView) {
-                                gridItems(movies, key = { it.key }) { movie -> movieCell(movie) }
-                            } else {
-                                // Disney: en rubrik per samling när alla tre visas, serierna först i kortfilmerna.
-                                for (section in DisneyShelf.entries) {
-                                    if (disneyShelf != null && section != disneyShelf) continue
-                                    val sectionMovies = movies.filter { state.disney.shelfOf(it) == section }
-                                    val sectionSeries = disneySeries.filter { state.disney.shelfOf(it) == section }
-                                    if (sectionMovies.isEmpty() && sectionSeries.isEmpty()) continue
-                                    if (disneyShelf == null) {
-                                        item(key = "rubrik-" + section.name, span = { GridItemSpan(maxLineSpan) }) {
-                                            DisneySectionHeader(section, sectionMovies.size + sectionSeries.size) {
-                                                state.movieGroup = section.key
-                                                state.disneyCharacter = null
+                        TvScrolling(lead = 0.05f, trail = 0.08f, snap = true) {
+                            LazyVerticalGrid(
+                                columns = GridCells.Adaptive(if (tvLayout) TV_POSTER_MIN else 152.dp),
+                                state = gridState,
+                                // Tv: luft runt omslagen, så att det markerade har plats att växa.
+                                contentPadding = if (tvLayout) {
+                                    PaddingValues(start = 40.dp, end = 40.dp, top = 14.dp, bottom = 40.dp)
+                                } else {
+                                    PaddingValues(start = 20.dp, end = 28.dp, bottom = 28.dp)
+                                },
+                                horizontalArrangement = Arrangement.spacedBy(if (tvLayout) 16.dp else 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(if (tvLayout) 20.dp else 12.dp),
+                            ) {
+                                val movieCell: @Composable (Movie) -> Unit = { movie ->
+                                    PosterCard(
+                                        title = state.titleOf(movie),
+                                        images = state.posterCandidates(movie),
+                                        meta = if (disneyView) disneyMeta(state, movie) else movieMeta(state, movie),
+                                        onClick = {
+                                            openedKey = movie.key
+                                            state.showMovie(movie)
+                                        },
+                                        modifier = (if (movie.key == openedKey) Modifier.focusRequester(restore) else Modifier)
+                                            .then(entry.mark(movie.key)),
+                                        onFocusChange = { has ->
+                                            if (has) {
+                                                focusedKey = movie.key
+                                                entry.last = movie.key
+                                            } else if (focusedKey == movie.key) {
+                                                focusedKey = null
                                             }
+                                        },
+                                        onActive = { if (!tvLayout) hoveredKey = movie.key },
+                                        badge = state.badgeFor(movie),
+                                        showTitle = !tvLayout,
+                                    )
+                                }
+                                if (!disneyView) {
+                                    gridItems(movies, key = { it.key }) { movie -> movieCell(movie) }
+                                } else {
+                                    // Samlingarna som stora kort överst; ett tryck byter samling.
+                                    item(key = SHELVES_KEY, span = { GridItemSpan(maxLineSpan) }) {
+                                        DisneyShelves(state, disneyShelf, shelfFocus) { shelf ->
+                                            state.movieGroup = shelf?.key ?: DisneyShelf.ALL_KEY
+                                            state.disneyCharacter = null
                                         }
                                     }
-                                    gridItems(sectionSeries, key = { "serie-" + it.key }) { series ->
-                                        val key = "serie-" + series.key
-                                        PosterCard(
-                                            title = state.titleOf(series),
-                                            images = state.posterCandidates(series),
-                                            meta = seriesMeta(state, series),
-                                            onClick = {
-                                                openedKey = key
-                                                seriesFromHere = true
-                                                state.showSeries(series)
-                                            },
-                                            modifier = if (key == openedKey) Modifier.focusRequester(restore) else Modifier,
-                                            onFocusChange = { has ->
-                                                if (has) focusedKey = key else if (focusedKey == key) focusedKey = null
-                                            },
-                                            onActive = { if (!tvLayout) hoveredKey = key },
-                                            badge = state.badgeFor(series),
-                                        )
+                                    // En rubrik per samling när alla tre visas, serierna först i kortfilmerna.
+                                    for (section in DisneyShelf.entries) {
+                                        if (disneyShelf != null && section != disneyShelf) continue
+                                        val sectionMovies = movies.filter { state.disney.shelfOf(it) == section }
+                                        val sectionSeries = disneySeries.filter { state.disney.shelfOf(it) == section }
+                                        if (sectionMovies.isEmpty() && sectionSeries.isEmpty()) continue
+                                        if (disneyShelf == null) {
+                                            item(key = HEADER_PREFIX + section.name, span = { GridItemSpan(maxLineSpan) }) {
+                                                DisneySectionHeader(section, sectionMovies.size + sectionSeries.size)
+                                            }
+                                        }
+                                        gridItems(sectionSeries, key = { "serie-" + it.key }) { series ->
+                                            val key = "serie-" + series.key
+                                            PosterCard(
+                                                title = state.titleOf(series),
+                                                images = state.posterCandidates(series),
+                                                meta = seriesMeta(state, series),
+                                                onClick = {
+                                                    openedKey = key
+                                                    seriesFromHere = true
+                                                    state.showSeries(series)
+                                                },
+                                                modifier = (if (key == openedKey) Modifier.focusRequester(restore) else Modifier)
+                                                    .then(entry.mark(key)),
+                                                onFocusChange = { has ->
+                                                    if (has) {
+                                                        focusedKey = key
+                                                        entry.last = key
+                                                    } else if (focusedKey == key) {
+                                                        focusedKey = null
+                                                    }
+                                                },
+                                                onActive = { if (!tvLayout) hoveredKey = key },
+                                                badge = state.badgeFor(series),
+                                                showTitle = !tvLayout,
+                                            )
+                                        }
+                                        gridItems(sectionMovies, key = { it.key }) { movie -> movieCell(movie) }
                                     }
-                                    gridItems(sectionMovies, key = { it.key }) { movie -> movieCell(movie) }
                                 }
                             }
                         }
@@ -293,6 +357,16 @@ fun MoviesScreen(state: AppState) {
         }
     }
 }
+
+/** Nycklarna i rutnätet som är omslag, inte rubriker eller samlingskort. */
+private const val SHELVES_KEY = "disney-samlingar"
+private const val HEADER_PREFIX = "rubrik-"
+
+/** Omslagen som syns just nu, i ordning: dit markeringen kan gå in från kategorierna. */
+private fun posterKeys(gridState: LazyGridState): List<Any> =
+    gridState.layoutInfo.visibleItemsInfo.mapNotNull { info ->
+        (info.key as? String)?.takeIf { it != SHELVES_KEY && !it.startsWith(HEADER_PREFIX) }
+    }
 
 /**
  * Filmens sida: fakta först, uppspelning när man väljer det. Omslag, år och
@@ -510,6 +584,8 @@ fun SeriesScreen(state: AppState) {
     // Tv: omslaget som är markerat, och det man senast öppnade.
     var focusedKey by remember { mutableStateOf<String?>(null) }
     var openedKey by remember { mutableStateOf<String?>(null) }
+    val entry = remember { TvEntry() }
+    val scope = rememberCoroutineScope()
     val selected = state.selectedSeries
     if (selected != null) {
         SeriesDetail(state, selected)
@@ -541,6 +617,10 @@ fun SeriesScreen(state: AppState) {
             }
         }
     }
+    val position = remember(series, focusedKey) {
+        val index = if (focusedKey == null) -1 else series.indexOfFirst { it.key == focusedKey }
+        if (index >= 0) "${(index + 1).grouped()} / ${series.size.grouped()}" else null
+    }
 
     Row(Modifier.fillMaxSize()) {
         GroupColumn(
@@ -550,6 +630,7 @@ fun SeriesScreen(state: AppState) {
             counts = library.seriesCounts,
             selected = group,
             onSelect = { state.seriesGroup = it },
+            onEnterContent = { scope.launch { entry.enter { posterKeys(gridState) } } },
         )
         Box(Modifier.weight(1f).fillMaxHeight()) {
             if (spotlight != null) {
@@ -561,14 +642,27 @@ fun SeriesScreen(state: AppState) {
                 )
             }
             Column(Modifier.fillMaxSize()) {
-                ScreenHeader(
-                    title = group ?: "Alla serier",
-                    subtitle = "${series.size.grouped()} serier",
-                    query = query,
-                    onQuery = { state.seriesQuery = it },
-                    placeholder = "Sök serie",
-                )
-                SortRow(state.seriesSort, series = true, onSelect = { state.sortSeries(it) })
+                if (tvLayout) {
+                    TvLibraryBar(
+                        title = group ?: "Alla serier",
+                        position = position ?: "${series.size.grouped()} serier",
+                        sort = state.seriesSort,
+                        series = true,
+                        onSort = { state.sortSeries(it) },
+                        query = query,
+                        onQuery = { state.seriesQuery = it },
+                        placeholder = "Sök serie",
+                    )
+                } else {
+                    ScreenHeader(
+                        title = group ?: "Alla serier",
+                        subtitle = "${series.size.grouped()} serier",
+                        query = query,
+                        onQuery = { state.seriesQuery = it },
+                        placeholder = "Sök serie",
+                    )
+                    SortRow(state.seriesSort, series = true, onSelect = { state.sortSeries(it) })
+                }
                 if (spotlight != null) {
                     val tmdb = state.tmdbFor(spotlight)
                     SpotlightInfo(
@@ -588,33 +682,42 @@ fun SeriesScreen(state: AppState) {
                     EmptyState(title = "Inga träffar", body = "Ingen serie matchar sökningen.")
                 } else {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        LazyVerticalGrid(
-                            columns = GridCells.Adaptive(if (tvLayout) TV_POSTER_MIN else 152.dp),
-                            state = gridState,
-                            contentPadding = if (tvLayout) {
-                                PaddingValues(start = 24.dp, end = 32.dp, top = 14.dp, bottom = 40.dp)
-                            } else {
-                                PaddingValues(start = 20.dp, end = 28.dp, bottom = 28.dp)
-                            },
-                            horizontalArrangement = Arrangement.spacedBy(if (tvLayout) 14.dp else 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(if (tvLayout) 18.dp else 12.dp),
-                        ) {
-                            gridItems(series, key = { it.key }) { item ->
-                                PosterCard(
-                                    title = state.titleOf(item),
-                                    images = state.posterCandidates(item),
-                                    meta = seriesMeta(state, item),
-                                    onClick = {
-                                        openedKey = item.key
-                                        state.showSeries(item)
-                                    },
-                                    modifier = if (item.key == openedKey) Modifier.focusRequester(restore) else Modifier,
-                                    onFocusChange = { has ->
-                                        if (has) focusedKey = item.key else if (focusedKey == item.key) focusedKey = null
-                                    },
-                                    onActive = { if (!tvLayout) hoveredKey = item.key },
-                                    badge = state.badgeFor(item),
-                                )
+                        TvScrolling(lead = 0.05f, trail = 0.08f, snap = true) {
+                            LazyVerticalGrid(
+                                columns = GridCells.Adaptive(if (tvLayout) TV_POSTER_MIN else 152.dp),
+                                state = gridState,
+                                contentPadding = if (tvLayout) {
+                                    PaddingValues(start = 40.dp, end = 40.dp, top = 14.dp, bottom = 40.dp)
+                                } else {
+                                    PaddingValues(start = 20.dp, end = 28.dp, bottom = 28.dp)
+                                },
+                                horizontalArrangement = Arrangement.spacedBy(if (tvLayout) 16.dp else 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(if (tvLayout) 20.dp else 12.dp),
+                            ) {
+                                gridItems(series, key = { it.key }) { item ->
+                                    PosterCard(
+                                        title = state.titleOf(item),
+                                        images = state.posterCandidates(item),
+                                        meta = seriesMeta(state, item),
+                                        onClick = {
+                                            openedKey = item.key
+                                            state.showSeries(item)
+                                        },
+                                        modifier = (if (item.key == openedKey) Modifier.focusRequester(restore) else Modifier)
+                                            .then(entry.mark(item.key)),
+                                        onFocusChange = { has ->
+                                            if (has) {
+                                                focusedKey = item.key
+                                                entry.last = item.key
+                                            } else if (focusedKey == item.key) {
+                                                focusedKey = null
+                                            }
+                                        },
+                                        onActive = { if (!tvLayout) hoveredKey = item.key },
+                                        badge = state.badgeFor(item),
+                                        showTitle = !tvLayout,
+                                    )
+                                }
                             }
                         }
                         Scrollbar(gridState, modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(end = 6.dp, bottom = 12.dp))
@@ -866,6 +969,8 @@ internal fun PosterCard(
     onActive: () -> Unit = {},
     /** Liten skylt uppe i hörnet, som "4K". */
     badge: String? = null,
+    /** Titeln under omslaget. Tv:ns filmer och serier visar den stort ovanför i stället. */
+    showTitle: Boolean = true,
 ) {
     val palette = LocalPalette.current
     var focused by remember { mutableStateOf(false) }
@@ -894,16 +999,20 @@ internal fun PosterCard(
         glowing = false,
     ) { hovered ->
         LaunchedEffect(hovered) { if (hovered) onActive() }
+        // Kristall: ljussvep och en kant som vandrar, i stället för den stilla kanten.
+        val shine = rememberCardShine(hovered)
+        val shape = RoundedCornerShape(10.dp)
         Column(Modifier.fillMaxWidth().padding(6.dp)) {
             Box(
                 Modifier
                     .fillMaxWidth()
                     .aspectRatio(2f / 3f)
                     // Glöden och kanten visar vilken titel man står på.
-                    .glow(if (hovered) palette.glowOf(glowAlpha) else Color.Transparent, RoundedCornerShape(10.dp), glowRadius)
-                    .clip(RoundedCornerShape(10.dp))
+                    .glow(if (hovered) palette.glowOf(glowAlpha) else Color.Transparent, shape, glowRadius)
+                    .clip(shape)
                     .background(palette.surfaceRaised)
-                    .then(if (hovered) Modifier.border(ring, palette.focus.copy(alpha = ringAlpha), RoundedCornerShape(10.dp)) else Modifier),
+                    .then(if (hovered && shine == null) Modifier.focusRing(palette, ring, shape, ringAlpha) else Modifier)
+                    .then(if (hovered) Modifier.cardShine(shine, palette, ring, shape) else Modifier),
                 contentAlignment = Alignment.Center,
             ) {
                 Artwork(
@@ -943,10 +1052,12 @@ internal fun PosterCard(
                     }
                 }
             }
-            Spacer(Modifier.height(8.dp))
-            Text(title, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            if (meta != null) {
-                Text(meta, style = MaterialTheme.typography.labelSmall, color = palette.textTertiary, maxLines = 1)
+            if (showTitle) {
+                Spacer(Modifier.height(8.dp))
+                Text(title, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (meta != null) {
+                    Text(meta, style = MaterialTheme.typography.labelSmall, color = palette.textTertiary, maxLines = 1)
+                }
             }
         }
     }
@@ -1004,7 +1115,7 @@ private fun SpotlightBackdrop(url: String?, fallback: String?, running: Boolean)
     Box(
         Modifier
             .fillMaxWidth()
-            .height(440.dp)
+            .height(if (tvLayout) 600.dp else 440.dp)
             .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
             .drawWithContent {
                 drawContent()
@@ -1044,31 +1155,37 @@ private fun SpotlightInfo(state: AppState, kind: String, tmdbId: Int?, title: St
     Column(
         Modifier
             .fillMaxWidth()
-            .height(if (tvLayout) 196.dp else 176.dp)
-            .padding(start = 24.dp, end = 36.dp, top = 6.dp, bottom = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+            .height(if (tvLayout) 238.dp else 176.dp)
+            .padding(start = if (tvLayout) 46.dp else 24.dp, end = 36.dp, top = if (tvLayout) 12.dp else 6.dp, bottom = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(if (tvLayout) 9.dp else 6.dp),
     ) {
         TitleLogo(
             state = state,
             kind = kind,
             tmdbId = tmdbId,
             title = title,
-            style = MaterialTheme.typography.headlineMedium,
-            maxHeight = 64.dp,
-            maxWidth = 380.dp,
+            style = if (tvLayout) MaterialTheme.typography.displaySmall else MaterialTheme.typography.headlineMedium,
+            maxHeight = if (tvLayout) 92.dp else 64.dp,
+            maxWidth = if (tvLayout) 540.dp else 380.dp,
             maxLines = 1,
         )
         if (meta != null) {
-            Text(meta, style = MaterialTheme.typography.titleSmall, color = palette.focus, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                meta,
+                style = if (tvLayout) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleSmall,
+                color = palette.focus,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
         if (overview != null) {
             Text(
                 overview,
                 style = MaterialTheme.typography.bodyLarge,
                 color = palette.textSecondary,
-                maxLines = if (tvLayout) 4 else 3,
+                maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth(0.72f),
+                modifier = Modifier.fillMaxWidth(if (tvLayout) 0.56f else 0.72f),
             )
         }
     }
@@ -1127,14 +1244,11 @@ private fun VersionPicker(labels: List<String>, selected: Int, onSelect: (Int) -
     }
 }
 
-/** Disney överst i kategorierna: alla tre samlingarna, och var och en för sig. Bara de som har något. */
+/** Disney överst i kategorierna. Samlingarna väljs inne i Disney, som stora kort. */
 private fun disneyPinned(state: AppState): List<PinnedGroup> {
     val disney = state.disney
     if (disney.isEmpty) return emptyList()
-    return listOf(PinnedGroup(DisneyShelf.ALL_KEY, "Disney", disney.total)) +
-        DisneyShelf.entries.mapNotNull { shelf ->
-            disney.counts[shelf]?.takeIf { it > 0 }?.let { PinnedGroup(shelf.key, shelf.title, it, indent = true) }
-        }
+    return listOf(PinnedGroup(DisneyShelf.ALL_KEY, "Disney", disney.total))
 }
 
 /** "41 av 64 klassiker", "20 av 31 filmer", "86 titlar". */
@@ -1169,12 +1283,12 @@ private fun DisneyCharacterChips(state: AppState) {
     }
 }
 
-/** Rubriken för en samling när alla tre visas. Ett tryck visar bara den samlingen. */
+/** Rubriken för en samling när alla tre visas. Korten överst byter samling. */
 @Composable
-private fun DisneySectionHeader(shelf: DisneyShelf, count: Int, onClick: () -> Unit) {
+private fun DisneySectionHeader(shelf: DisneyShelf, count: Int) {
     val palette = LocalPalette.current
     Row(
-        Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 2.dp),
+        Modifier.fillMaxWidth().padding(start = 6.dp, top = 14.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(shelf.title, style = MaterialTheme.typography.titleLarge)
@@ -1184,8 +1298,174 @@ private fun DisneySectionHeader(shelf: DisneyShelf, count: Int, onClick: () -> U
             style = MaterialTheme.typography.bodyMedium,
             color = palette.textTertiary,
         )
+    }
+}
+
+/**
+ * Disneys tre samlingar som stora kort överst i Disney: Kalle Anka & vänner,
+ * Disneyklassiker och Pixar, var och en med ett par omslag i en solfjäder.
+ * Ett tryck visar samlingen; ett tryck till på den valda visar alla tre igen.
+ */
+@Composable
+private fun DisneyShelves(state: AppState, current: DisneyShelf?, focus: FocusRequester, onPick: (DisneyShelf?) -> Unit) {
+    val shelves = DisneyShelf.entries.filter { (state.disney.counts[it] ?: 0) > 0 }
+    if (shelves.isEmpty()) return
+    // Markeringen kommer in på den valda samlingen, eller den första.
+    val target = current?.takeIf { it in shelves } ?: shelves.first()
+    Row(
+        Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (tvLayout) 18.dp else 12.dp),
+    ) {
+        shelves.forEach { shelf ->
+            DisneyShelfCard(
+                state = state,
+                shelf = shelf,
+                selected = shelf == current,
+                modifier = Modifier.weight(1f).then(if (shelf == target) Modifier.focusRequester(focus) else Modifier),
+                onClick = { onPick(if (shelf == current) null else shelf) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun DisneyShelfCard(state: AppState, shelf: DisneyShelf, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val palette = LocalPalette.current
+    val shape = RoundedCornerShape(18.dp)
+    val look = shelfLook(shelf)
+    val covers = remember(state.disney, state.library, state.versions, shelf) { state.disneyCovers(shelf, 3) }
+    val count = state.disney.counts[shelf] ?: 0
+    val subtitle = when (shelf) {
+        DisneyShelf.CLASSICS -> "${DisneyIndex.CLASSICS_TOTAL} klassiker sedan 1937"
+        DisneyShelf.PIXAR -> "${DisneyIndex.PIXAR_TOTAL} filmer sedan 1995"
+        DisneyShelf.SHORTS -> "Kortfilmerna från 30-talet och framåt"
+    }
+    val posterWidth = if (tvLayout) 86.dp else 62.dp
+    val step = if (tvLayout) 50.dp else 36.dp
+    Pressable(
+        onClick = onClick,
+        modifier = modifier,
+        shape = shape,
+        selected = selected,
+        hoverScale = if (tvLayout) 1.04f else 1.02f,
+        glowing = false,
+    ) { hovered ->
+        val shine = rememberCardShine(hovered)
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(if (tvLayout) 178.dp else 140.dp)
+                .glow(if (hovered) look.accent.copy(alpha = 0.55f) else Color.Transparent, shape, 30.dp)
+                .clip(shape)
+                .background(Brush.linearGradient(listOf(look.from, look.to)))
+                // Ett varmt ljus nere till vänster, som en strålkastare.
+                .background(Brush.radialGradient(listOf(look.accent.copy(alpha = 0.34f), Color.Transparent), radius = 520f, center = Offset(0f, 520f)))
+                .then(
+                    when {
+                        hovered && shine == null -> Modifier.focusRing(palette, 3.dp, shape)
+                        selected && !hovered -> Modifier.border(2.dp, look.accent.copy(alpha = 0.9f), shape)
+                        else -> Modifier
+                    },
+                )
+                .then(if (hovered) Modifier.cardShine(shine, palette, 3.dp, shape) else Modifier),
+        ) {
+            Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                Column(
+                    Modifier.weight(1f).padding(start = 22.dp, end = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Text(
+                        shelf.title,
+                        style = if (tvLayout) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
+                        color = Color.White,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = 0.78f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        if (count == 1) "1 titel här" else "${count.grouped()} titlar här",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = look.accent,
+                        maxLines = 1,
+                    )
+                }
+                // Omslagen i en solfjäder: mitten överst och lite högre.
+                Box(Modifier.width(posterWidth + step * 2 + 16.dp).fillMaxHeight()) {
+                    covers.forEachIndexed { index, candidates ->
+                        val middle = index == 1
+                        Box(
+                            Modifier
+                                .align(Alignment.CenterStart)
+                                .offset(x = step * index, y = if (middle) (-6).dp else 8.dp)
+                                .zIndex(if (middle) 2f else 1f)
+                                .graphicsLayer { rotationZ = (index - 1) * 8f }
+                                .width(posterWidth)
+                                .aspectRatio(2f / 3f)
+                                .shadow(10.dp, RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(palette.surfaceRaised),
+                        ) {
+                            Artwork(candidates = candidates, modifier = Modifier.fillMaxSize(), maxSide = 240)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Kortens färger: blått och rött som en gammal tecknad film, midnatt och guld, och himmelsblått. */
+private class ShelfLook(val from: Color, val to: Color, val accent: Color)
+
+private fun shelfLook(shelf: DisneyShelf): ShelfLook = when (shelf) {
+    DisneyShelf.SHORTS -> ShelfLook(Color(0xFF1C3F94), Color(0xFFB4233A), Color(0xFFFFD45C))
+    DisneyShelf.CLASSICS -> ShelfLook(Color(0xFF0E1440), Color(0xFF3B2A7A), Color(0xFFF2C66D))
+    DisneyShelf.PIXAR -> ShelfLook(Color(0xFF0B5C78), Color(0xFF39B5D9), Color(0xFFFFE08A))
+}
+
+/**
+ * Tv: överst i Filmer och Serier en enda rad — kategorin, var man är i den
+ * ("8 / 551"), sorteringen som ett val man trycker sig igenom, och sök.
+ */
+@Composable
+private fun TvLibraryBar(
+    title: String,
+    position: String,
+    sort: SortOrder,
+    series: Boolean,
+    onSort: (SortOrder) -> Unit,
+    query: String,
+    onQuery: (String) -> Unit,
+    placeholder: String,
+) {
+    val palette = LocalPalette.current
+    Row(
+        Modifier.fillMaxWidth().padding(start = 46.dp, end = 40.dp, top = 22.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            title.uppercase(),
+            style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 1.6.sp),
+            color = palette.textSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        Text(position, style = MaterialTheme.typography.labelLarge, color = palette.textTertiary, maxLines = 1)
         Spacer(Modifier.weight(1f))
-        SecondaryButton("Visa alla", onClick = onClick)
+        val label = if (series && sort == SortOrder.ADDED) "Senast uppdaterade" else sort.label
+        Chip("Sortera: $label", selected = false, onClick = {
+            val all = SortOrder.entries
+            onSort(all[(all.indexOf(sort) + 1) % all.size])
+        })
+        SearchField(query, onQuery, placeholder, Modifier.width(260.dp))
     }
 }
 

@@ -13,6 +13,8 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
@@ -44,15 +46,31 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalFocusManager
+import kotlinx.coroutines.launch
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Color
@@ -86,13 +104,55 @@ internal object MiniDock {
 
 private val SIDEBAR_WIDTH = 236.dp
 
+/** Vad som syns till vänster om innehållet på tv:n. */
+internal enum class TvDrawer { NONE, CATEGORIES, MENU }
+
 /**
- * Markeringen står i menyn. Kategorikanten på tv:n går då inte att landa i,
- * så att pil höger från menyn går rakt till innehållet.
+ * Tv: menyn och kategorierna syns bara när man är i dem. I innehållet tar
+ * omslagen och kanalerna hela bredden; pil vänster vid kanten tar fram
+ * kategorierna, och en gång till menyn. Pil höger eller OK går samma väg
+ * tillbaka: menyn → kategorierna → innehållet, ett steg i taget.
  */
-internal val LocalMenuFocused = compositionLocalOf { false }
-/** Tv: menyn infälld till bara ikonerna, medan markeringen är i innehållet. */
-private val RAIL_WIDTH = 74.dp
+internal object TvNav {
+    var drawer by mutableStateOf(TvDrawer.NONE)
+    /** Hur många kategorilistor som står på skärmen just nu (en per skärm). */
+    var categories by mutableIntStateOf(0)
+    /** Ökas när kategorierna ska ta emot markeringen. */
+    var categoryCalls by mutableIntStateOf(0)
+        private set
+    /** Ökas när menyn ska ta emot markeringen. */
+    var menuCalls by mutableIntStateOf(0)
+        private set
+
+    fun openCategories() {
+        drawer = TvDrawer.CATEGORIES
+        categoryCalls++
+    }
+
+    fun openMenu() {
+        drawer = TvDrawer.MENU
+        menuCalls++
+    }
+
+    /** Medan kategorierna syns: tillbaka till innehållet, som pil höger. Tillbaka-knappen på Shield. */
+    var leaveCategories: (() -> Unit)? = null
+
+    /** Pil vänster vid innehållets kant: kategorierna om skärmen har några, annars menyn. */
+    fun openLeft() {
+        if (categories > 0) openCategories() else openMenu()
+    }
+}
+
+/**
+ * Tv: minispelaren står i sidomenyn, som då syns hela tiden. Kategorierna
+ * står då som en smal kant bredvid, i stället för att gömmas helt.
+ */
+internal val LocalTvDocked = compositionLocalOf { false }
+
+/** Tv: skuggan som tonar innehållet bakom menyn och kategorierna. */
+internal val DRAWER_SCRIM = 260.dp
+internal const val DRAWER_MS = 220
+
 /** Luft över och under menyn, inne i det som rullar. */
 private val NAV_AIR = 14.dp
 private const val DOCK_MS = 420
@@ -119,24 +179,38 @@ fun AppRoot(state: AppState) {
     val docked by remember(state, collapse) {
         derivedStateOf { state.nowPlaying != null && (state.miniPlayer || collapse.value > 0f) }
     }
-    var menuFocused by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    // Tv utan minispelare: menyn och kategorierna göms medan man är i innehållet.
+    val drawers = tvLayout && !docked
     Box(Modifier.fillMaxSize().background(palette.background)) {
         // Temats dekor rör sig bara när spelaren inte täcker allt.
         val decorated = state.nowPlaying == null || state.miniPlayer
         CustomBackdrop(state.backgrounds, running = decorated, modifier = Modifier.fillMaxSize())
         ThemeBackdrop(palette.decoration, running = decorated, modifier = Modifier.fillMaxSize())
         Row(Modifier.fillMaxSize()) {
-            if (tvLayout && !docked) {
-                // Tv: menyn tar bara ikonernas bredd. Utfälld lägger den sig över
-                // innehållet, så att omslagen inte flyttar sig.
-                Box(Modifier.width(RAIL_WIDTH).fillMaxHeight().zIndex(2f)) {
-                    Sidebar(state, docked = false, rail = true, onFocus = { menuFocused = it })
-                }
-            } else {
-                Sidebar(state, docked, rail = false, onFocus = { menuFocused = it })
-            }
-            Box(Modifier.weight(1f).fillMaxHeight()) {
-                CompositionLocalProvider(LocalMenuFocused provides menuFocused) {
+            if (!drawers) Sidebar(state, docked, tv = false)
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .then(
+                        if (drawers) {
+                            // Pil vänster: går det inte längre åt vänster i innehållet
+                            // kommer kategorierna fram (eller menyn, om skärmen inte har några).
+                            Modifier.onKeyEvent { event ->
+                                if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft) {
+                                    if (!focusManager.moveFocus(FocusDirection.Left)) TvNav.openLeft()
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                        } else {
+                            Modifier
+                        },
+                    ),
+            ) {
+                CompositionLocalProvider(LocalTvDocked provides (tvLayout && docked)) {
                     if (state.loading) {
                         Spinner(Modifier.align(Alignment.Center))
                     } else {
@@ -152,6 +226,25 @@ fun AppRoot(state: AppState) {
                             Screen.SETTINGS -> SettingsScreen(state)
                         }
                     }
+                }
+            }
+        }
+        // Tv: menyn glider in över innehållet när man går dit, och ut igen när man lämnar den.
+        if (drawers) {
+            AnimatedVisibility(
+                visible = TvNav.drawer == TvDrawer.MENU,
+                enter = slideInHorizontally(tween(DRAWER_MS, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(DRAWER_MS)),
+                exit = slideOutHorizontally(tween(DRAWER_MS, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(DRAWER_MS / 2)),
+                modifier = Modifier.fillMaxHeight(),
+            ) {
+                Row(Modifier.fillMaxHeight()) {
+                    Sidebar(state, docked = false, tv = true)
+                    Box(
+                        Modifier
+                            .width(DRAWER_SCRIM)
+                            .fillMaxHeight()
+                            .background(Brush.horizontalGradient(listOf(Color.Black.copy(alpha = 0.55f), Color.Transparent))),
+                    )
                 }
             }
         }
@@ -171,47 +264,75 @@ fun AppRoot(state: AppState) {
 }
 
 /**
- * Sidomenyn. På tv:n ([rail]) är den infälld till ikonerna och fälls ut när
- * markeringen kommer in i den, och in igen när den går tillbaka till innehållet.
+ * Sidomenyn. På tv:n ([tv]) glider den in över innehållet när man går dit
+ * med pil vänster, med markeringen på fliken man är i, och ut igen när man
+ * lämnar den. OK eller pil höger byter flik och går vidare in.
  */
 @Composable
-private fun Sidebar(state: AppState, docked: Boolean, rail: Boolean, onFocus: (Boolean) -> Unit = {}) {
+private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
     val palette = LocalPalette.current
     val library = state.library
     var focused by remember { mutableStateOf(false) }
-    // Försvinner menyn medan den har markeringen (minispelaren tar plats) räknas den som lämnad.
-    DisposableEffect(Unit) { onDispose { onFocus(false) } }
-    val folded = rail && !focused
-    // Texten tonar ut när menyn fälls in, och in när den fälls ut.
-    val labelAlpha = animateFloatAsState(if (folded) 0f else 1f, tween(if (folded) 120 else 260), label = "menytext")
-    val labels = remember(labelAlpha) { { labelAlpha.value } }
+    // Den valda fliken tar emot markeringen när menyn kommer fram.
+    val current = remember { FocusRequester() }
+    if (tv) {
+        LaunchedEffect(TvNav.menuCalls) {
+            repeat(2) { withFrameNanos { } }
+            runCatching { current.requestFocus() }
+        }
+    }
+    val focusManager = LocalFocusManager.current
+    val scope = rememberCoroutineScope()
+    // Byter flik. På tv:n går markeringen sedan vidare in: till kategorierna
+    // om skärmen har några, annars till innehållet.
+    fun go(screen: Screen) {
+        state.screen = screen
+        if (!tv) return
+        scope.launch {
+            // Vänta in den nya skärmen, så att dess kategorier hunnit visas.
+            repeat(3) { withFrameNanos { } }
+            if (TvNav.categories > 0) {
+                TvNav.openCategories()
+            } else if (focused) {
+                focusManager.moveFocus(FocusDirection.Right)
+            }
+        }
+    }
+    // Den valda fliken tar emot markeringen; pil höger väljer fliken man står på.
+    fun navModifier(screen: Screen): Modifier {
+        var modifier: Modifier = Modifier
+        if (state.screen == screen) modifier = modifier.focusRequester(current)
+        if (tv) {
+            modifier = modifier.onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight) {
+                    go(screen)
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+        return modifier
+    }
     // Medan bilden täcker allt byter fältet bredd direkt. Stängs spelaren
     // medan den står i fältet glider fältet tillbaka till sin vanliga bredd.
-    val widthSpec: AnimationSpec<Dp> = when {
-        rail -> tween(240, easing = FastOutSlowInEasing)
-        state.nowPlaying == null -> tween(320, easing = FastOutSlowInEasing)
-        else -> snap()
-    }
+    val widthSpec: AnimationSpec<Dp> = if (state.nowPlaying == null) tween(320, easing = FastOutSlowInEasing) else snap()
     val width by animateDpAsState(
-        targetValue = when {
-            docked -> MiniDock.sidebarWidth
-            folded -> RAIL_WIDTH
-            else -> SIDEBAR_WIDTH
-        },
+        targetValue = if (docked) MiniDock.sidebarWidth else SIDEBAR_WIDTH,
         animationSpec = widthSpec,
         label = "sidofält",
     )
     Column(
         Modifier
-            .then(if (rail) Modifier.wrapContentWidth(Alignment.Start, unbounded = true) else Modifier)
             .width(width)
             .fillMaxHeight()
-            // Utfälld över innehållet: täckande, med en skugga mot det som ligger under.
-            .then(if (rail && !folded) Modifier.shadow(24.dp).background(palette.background) else Modifier)
+            // Tv: täckande över innehållet, med en skugga mot det som ligger under.
+            .then(if (tv) Modifier.shadow(24.dp).background(palette.background) else Modifier)
             .background(palette.ambient)
             .onFocusChanged {
+                // Markeringen gick vidare: menyn glider undan.
+                if (tv && focused && !it.hasFocus && TvNav.drawer == TvDrawer.MENU) TvNav.drawer = TvDrawer.NONE
                 focused = it.hasFocus
-                onFocus(it.hasFocus)
             }
             .focusGroup()
             .padding(start = MiniDock.inset, end = MiniDock.inset, top = MiniDock.top, bottom = 22.dp),
@@ -223,7 +344,7 @@ private fun Sidebar(state: AppState, docked: Boolean, rail: Boolean, onFocus: (B
             ) {
                 Image(rememberVectorPainter(Glyphs.AppMark), contentDescription = null, modifier = Modifier.size(36.dp).glow(palette.glowOf(0.55f), RoundedCornerShape(9.dp), 22.dp))
                 Spacer(Modifier.width(12.dp))
-                Column(Modifier.graphicsLayer { alpha = labels() }) {
+                Column {
                     Text("Tv", style = MaterialTheme.typography.titleLarge, maxLines = 1, softWrap = false)
                     Text(
                         "för $platformName",
@@ -255,45 +376,45 @@ private fun Sidebar(state: AppState, docked: Boolean, rail: Boolean, onFocus: (B
                 .padding(vertical = NAV_AIR),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            NavItem(Glyphs.Home, "Hem", "Fortsätt titta & tips", null, state.screen == Screen.HOME, docked, labels = labels) {
-                state.screen = Screen.HOME
+            NavItem(Glyphs.Home, "Hem", "Fortsätt titta & tips", null, state.screen == Screen.HOME, docked, modifier = navModifier(Screen.HOME)) {
+                go(Screen.HOME)
             }
-            NavItem(Glyphs.Live, "Live TV", "Direktsändning", library.channels.size, state.screen == Screen.LIVE, docked, labels = labels) {
-                state.screen = Screen.LIVE
+            NavItem(Glyphs.Live, "Live TV", "Direktsändning", library.channels.size, state.screen == Screen.LIVE, docked, modifier = navModifier(Screen.LIVE)) {
+                go(Screen.LIVE)
             }
-            NavItem(Glyphs.Guide, "Tablå", "Vad som sänds", state.guide.channelCount, state.screen == Screen.GUIDE, docked, labels = labels) {
-                state.screen = Screen.GUIDE
+            NavItem(Glyphs.Guide, "Tablå", "Vad som sänds", state.guide.channelCount, state.screen == Screen.GUIDE, docked, modifier = navModifier(Screen.GUIDE)) {
+                go(Screen.GUIDE)
             }
             // Antalet matcher som pågår just nu.
             val liveMatches = state.footballMatches.count { it.state == MatchState.LIVE }
-            NavItem(Glyphs.Football, "Fotboll", "Matcher & tabeller", liveMatches.takeIf { it > 0 }, state.screen == Screen.FOOTBALL, docked, live = true, labels = labels) {
-                state.screen = Screen.FOOTBALL
+            NavItem(Glyphs.Football, "Fotboll", "Matcher & tabeller", liveMatches.takeIf { it > 0 }, state.screen == Screen.FOOTBALL, docked, live = true, modifier = navModifier(Screen.FOOTBALL)) {
+                go(Screen.FOOTBALL)
             }
             // Varje film och serie en gång, hur många versioner den än finns i.
             val versions = state.versions
             val movieCount = if (versions.isEmpty) library.movies.size else versions.movieCount
             val seriesCount = if (versions.isEmpty) library.series.size else versions.seriesCount
-            NavItem(Glyphs.Movies, "Filmer", "Filmbiblioteket", movieCount, state.screen == Screen.MOVIES, docked, labels = labels) {
-                state.screen = Screen.MOVIES
+            NavItem(Glyphs.Movies, "Filmer", "Filmbiblioteket", movieCount, state.screen == Screen.MOVIES, docked, modifier = navModifier(Screen.MOVIES)) {
+                go(Screen.MOVIES)
             }
-            NavItem(Glyphs.Series, "Serier", "Säsonger & avsnitt", seriesCount, state.screen == Screen.SERIES, docked, labels = labels) {
-                state.screen = Screen.SERIES
+            NavItem(Glyphs.Series, "Serier", "Säsonger & avsnitt", seriesCount, state.screen == Screen.SERIES, docked, modifier = navModifier(Screen.SERIES)) {
+                go(Screen.SERIES)
             }
-            NavItem(Glyphs.Genres, "Genrer", "Topplistor efter betyg", null, state.screen == Screen.GENRES, docked, labels = labels) {
-                state.screen = Screen.GENRES
+            NavItem(Glyphs.Genres, "Genrer", "Topplistor efter betyg", null, state.screen == Screen.GENRES, docked, modifier = navModifier(Screen.GENRES)) {
+                go(Screen.GENRES)
             }
-            NavItem(Glyphs.History, "Historik", "Fortsätt där du slutade", null, state.screen == Screen.HISTORY, docked, labels = labels) {
-                state.screen = Screen.HISTORY
+            NavItem(Glyphs.History, "Historik", "Fortsätt där du slutade", null, state.screen == Screen.HISTORY, docked, modifier = navModifier(Screen.HISTORY)) {
+                go(Screen.HISTORY)
             }
         }
 
         if (state.importingId != null) {
-            if (folded) Spinner(Modifier.padding(start = 12.dp), size = 20.dp) else ImportIndicator(state.importState)
+            ImportIndicator(state.importState)
             Spacer(Modifier.height(8.dp))
         }
 
-        NavItem(Glyphs.Settings, "Inställningar", "Källor & uppspelning", null, state.screen == Screen.SETTINGS, docked, labels = labels) {
-            state.screen = Screen.SETTINGS
+        NavItem(Glyphs.Settings, "Inställningar", "Källor & uppspelning", null, state.screen == Screen.SETTINGS, docked, modifier = navModifier(Screen.SETTINGS)) {
+            go(Screen.SETTINGS)
         }
     }
 }
@@ -311,11 +432,12 @@ private fun NavItem(
     live: Boolean = false,
     /** Hur synlig texten är: 0 när tv-menyn är infälld till ikonerna. Läses när det ritas. */
     labels: () -> Float = { 1f },
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val palette = LocalPalette.current
     val counted = count != null && count > 0
-    Pressable(onClick = onClick, selected = selected, modifier = Modifier.fillMaxWidth()) {
+    Pressable(onClick = onClick, selected = selected, modifier = modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,

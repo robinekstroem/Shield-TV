@@ -1,14 +1,22 @@
 package se.norrsken.tv.desktop.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -31,7 +39,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -47,10 +57,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldColors
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -58,10 +73,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
@@ -69,6 +91,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -77,6 +100,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 
 /** Leverantörer anger trailern som YouTube-id eller som hel adress. */
@@ -147,7 +172,7 @@ fun Pressable(
             .then(if (glowStrength > 0.01f) Modifier.glow(palette.glowOf(glowStrength), shape) else Modifier)
             .clip(shape)
             .background(background)
-            .then(if (focused) Modifier.border(2.dp, palette.focus, shape) else Modifier)
+            .then(if (focused) Modifier.focusRing(palette, 2.dp, shape) else Modifier)
             .hoverable(interaction, enabled)
             .clickable(interactionSource = interaction, indication = null, enabled = enabled, onClick = onClick)
             .then(if (enabled) Modifier.pointerHoverIcon(PointerIcon.Hand) else Modifier),
@@ -403,7 +428,7 @@ fun ScreenHeader(
 ) {
     val palette = LocalPalette.current
     Row(
-        Modifier.fillMaxWidth().padding(start = 28.dp, end = 28.dp, top = 24.dp, bottom = 16.dp),
+        Modifier.fillMaxWidth().padding(start = if (tvLayout) 46.dp else 28.dp, end = if (tvLayout) 40.dp else 28.dp, top = 24.dp, bottom = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(20.dp),
     ) {
@@ -429,9 +454,11 @@ fun GroupColumn(
     onSelect: (String?) -> Unit,
     title: String = "KATEGORIER",
     pinned: List<PinnedGroup> = emptyList(),
+    /** Tv: pil höger eller OK i listan går hit — till det man senast stod på i innehållet. */
+    onEnterContent: (() -> Unit)? = null,
 ) {
     if (tvLayout) {
-        TvGroupPanel(allLabel, total, groups, counts, selected, onSelect, title, pinned)
+        TvGroupPanel(allLabel, total, groups, counts, selected, onSelect, title, pinned, onEnterContent)
         return
     }
     val palette = LocalPalette.current
@@ -487,11 +514,26 @@ private fun GroupRow(name: String, count: Int, selected: Boolean, indent: Boolea
     }
 }
 
+/** En rad i tv-listan: "Alla", en egen kategori eller en vanlig. */
+private class GroupEntry(val key: String?, val name: String, val count: Int, val indent: Boolean) {
+    val id: String get() = key ?: ALL_ID
+}
+
+/** Raden markeringen står på, i väntan på att den ska väljas. */
+private class GroupPick(val key: String?)
+
+private const val ALL_ID = "\u0000alla"
+
 /**
- * Tv: kategorierna som en smal kant till vänster om innehållet. Pil vänster
- * från omslagen fäller ut listan över innehållet, med markeringen på den
- * valda kategorin; pil höger tillbaka fäller in den. Ett steg till vänster
- * till går till menyn.
+ * Tv: kategorierna. De syns bara när man är i dem: pil vänster vid
+ * innehållets kant låter dem glida in över innehållet, och de glider ut
+ * igen när man går vidare. Står minispelaren i menyn är de i stället en
+ * smal kant som fälls ut när man går dit.
+ *
+ * - In i listan hamnar markeringen alltid på den valda kategorin.
+ * - Kategorin byts medan man bläddrar, när markeringen stannat en kort stund,
+ *   så att innehållet bredvid visar den direkt.
+ * - Pil höger eller OK går in i innehållet ([onEnterContent]); pil vänster till menyn.
  */
 @Composable
 private fun TvGroupPanel(
@@ -503,96 +545,225 @@ private fun TvGroupPanel(
     onSelect: (String?) -> Unit,
     title: String,
     pinned: List<PinnedGroup>,
+    onEnterContent: (() -> Unit)?,
+) {
+    val palette = LocalPalette.current
+    // Menyn räknar med kategorierna när man väljer en flik: finns de, går markeringen hit.
+    DisposableEffect(Unit) {
+        TvNav.categories++
+        onDispose {
+            TvNav.categories--
+            if (TvNav.categories <= 0 && TvNav.drawer == TvDrawer.CATEGORIES) TvNav.drawer = TvDrawer.NONE
+        }
+    }
+    if (LocalTvDocked.current) {
+        var open by remember { mutableStateOf(false) }
+        val width by animateDpAsState(
+            targetValue = if (open) TV_GROUPS_OPEN else TV_GROUPS_CLOSED,
+            animationSpec = tween(240, easing = FastOutSlowInEasing),
+            label = "kategorier",
+        )
+        val textAlpha = animateFloatAsState(if (open) 1f else 0f, tween(if (open) 260 else 120), label = "kategoritext")
+        val shown = remember(textAlpha) { { textAlpha.value } }
+        // Platsen i raden är kantens bredd; utfälld lägger sig listan över innehållet.
+        Box(Modifier.width(TV_GROUPS_CLOSED).fillMaxHeight().zIndex(1f)) {
+            TvGroupList(
+                allLabel, total, groups, counts, selected, onSelect, title, pinned,
+                shown = shown,
+                takeFocus = false,
+                onLeft = null,
+                onEnterContent = onEnterContent,
+                onFocus = { open = it },
+                modifier = Modifier
+                    .wrapContentWidth(Alignment.Start, unbounded = true)
+                    .width(width)
+                    .fillMaxHeight()
+                    .shadow(if (open) 24.dp else 0.dp)
+                    .background(if (open) palette.background else Color.Transparent)
+                    .background(palette.surface),
+            )
+            if (!open) {
+                Icon(
+                    Glyphs.ChevronDown,
+                    contentDescription = null,
+                    tint = palette.textTertiary,
+                    modifier = Modifier.align(Alignment.Center).rotate(-90f).size(20.dp),
+                )
+            }
+        }
+        return
+    }
+    // Ingen plats i raden: listan glider in över innehållet, med skugga mot det.
+    Box(Modifier.width(0.dp).fillMaxHeight().zIndex(3f)) {
+        AnimatedVisibility(
+            visible = TvNav.drawer == TvDrawer.CATEGORIES,
+            enter = slideInHorizontally(tween(DRAWER_MS, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(DRAWER_MS)),
+            exit = slideOutHorizontally(tween(DRAWER_MS, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(DRAWER_MS / 2)),
+            modifier = Modifier.wrapContentWidth(Alignment.Start, unbounded = true).fillMaxHeight(),
+        ) {
+            Row(Modifier.fillMaxHeight()) {
+                TvGroupList(
+                    allLabel, total, groups, counts, selected, onSelect, title, pinned,
+                    shown = { 1f },
+                    takeFocus = true,
+                    onLeft = { TvNav.openMenu() },
+                    onEnterContent = onEnterContent,
+                    // Markeringen gick vidare till innehållet: listan glider undan.
+                    onFocus = { has -> if (!has && TvNav.drawer == TvDrawer.CATEGORIES) TvNav.drawer = TvDrawer.NONE },
+                    modifier = Modifier
+                        .width(TV_GROUPS_OPEN)
+                        .fillMaxHeight()
+                        .shadow(24.dp)
+                        .background(palette.background)
+                        .background(palette.surface),
+                )
+                Box(
+                    Modifier
+                        .width(DRAWER_SCRIM)
+                        .fillMaxHeight()
+                        .background(Brush.horizontalGradient(listOf(Color.Black.copy(alpha = 0.55f), Color.Transparent))),
+                )
+            }
+        }
+    }
+}
+
+/** Själva listan: rubriken och raderna, med markeringens regler (se [TvGroupPanel]). */
+@Composable
+private fun TvGroupList(
+    allLabel: String,
+    total: Int,
+    groups: List<String>,
+    counts: Map<String, Int>,
+    selected: String?,
+    onSelect: (String?) -> Unit,
+    title: String,
+    pinned: List<PinnedGroup>,
+    shown: () -> Float,
+    /** Tar emot markeringen när listan visas och när menyn lämnar över den. */
+    takeFocus: Boolean,
+    onLeft: (() -> Unit)?,
+    onEnterContent: (() -> Unit)?,
+    onFocus: (Boolean) -> Unit,
+    modifier: Modifier,
 ) {
     val palette = LocalPalette.current
     val listState = rememberLazyListState()
     val selectedRow = remember { FocusRequester() }
-    var open by remember { mutableStateOf(false) }
-    // Från menyn går pil höger förbi kanten, rakt till innehållet.
-    val enterable = open || !LocalMenuFocused.current
-    val width by animateDpAsState(
-        targetValue = if (open) TV_GROUPS_OPEN else TV_GROUPS_CLOSED,
-        animationSpec = tween(240, easing = FastOutSlowInEasing),
-        label = "kategorier",
-    )
-    val textAlpha = animateFloatAsState(if (open) 1f else 0f, tween(if (open) 260 else 120), label = "kategoritext")
-    val shown = remember(textAlpha) { { textAlpha.value } }
-    // "Alla" står först, sedan de egna (Disney), sedan kategorierna.
-    val pinnedIndex = pinned.indexOfFirst { it.key == selected }
-    val selectedIndex = when {
-        selected == null -> 0
-        pinnedIndex >= 0 -> 1 + pinnedIndex
-        else -> (1 + pinned.size + (if (pinned.isNotEmpty()) 1 else 0) + groups.indexOf(selected)).coerceAtLeast(0)
-    }
-    LaunchedEffect(open) {
-        if (!open) return@LaunchedEffect
-        // Markeringen hoppar till den valda kategorin, inte till raden man råkade komma in vid.
-        if (listState.layoutInfo.visibleItemsInfo.none { it.index == selectedIndex }) {
-            listState.scrollToItem((selectedIndex - 3).coerceAtLeast(0))
+    val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
+    var focused by remember { mutableStateOf(false) }
+    val entries = remember(allLabel, total, groups, counts, pinned) {
+        buildList {
+            add(GroupEntry(null, allLabel, total, indent = false))
+            pinned.forEach { add(GroupEntry(it.key, it.title, it.count, it.indent)) }
+            groups.forEach { add(GroupEntry(it, it, counts[it] ?: 0, indent = false)) }
         }
-        withFrameNanos { }
-        runCatching { selectedRow.requestFocus() }
     }
-    // Platsen i raden är kantens bredd; utfälld lägger sig listan över innehållet.
-    Box(Modifier.width(TV_GROUPS_CLOSED).fillMaxHeight().zIndex(1f)) {
-        Column(
-            Modifier
-                .wrapContentWidth(Alignment.Start, unbounded = true)
-                .width(width)
-                .fillMaxHeight()
-                .shadow(if (open) 24.dp else 0.dp)
-                .background(if (open) palette.background else Color.Transparent)
-                .background(palette.surface)
-                .onFocusChanged { open = it.hasFocus }
-                .focusGroup(),
-        ) {
-            Text(
-                title,
-                style = MaterialTheme.typography.labelSmall,
-                color = palette.textTertiary,
-                maxLines = 1,
-                softWrap = false,
-                modifier = Modifier.padding(start = 22.dp, top = 28.dp, bottom = 10.dp).graphicsLayer { alpha = shown() },
-            )
+    val selectedIndex = entries.indexOfFirst { it.key == selected }.coerceAtLeast(0)
+    val currentSelected by rememberUpdatedState(selected)
+    val currentIndex by rememberUpdatedState(selectedIndex)
+    val select by rememberUpdatedState(onSelect)
+    val enter by rememberUpdatedState(onEnterContent)
+    var pending by remember { mutableStateOf<GroupPick?>(null) }
+    var focusedIndex by remember { mutableIntStateOf(-1) }
+
+    // Kategorin markeringen stannat på blir vald, så att innehållet bredvid följer med.
+    LaunchedEffect(pending) {
+        val pick = pending ?: return@LaunchedEffect
+        delay(GROUP_PICK_MS)
+        if (pick.key != currentSelected) select(pick.key)
+    }
+    // In i innehållet. Kategorin man stod på gäller direkt, utan att vänta ut pausen.
+    fun goRight(): Boolean {
+        pending?.let { pick -> if (pick.key != currentSelected) select(pick.key) }
+        pending = null
+        val target = enter ?: return false
+        target()
+        return true
+    }
+    if (takeFocus) {
+        LaunchedEffect(TvNav.categoryCalls) { focusRow(listState, currentIndex, selectedRow) }
+        // Tillbaka-knappen gör samma sak som pil höger medan listan syns.
+        DisposableEffect(Unit) {
+            TvNav.leaveCategories = { if (!goRight()) focusManager.moveFocus(FocusDirection.Right) }
+            onDispose { TvNav.leaveCategories = null }
+        }
+    }
+
+    Column(
+        modifier
+            .onFocusChanged {
+                if (it.hasFocus != focused) {
+                    // In i listan: till den valda kategorin, inte raden man råkade komma in vid.
+                    if (it.hasFocus) scope.launch { focusRow(listState, currentIndex, selectedRow) }
+                    focused = it.hasFocus
+                    onFocus(it.hasFocus)
+                }
+            }
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when (event.key) {
+                    Key.DirectionRight -> goRight()
+                    Key.DirectionLeft -> {
+                        val left = onLeft ?: return@onPreviewKeyEvent false
+                        left()
+                        true
+                    }
+                    // Listan tar slut: markeringen stannar i stället för att hoppa ut i innehållet.
+                    Key.DirectionUp -> focusedIndex == 0
+                    Key.DirectionDown -> focusedIndex == entries.lastIndex
+                    else -> false
+                }
+            }
+            .focusGroup(),
+    ) {
+        Text(
+            title,
+            style = MaterialTheme.typography.labelSmall,
+            color = palette.textTertiary,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.padding(start = 22.dp, top = 28.dp, bottom = 10.dp).graphicsLayer { alpha = shown() },
+        )
+        TvScrolling(lead = 0.2f, trail = 0.2f) {
             LazyColumn(
                 state = listState,
                 contentPadding = PaddingValues(start = 6.dp, end = 6.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                item {
-                    TvGroupRow(allLabel, total, selected == null, shown, enterable, if (selectedIndex == 0) selectedRow else null) {
-                        onSelect(null)
-                    }
-                }
-                items(pinned, key = { it.key }) { group ->
+                itemsIndexed(entries, key = { _, entry -> entry.id }) { index, entry ->
                     TvGroupRow(
-                        group.title,
-                        group.count,
-                        selected == group.key,
-                        shown,
-                        enterable,
-                        if (group.key == selected) selectedRow else null,
-                        indent = group.indent,
-                    ) { onSelect(group.key) }
-                }
-                if (pinned.isNotEmpty()) item { Spacer(Modifier.height(10.dp)) }
-                items(groups, key = { it }) { group ->
-                    TvGroupRow(group, counts[group] ?: 0, selected == group, shown, enterable, if (group == selected) selectedRow else null) {
-                        onSelect(group)
-                    }
+                        name = entry.name,
+                        count = entry.count,
+                        selected = index == selectedIndex,
+                        shown = shown,
+                        focus = if (index == selectedIndex) selectedRow else null,
+                        indent = entry.indent,
+                        gapAbove = pinned.isNotEmpty() && index == pinned.size + 1,
+                        onFocused = {
+                            focusedIndex = index
+                            pending = GroupPick(entry.key)
+                        },
+                        onClick = {
+                            pending = null
+                            if (entry.key != currentSelected) select(entry.key)
+                            if (!goRight()) focusManager.moveFocus(FocusDirection.Right)
+                        },
+                    )
                 }
             }
         }
-        // Infälld: en pil som visar att kategorierna finns här.
-        if (!open) {
-            Icon(
-                Glyphs.ChevronDown,
-                contentDescription = null,
-                tint = palette.textTertiary,
-                modifier = Modifier.align(Alignment.Center).rotate(-90f).size(20.dp),
-            )
-        }
     }
+}
+
+/** Markeringen till raden [index]: rullar fram den först om den inte syns. */
+private suspend fun focusRow(listState: LazyListState, index: Int, requester: FocusRequester) {
+    if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
+        listState.scrollToItem((index - 3).coerceAtLeast(0))
+    }
+    repeat(2) { withFrameNanos { } }
+    runCatching { requester.requestFocus() }
 }
 
 /** En kategori i tv-listan. Texten syns bara utfälld; den valda raden syns som en ljus fläck i kanten. */
@@ -602,9 +773,10 @@ private fun TvGroupRow(
     count: Int,
     selected: Boolean,
     shown: () -> Float,
-    enterable: Boolean,
     focus: FocusRequester?,
-    indent: Boolean = false,
+    indent: Boolean,
+    gapAbove: Boolean,
+    onFocused: () -> Unit,
     onClick: () -> Unit,
 ) {
     val palette = LocalPalette.current
@@ -612,9 +784,10 @@ private fun TvGroupRow(
         onClick = onClick,
         selected = selected,
         modifier = Modifier
+            .padding(top = if (gapAbove) 10.dp else 0.dp)
             .fillMaxWidth()
-            .focusProperties { canFocus = enterable }
-            .then(if (focus != null) Modifier.focusRequester(focus) else Modifier),
+            .then(if (focus != null) Modifier.focusRequester(focus) else Modifier)
+            .onFocusChanged { if (it.isFocused) onFocused() },
     ) {
         Row(
             Modifier
@@ -645,6 +818,67 @@ private fun TvGroupRow(
 
 private val TV_GROUPS_CLOSED = 36.dp
 private val TV_GROUPS_OPEN = 340.dp
+/** Så länge markeringen ska stå still på en kategori innan den väljs. */
+private const val GROUP_PICK_MS = 300L
+
+/**
+ * Tv: var markeringen landar när man går in i en lista eller ett rutnät från
+ * kategorierna — det man senast stod på om det fortfarande syns, annars det
+ * första som syns. Raden eller omslaget märks med [mark].
+ */
+@Stable
+internal class TvEntry {
+    val requester = FocusRequester()
+    var target by mutableStateOf<Any?>(null)
+        private set
+    /** Det som senast var markerat i innehållet. */
+    var last: Any? = null
+
+    fun mark(key: Any): Modifier = if (key == target) Modifier.focusRequester(requester) else Modifier
+
+    /** [visible]: nycklarna som syns just nu, i ordning. */
+    suspend fun enter(visible: () -> List<Any>) {
+        // Byttes kategorin nyss: vänta in den nya listan.
+        repeat(2) { withFrameNanos { } }
+        val keys = visible()
+        val chosen = last?.takeIf { it in keys } ?: keys.firstOrNull() ?: return
+        target = chosen
+        repeat(2) { withFrameNanos { } }
+        runCatching { requester.requestFocus() }
+    }
+}
+
+/**
+ * Tv: hur listor rullar när markeringen flyttas. Det markerade hålls innanför
+ * [lead] från början och [trail] från slutet, i andelar av höjden, så att man
+ * alltid ser vad som kommer. [snap]: hamnar det utanför läggs det vid [lead]
+ * — rutnät rullar då en hel rad i taget, och raden man står på hamnar överst.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun TvScrolling(lead: Float, trail: Float, snap: Boolean = false, content: @Composable () -> Unit) {
+    if (!tvLayout) {
+        content()
+        return
+    }
+    val spec = remember(lead, trail, snap) {
+        object : BringIntoViewSpec {
+            override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+                val top = containerSize * lead
+                val bottom = containerSize * (1f - trail)
+                return when {
+                    // Större än utrymmet: början överst.
+                    size > bottom - top -> offset - top
+                    offset >= top && offset + size <= bottom -> 0f
+                    snap -> offset - top
+                    offset < top -> offset - top
+                    else -> offset + size - bottom
+                }
+            }
+        }
+    }
+    CompositionLocalProvider(LocalBringIntoViewSpec provides spec, content = content)
+}
 
 /** Liten etikett: LIVE-märket, betyg. */
 @Composable

@@ -691,6 +691,8 @@ private fun WideCard(
         glowing = false,
     ) { hovered ->
         LaunchedEffect(hovered) { if (hovered) onActive() }
+        val shine = rememberCardShine(hovered)
+        val ring = if (tvLayout) 3.dp else 1.dp
         Box(
             Modifier
                 .fillMaxWidth()
@@ -698,7 +700,8 @@ private fun WideCard(
                 .glow(if (hovered) palette.glowOf(if (tvLayout) 1f else 0.75f) else Color.Transparent, shape, if (tvLayout) 34.dp else 26.dp)
                 .clip(shape)
                 .background(palette.surfaceRaised)
-                .then(if (hovered) Modifier.border(if (tvLayout) 3.dp else 1.dp, palette.focus.copy(alpha = if (tvLayout) 1f else 0.6f), shape) else Modifier),
+                .then(if (hovered && shine == null) Modifier.focusRing(palette, ring, shape, if (tvLayout) 1f else 0.6f) else Modifier)
+                .then(if (hovered) Modifier.cardShine(shine, palette, ring, shape) else Modifier),
         ) {
             RemoteImage(url = image, modifier = Modifier.fillMaxSize(), maxSide = 640, contentScale = ContentScale.Crop)
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.35f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.88f))))
@@ -750,6 +753,8 @@ private fun ChannelCard(
         glowing = false,
     ) { hovered ->
         LaunchedEffect(hovered) { if (hovered) onActive() }
+        val shine = rememberCardShine(hovered)
+        val ring = if (tvLayout) 3.dp else 1.dp
         Column(Modifier.fillMaxWidth()) {
             Box(
                 Modifier
@@ -758,7 +763,8 @@ private fun ChannelCard(
                     .glow(if (hovered) palette.glowOf(if (tvLayout) 1f else 0.75f) else Color.Transparent, shape, if (tvLayout) 34.dp else 26.dp)
                     .clip(shape)
                     .background(palette.surfaceRaised)
-                    .then(if (hovered) Modifier.border(if (tvLayout) 3.dp else 1.dp, palette.focus.copy(alpha = if (tvLayout) 1f else 0.6f), shape) else Modifier),
+                    .then(if (hovered && shine == null) Modifier.focusRing(palette, ring, shape, if (tvLayout) 1f else 0.6f) else Modifier)
+                    .then(if (hovered) Modifier.cardShine(shine, palette, ring, shape) else Modifier),
                 contentAlignment = Alignment.Center,
             ) {
                 RemoteImage(

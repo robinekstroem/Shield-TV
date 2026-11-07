@@ -584,8 +584,101 @@ fun findBroadcasts(matches: List<FootballMatch>, channels: List<LiveChannel>, gu
             }
         }
     }
-    return found.mapValues { (_, list) -> list.sortedByDescending { it.first }.map { it.second }.distinctBy { it.name }.take(4) }
+    return found.mapValues { (_, list) -> rankBroadcasts(list) }
 }
+
+/**
+ * Kanalerna som visar en match, bäst först: svenska först (V Sport, Viaplay,
+ * TV4 och de andra svenska), sedan norska och danska, finska, engelska, de
+ * som inte säger något och sist andra språk. Inom samma land går säkrare
+ * träffar i tablån före, och reservkanaler ("[B]", "Backup"), tidsförskjutna
+ * ("+1", "-2H") och låg kvalitet hamnar sist. Samma kanal i flera versioner
+ * (HD, FHD, 4K, reserv, andra länder) visas en gång: den bästa.
+ */
+internal fun rankBroadcasts(found: List<Pair<Int, LiveChannel>>): List<LiveChannel> =
+    found
+        .sortedWith(
+            compareBy<Pair<Int, LiveChannel>>(
+                { broadcastRegion(it.second) },
+                { -it.first },
+                { broadcastPenalty(it.second.name) },
+                { qualityRank(it.second.name) },
+                { it.second.name.length },
+            ),
+        )
+        .map { it.second }
+        .distinctBy { channelBase(it.name) }
+        .take(4)
+
+/** 0 svensk, 1 trolig svensk (V Sport, Viaplay utan landskod), 2 norsk/dansk, 3 finsk, 4 engelsk, 5 okänd, 6 annat språk. */
+private fun broadcastRegion(channel: LiveChannel): Int {
+    // Namnets landskod går före kategorins: "NORDIC" kan rymma både SE och NO.
+    val byName = VersionTags.regionRank(channel.name)
+    val rank = byName ?: VersionTags.regionRank(channel.group)
+    if (rank != null) {
+        return when (rank) {
+            0 -> 0
+            1 -> 2
+            2 -> 3
+            3 -> 4
+            else -> 6
+        }
+    }
+    val name = " " + normalizeName(channel.name) + " "
+    return when {
+        SWEDISH_BRANDS.any { it in name } -> 0
+        NORDIC_BRANDS.any { it in name } -> 1
+        else -> 5
+    }
+}
+
+/** Kanaler som bara finns i Sverige. Med mellanslag runt, mot normaliserade namn. */
+private val SWEDISH_BRANDS = listOf(" tv4 ", " tv4 sport", " tv4 fotboll", " c more", " cmore", " svt", " sportkanalen", " kanal 5", " kanal5", " tv12 ")
+
+/** Kanaler i hela Norden, oftast den svenska när inget land står. */
+private val NORDIC_BRANDS = listOf(" v sport", " vsport", " viaplay", " eurosport", " max sport", " discovery")
+
+/** Reservkanaler och tidsförskjutna kanaler sist. */
+private fun broadcastPenalty(name: String): Int {
+    var penalty = 0
+    if (BACKUP.containsMatchIn(name)) penalty += 2
+    if (TIMESHIFT.containsMatchIn(name)) penalty += 3
+    return penalty
+}
+
+private val BACKUP = Regex("""(?i)(\[\s*b\s*\]|\(\s*b\s*\)|\bbackup\d*\b|\bbkp\b|\bbak\b|\balt\b)""")
+private val TIMESHIFT = Regex("""(?i)((^|[\s\[(|])[+-]\s?\d{1,2}\s?(h|hr|hrs|t)?($|[\s\])|])|\btimeshift\b)""")
+
+/** Full HD först, sedan 4K, sedan utan märkning, sist SD och låg kvalitet. */
+private fun qualityRank(name: String): Int {
+    val upper = name.uppercase()
+    return when {
+        LOW.containsMatchIn(upper) -> 3
+        FULL_HD.containsMatchIn(upper) -> 0
+        UHD.containsMatchIn(upper) -> 1
+        else -> 2
+    }
+}
+
+private val FULL_HD = Regex("""(FHD|\bHD\b|1080|ᴴᴰ|ᶠᴴᴰ|HEVC)""")
+private val UHD = Regex("""(\b4K\b|UHD|2160|ᵁᴴᴰ)""")
+private val LOW = Regex("""(\bSD\b|\bLQ\b|\bLOW\b|480|360)""")
+
+/** Kanalen utan land, kvalitet, reservmärkning och tidsförskjutning: "SE: V Sport Premium FHD [B]" → "v sport premium". */
+private fun channelBase(name: String): String {
+    var text = name
+    text = TIMESHIFT.replace(text, " ")
+    text = BACKUP.replace(text, " ")
+    val words = normalizeName(text).split(' ').filter { word ->
+        word.isNotEmpty() && word !in BASE_NOISE && VersionTags.regionRank(word.uppercase()) == null
+    }
+    return words.joinToString(" ").ifEmpty { normalizeName(name) }
+}
+
+private val BASE_NOISE = setOf(
+    "hd", "fhd", "uhd", "4k", "sd", "lq", "hq", "hevc", "h265", "h264", "50fps", "60fps", "raw", "1080", "1080p", "720", "720p",
+    "2160", "2160p", "vip", "plus", "tv",
+)
 
 /** Programmen som pågår vid avspark: börjar högst två timmar före och slutar en bit in i matchen. */
 private fun programmesAround(schedule: List<Programme>, kickoff: Long): List<Programme> {

@@ -1769,7 +1769,7 @@ private fun TvFocusBox(modifier: Modifier = Modifier, shape: Shape = RoundedCorn
             .clip(shape)
             .then(
                 if (focused) {
-                    Modifier.background(palette.focus.copy(alpha = 0.08f)).border(2.dp, palette.focus.copy(alpha = 0.8f), shape)
+                    Modifier.background(palette.focus.copy(alpha = 0.08f)).focusRing(palette, 2.dp, shape, 0.8f)
                 } else {
                     Modifier
                 },

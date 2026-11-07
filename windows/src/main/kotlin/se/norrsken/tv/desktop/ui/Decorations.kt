@@ -43,6 +43,7 @@ fun ThemeBackdrop(decoration: Decoration, running: Boolean, modifier: Modifier =
         Decoration.MIST -> Mist(running, palette.secondary, modifier)
         Decoration.AURORA -> AuroraSky(running, modifier)
         Decoration.RETRO -> RetroHorizon(running, modifier)
+        Decoration.CRYSTAL -> CrystalLight(running, modifier)
     }
 }
 
@@ -66,7 +67,7 @@ fun ThemeOverlay(decoration: Decoration, running: Boolean, modifier: Modifier = 
 
 /** Med egna bakgrundsbilder blir temats himmel genomskinlig, så att bilderna syns. */
 @Composable
-private fun skyVeil(): Float = if (LocalPalette.current.ambient.alpha < 0.99f) 0.35f else 1f
+private fun skyVeil(): Float = if (LocalPalette.current.customBackdrop) 0.35f else 1f
 
 /**
  * Sekunder sedan animationen började, uppdaterad [fps] gånger i sekunden
@@ -705,6 +706,92 @@ private fun Scanlines(running: Boolean, modifier: Modifier) {
     }
 }
 
+// --- Kristall ------------------------------------------------------------------------
+//
+// Frostat glas mot ett levande ljus: stora mjuka färgfält i violett, rosa, cyan
+// och blått som flyter långsamt om varandra, kristallstoft som glimmar, och en
+// gång i halvminuten en svag reflex som drar snett över allt, som i en glasruta.
+
+private class Glint(val x: Float, val y: Float, val radius: Float, val speed: Float, val phase: Float)
+
+@Composable
+private fun CrystalLight(running: Boolean, modifier: Modifier) {
+    val veil = skyVeil()
+    val glints = remember {
+        val random = Random(19)
+        List(36) {
+            Glint(
+                x = random.nextFloat(),
+                y = random.nextFloat(),
+                radius = 0.5f + random.nextFloat() * 1.1f,
+                speed = 0.4f + random.nextFloat() * 1.2f,
+                phase = random.nextFloat() * 6.28f,
+            )
+        }
+    }
+    val seconds = rememberSeconds(running, fps = 24)
+    Spacer(
+        modifier.drawWithCache {
+            val w = size.width
+            val h = size.height
+            val base = Brush.verticalGradient(
+                0f to Color(0xFF06051A).copy(alpha = veil),
+                0.55f to Color(0xFF080622).copy(alpha = veil),
+                1f to Color(0xFF0C0829).copy(alpha = veil),
+            )
+            val reach = size.maxDimension
+            onDrawBehind {
+                val t = seconds.floatValue
+                drawRect(base)
+                drawBlob(CRYSTAL_VIOLET, 0.30f, reach * 0.55f, Offset(w * (0.22f + 0.14f * sin(t * 0.050f)), h * (0.28f + 0.14f * cos(t * 0.043f))))
+                drawBlob(CRYSTAL_PINK, 0.20f, reach * 0.42f, Offset(w * (0.82f + 0.10f * sin(t * 0.037f + 1f)), h * (0.22f + 0.16f * sin(t * 0.051f + 2f))))
+                drawBlob(CRYSTAL_CYAN, 0.18f, reach * 0.50f, Offset(w * (0.62f + 0.18f * cos(t * 0.031f + 3f)), h * (0.88f + 0.08f * sin(t * 0.047f))))
+                drawBlob(CRYSTAL_BLUE, 0.22f, reach * 0.60f, Offset(w * (0.06f + 0.10f * cos(t * 0.029f + 4f)), h * (0.92f + 0.07f * sin(t * 0.041f + 1f))))
+                for (glint in glints) {
+                    val twinkle = 0.5f + 0.5f * sin(t * glint.speed + glint.phase)
+                    val center = Offset(glint.x * w, glint.y * h)
+                    drawCircle(Color.White.copy(alpha = 0.10f * twinkle), radius = glint.radius * 3.2f * density, center = center)
+                    drawCircle(Color.White.copy(alpha = 0.55f * twinkle * twinkle), radius = glint.radius * density, center = center)
+                }
+                // Reflexen: tre sekunder snett över bilden, en gång var tjugofjärde sekund.
+                val cycle = t % 24f
+                if (cycle < 3.2f) {
+                    val x = -w * 0.4f + cycle / 3.2f * w * 1.8f
+                    drawRect(
+                        Brush.linearGradient(
+                            0f to Color.Transparent,
+                            0.5f to Color.White.copy(alpha = 0.045f),
+                            1f to Color.Transparent,
+                            start = Offset(x - w * 0.12f, 0f),
+                            end = Offset(x + w * 0.12f, h * 0.5f),
+                        ),
+                    )
+                }
+            }
+        },
+    )
+}
+
+/** Ett mjukt färgfält som tonar ut åt alla håll. */
+private fun DrawScope.drawBlob(color: Color, alpha: Float, radius: Float, center: Offset) {
+    drawCircle(
+        Brush.radialGradient(
+            0f to color.copy(alpha = alpha),
+            0.45f to color.copy(alpha = alpha * 0.45f),
+            1f to color.copy(alpha = 0f),
+            center = center,
+            radius = radius,
+        ),
+        radius = radius,
+        center = center,
+    )
+}
+
+private val CRYSTAL_VIOLET = Color(0xFF7C4DFF)
+private val CRYSTAL_PINK = Color(0xFFFF4FB8)
+private val CRYSTAL_CYAN = Color(0xFF2EC8FF)
+private val CRYSTAL_BLUE = Color(0xFF3550FF)
+
 /** En liten stillbild av dekoren, för temakorten i inställningarna. */
 internal fun DrawScope.decorationHint(palette: Palette) {
     when (palette.decoration) {
@@ -757,6 +844,11 @@ internal fun DrawScope.decorationHint(palette: Palette) {
         Decoration.AURORA -> {
             drawAuroraBand(3f, base = 0.12f, amp = 0.08f, thickness = 0.4f, speed = 0.05f, phase = 0f, color = Color(0xFF3EF0B2), alpha = 0.55f)
             drawAuroraBand(3f, base = 0.3f, amp = 0.06f, thickness = 0.3f, speed = -0.03f, phase = 2f, color = Color(0xFFB98BFF), alpha = 0.35f)
+        }
+        Decoration.CRYSTAL -> {
+            drawBlob(CRYSTAL_VIOLET, 0.42f, size.width * 0.5f, Offset(size.width * 0.3f, size.height * 0.25f))
+            drawBlob(CRYSTAL_PINK, 0.32f, size.width * 0.4f, Offset(size.width * 0.88f, size.height * 0.15f))
+            drawBlob(CRYSTAL_CYAN, 0.32f, size.width * 0.45f, Offset(size.width * 0.72f, size.height * 1.0f))
         }
         Decoration.RETRO -> {
             val horizon = size.height * 0.7f

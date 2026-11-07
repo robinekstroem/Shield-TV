@@ -1,5 +1,9 @@
 package se.norrsken.tv.desktop.ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.border
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
@@ -7,8 +11,24 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.unit.Dp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.time.TimeSource
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -26,6 +46,10 @@ import androidx.compose.ui.unit.sp
 /** Utseendet. Väljs under Inställningar → Utseende och sparas. */
 enum class AppTheme(val label: String, val description: String) {
     GRAPHITE("Grafit", "Stilla gråskala. Markeringen är ljus, inte färg."),
+    CRYSTAL(
+        "Kristall",
+        "Frostat glas mot ett levande, flytande ljus i violett, rosa och cyan. Det du markerar får en skimrande kant och ett glansigt ljussvep.",
+    ),
     EMBER("Orange glöd", "Svart och orange, med en mjuk glöd kring det du pekar på."),
     CHRISTMAS("Julafton", "Vinternatt i månsken: snö som driver i vinden, granar, en röd stuga med ljus i fönstren och en ljusslinga som blinkar."),
     HERO("Superhjälte", "Kraftiga färger, serietidningsraster och fart."),
@@ -36,7 +60,7 @@ enum class AppTheme(val label: String, val description: String) {
 }
 
 /** Det som rör sig eller ligger i bakgrunden, per tema. */
-enum class Decoration { NONE, SNOW, SPARKLES, HALFTONE, MIST, AURORA, RETRO }
+enum class Decoration { NONE, SNOW, SPARKLES, HALFTONE, MIST, AURORA, RETRO, CRYSTAL }
 
 /**
  * Färgerna. Grafit är samma palett som Android-appen (core/ui/theme/Color.kt):
@@ -69,6 +93,12 @@ data class Palette(
     val headingFont: FontFamily = FontFamily.Default,
     val headingWeight: FontWeight = FontWeight.SemiBold,
     val headingStyle: FontStyle = FontStyle.Normal,
+    /** Kanten kring det markerade som ett skimmer i flera färger. Tom: accentfärgen. */
+    val ring: List<Color> = emptyList(),
+    /** Ett ljussvep över omslag och kort när markeringen kommer dit, och en kant som vandrar. */
+    val shine: Boolean = false,
+    /** Egna bakgrundsbilder: temats himmel blir genomskinlig, så att bilderna syns. */
+    val customBackdrop: Boolean = false,
 )
 
 /** Glödens färg i en viss styrka, eller genomskinlig om temat inte glöder. */
@@ -135,6 +165,30 @@ private val aurora = Palette(
     alert = Color(0xFFFF7A8A),
     glow = Color(0x733EF0B2),
     decoration = Decoration.AURORA,
+)
+
+// Kristall: frostat glas. Ytorna är halvgenomskinliga, så att ljuset bakom
+// skymtar genom menyn och korten. Markeringen skimrar i cyan, violett och rosa.
+private val crystal = Palette(
+    background = Color(0xFF05040F),
+    ambient = Color(0xC209081C),
+    surface = Color(0xB80E0C26),
+    surfaceRaised = Color(0xD01A1738),
+    hairline = Color(0x47B9ABFF),
+    textPrimary = Color(0xFFF8F6FF),
+    textSecondary = Color(0xFFC6C0EA),
+    textTertiary = Color(0xFF8D87B8),
+    focus = Color(0xFFEAE4FF),
+    onFocus = Color(0xFF15102F),
+    signal = Color(0xFF4FE3FF),
+    secondary = Color(0xFFFF7AD9),
+    alert = Color(0xFFFF6B8B),
+    scrim = Color(0xE605040F),
+    glow = Color(0x998C6CFF),
+    decoration = Decoration.CRYSTAL,
+    headingWeight = FontWeight.Bold,
+    ring = listOf(Color(0xFF5EEBFF), Color(0xFFA98BFF), Color(0xFFFF7AD9), Color(0xFFFFD58A), Color(0xFF5EEBFF)),
+    shine = true,
 )
 
 // Åttiotal: neonrosa och cyan på lila, som omslaget till en VHS-kassett.
@@ -218,6 +272,7 @@ private val epic = Palette(
 
 fun paletteFor(theme: AppTheme): Palette = when (theme) {
     AppTheme.GRAPHITE -> graphite
+    AppTheme.CRYSTAL -> crystal
     AppTheme.EMBER -> ember
     AppTheme.CHRISTMAS -> christmas
     AppTheme.HERO -> hero
@@ -255,7 +310,15 @@ private fun typographyFor(palette: Palette): Typography {
 fun TvTheme(theme: AppTheme = AppTheme.GRAPHITE, translucent: Boolean = false, content: @Composable () -> Unit) {
     // Med egna bakgrundsbilder släpper sidomenyn och panelerna igenom lite av bilden.
     val palette = paletteFor(theme).let {
-        if (translucent) it.copy(ambient = it.ambient.copy(alpha = 0.8f), surface = it.surface.copy(alpha = 0.86f)) else it
+        if (translucent) {
+            it.copy(
+                ambient = it.ambient.copy(alpha = minOf(it.ambient.alpha, 0.8f)),
+                surface = it.surface.copy(alpha = minOf(it.surface.alpha, 0.86f)),
+                customBackdrop = true,
+            )
+        } else {
+            it
+        }
     }
     val typography = remember(palette) { typographyFor(palette) }
     val colors = darkColorScheme(
@@ -284,3 +347,80 @@ fun TvTheme(theme: AppTheme = AppTheme.GRAPHITE, translucent: Boolean = false, c
         }
     }
 }
+
+/** Kanten kring det markerade: skimrande i Kristall, annars i accentfärgen. */
+fun Modifier.focusRing(palette: Palette, width: Dp, shape: Shape, alpha: Float = 1f): Modifier =
+    if (palette.ring.size >= 2) {
+        border(width, Brush.linearGradient(palette.ring.map { it.copy(alpha = it.alpha * alpha) }), shape)
+    } else {
+        border(width, palette.focus.copy(alpha = palette.focus.alpha * alpha), shape)
+    }
+
+/**
+ * Kristall: ljussvepet och kantens skimmer för ett markerat kort. Värdena
+ * läses först när kortet ritas, så att bara ritningen görs om.
+ */
+@Stable
+class CardShine {
+    internal val sweep = Animatable(0f)
+    /** Hur många varv kantens färger vandrat. */
+    internal val turn = mutableFloatStateOf(0f)
+}
+
+/** Null i teman utan ljussvep. Svepet går en gång när [active] blir sant; kanten vandrar så länge. */
+@Composable
+fun rememberCardShine(active: Boolean): CardShine? {
+    if (!LocalPalette.current.shine) return null
+    val shine = remember { CardShine() }
+    LaunchedEffect(active) {
+        shine.sweep.snapTo(0f)
+        if (!active) return@LaunchedEffect
+        launch { shine.sweep.animateTo(1f, tween(SHINE_MS, easing = FastOutSlowInEasing)) }
+        val start = TimeSource.Monotonic.markNow()
+        val from = shine.turn.floatValue
+        // Trettio gånger i sekunden räcker för en kant som vandrar så sakta.
+        while (true) {
+            delay(33)
+            shine.turn.floatValue = from + start.elapsedNow().inWholeMilliseconds / RING_TURN_MS.toFloat()
+        }
+    }
+    return shine
+}
+
+/** Ritar ljussvepet och den vandrande kanten. Läggs efter clip, så att bägge stannar innanför kortet. */
+fun Modifier.cardShine(shine: CardShine?, palette: Palette, width: Dp, shape: Shape): Modifier {
+    if (shine == null) return this
+    val colors = palette.ring.ifEmpty { listOf(palette.focus, palette.focus) }
+    return drawWithContent {
+        drawContent()
+        val w = size.width
+        val h = size.height
+        val p = shine.sweep.value
+        if (p > 0f && p < 1f) {
+            // Ett ljust band, vinkelrätt mot diagonalen, som drar från övre vänstra hörnet till nedre högra.
+            val middle = Offset(-0.3f * w + p * 1.6f * w, -0.3f * h + p * 1.6f * h)
+            val reach = Offset(w * 0.18f, h * 0.18f)
+            drawRect(
+                Brush.linearGradient(
+                    0f to Color.Transparent,
+                    0.5f to Color.White.copy(alpha = 0.30f),
+                    1f to Color.Transparent,
+                    start = middle - reach,
+                    end = middle + reach,
+                ),
+            )
+        }
+        val angle = shine.turn.floatValue * 2f * PI.toFloat()
+        val radius = maxOf(w, h) / 2f
+        val along = Offset(cos(angle) * radius, sin(angle) * radius)
+        drawOutline(
+            shape.createOutline(size, layoutDirection, this),
+            Brush.linearGradient(colors, start = center - along, end = center + along),
+            // Halva strecket hamnar utanför kortet och klipps bort.
+            style = Stroke(width.toPx() * 2f),
+        )
+    }
+}
+
+private const val SHINE_MS = 950
+private const val RING_TURN_MS = 5200

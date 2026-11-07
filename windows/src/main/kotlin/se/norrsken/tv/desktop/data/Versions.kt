@@ -406,6 +406,31 @@ internal object VersionTags {
         return other
     }
 
+    /**
+     * Vilket land eller språk ett kanalnamn eller en kategori pekar på, efter
+     * koderna och orden i den: 0 svenskt, 1 norskt eller danskt, 2 finskt,
+     * 3 engelskt, 5 annat. Null när namnet inte säger något.
+     */
+    fun regionRank(text: String): Int? {
+        var best: Int? = null
+        for (raw in text.split(groupSplitter)) {
+            if (raw.length < 2) continue
+            val token = raw.uppercase()
+            // Korta koder räknas bara i versaler: "SE" är Sverige, "Se" är ett ord.
+            if (raw.length <= 3 && raw != token) continue
+            val language = languages[token] ?: countries[token] ?: continue
+            val rank = when (language.kind) {
+                Kind.SWEDISH -> 0
+                Kind.NORDIC -> 1
+                Kind.FINNISH -> 2
+                Kind.ENGLISH -> 3
+                Kind.OTHER -> 5
+            }
+            if (best == null || rank < best) best = rank
+        }
+        return best
+    }
+
     private class Language(val noun: String, val adjective: String, val kind: Kind)
 
     private enum class Kind { SWEDISH, NORDIC, FINNISH, ENGLISH, OTHER }

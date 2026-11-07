@@ -651,6 +651,24 @@ class AppState {
 
     fun disneyShelfOf(movie: Movie): DisneyShelf? = disney.shelfOf(movie)
 
+    /**
+     * Omslagen på Disneys samlingskort: de första titlarna i samlingen som har
+     * omslag — klassikerna och Pixar i nummerordning, kortfilmerna äldst först.
+     * En per film, hur många versioner den än finns i.
+     */
+    fun disneyCovers(shelf: DisneyShelf, count: Int): List<List<String>> {
+        val shelves = disney
+        val index = versions
+        return library.movies.asSequence()
+            .filter { shelves.shelfOf(it) == shelf }
+            .sortedWith(compareBy<Movie>({ shelves.numberOf(it) ?: Int.MAX_VALUE }, { index.yearOf(it) ?: Int.MAX_VALUE }))
+            .distinctBy { index.groupKeyOf(it) }
+            .map { posterCandidates(it) }
+            .filter { it.isNotEmpty() }
+            .take(count)
+            .toList()
+    }
+
     /** Visas valet Disney på filmsidan. */
     fun isDisneyCandidate(movie: Movie): Boolean =
         disney.shelfOf(movie) != null || DisneyIndex.isCandidate(movie.group, versions.titleOf(movie))
@@ -922,10 +940,8 @@ class AppState {
             val found = withContext(Dispatchers.Default) {
                 runCatching {
                     val visible = key.channels.filter { LibraryFilter.groupKey(LibraryFilter.LIVE, it.group) !in key.hidden }
-                    // Svenska och nordiska kanaler först, när flera visar samma match.
-                    findBroadcasts(matches, visible, key.guide).mapValues { (_, list) ->
-                        list.sortedBy { VersionTags.isForeignGroup(it.group) }
-                    }
+                    // Svenska kanaler först (V Sport, Viaplay, TV4 …), sedan nordiska; se rankBroadcasts.
+                    findBroadcasts(matches, visible, key.guide)
                 }.getOrNull()
             } ?: return
             matchChannels = found

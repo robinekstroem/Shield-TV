@@ -21,6 +21,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -40,6 +42,9 @@ fun GenreScreen(state: AppState) {
     // Före förgreningarna: tillbaka från en film eller serie ska landa där man var.
     val gridState = rememberLazyGridState()
     LaunchedEffect(state.genre, state.genreQuery, state.genreSort, state.genreShowsSeries) { gridState.scrollToItem(0) }
+    // Tv: var markeringen landar från genrelistan.
+    val entry = remember { TvEntry() }
+    val scope = rememberCoroutineScope()
 
     val openMovie = state.selectedMovie
     if (openMovie != null) {
@@ -137,6 +142,9 @@ fun GenreScreen(state: AppState) {
             selected = genre?.label,
             onSelect = { label -> state.genre = Genre.entries.firstOrNull { it.label == label }?.name },
             title = "GENRER",
+            onEnterContent = {
+                scope.launch { entry.enter { gridState.layoutInfo.visibleItemsInfo.map { it.key } } }
+            },
         )
         Column(Modifier.weight(1f).fillMaxHeight()) {
             ScreenHeader(
@@ -169,34 +177,44 @@ fun GenreScreen(state: AppState) {
                 // Numreras bara när listan faktiskt är rangordnad efter betyg.
                 val ranked = sort == SortOrder.RATING || sort == SortOrder.POPULAR
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(152.dp),
-                        state = gridState,
-                        contentPadding = PaddingValues(start = 20.dp, end = 28.dp, bottom = 28.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        if (showSeries) {
-                            itemsIndexed(series, key = { _, item -> item.key }) { position, item ->
-                                PosterCard(
-                                    title = state.titleOf(item),
-                                    images = state.posterCandidates(item),
-                                    meta = seriesMeta(state, item),
-                                    onClick = { state.showSeries(item) },
-                                    rank = if (ranked) position + 1 else null,
-                                    badge = state.badgeFor(item),
-                                )
-                            }
-                        } else {
-                            itemsIndexed(movies, key = { _, item -> item.key }) { position, item ->
-                                PosterCard(
-                                    title = state.titleOf(item),
-                                    images = state.posterCandidates(item),
-                                    meta = movieMeta(state, item),
-                                    onClick = { state.showMovie(item) },
-                                    rank = if (ranked) position + 1 else null,
-                                    badge = state.badgeFor(item),
-                                )
+                    TvScrolling(lead = 0.05f, trail = 0.08f, snap = true) {
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(if (tvLayout) 176.dp else 152.dp),
+                            state = gridState,
+                            contentPadding = if (tvLayout) {
+                                PaddingValues(start = 40.dp, end = 40.dp, top = 10.dp, bottom = 36.dp)
+                            } else {
+                                PaddingValues(start = 20.dp, end = 28.dp, bottom = 28.dp)
+                            },
+                            horizontalArrangement = Arrangement.spacedBy(if (tvLayout) 14.dp else 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(if (tvLayout) 16.dp else 12.dp),
+                        ) {
+                            if (showSeries) {
+                                itemsIndexed(series, key = { _, item -> item.key }) { position, item ->
+                                    PosterCard(
+                                        title = state.titleOf(item),
+                                        images = state.posterCandidates(item),
+                                        meta = seriesMeta(state, item),
+                                        onClick = { state.showSeries(item) },
+                                        rank = if (ranked) position + 1 else null,
+                                        modifier = entry.mark(item.key),
+                                        onFocusChange = { has -> if (has) entry.last = item.key },
+                                        badge = state.badgeFor(item),
+                                    )
+                                }
+                            } else {
+                                itemsIndexed(movies, key = { _, item -> item.key }) { position, item ->
+                                    PosterCard(
+                                        title = state.titleOf(item),
+                                        images = state.posterCandidates(item),
+                                        meta = movieMeta(state, item),
+                                        onClick = { state.showMovie(item) },
+                                        rank = if (ranked) position + 1 else null,
+                                        modifier = entry.mark(item.key),
+                                        onFocusChange = { has -> if (has) entry.last = item.key },
+                                        badge = state.badgeFor(item),
+                                    )
+                                }
                             }
                         }
                     }

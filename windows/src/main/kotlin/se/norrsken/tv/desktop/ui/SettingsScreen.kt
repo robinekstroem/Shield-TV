@@ -496,7 +496,10 @@ private fun ThemeCard(theme: AppTheme, selected: Boolean, onClick: () -> Unit) {
                     )
                 }
             }
-            Text(theme.label, style = MaterialTheme.typography.titleMedium)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(theme.label, style = MaterialTheme.typography.titleMedium)
+                if (theme == AppTheme.CRYSTAL) Tag("NYTT", preview.signal)
+            }
             Text(theme.description, style = MaterialTheme.typography.bodySmall, color = palette.textTertiary)
         }
     }
