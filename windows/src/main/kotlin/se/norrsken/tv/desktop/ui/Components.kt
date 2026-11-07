@@ -415,7 +415,10 @@ fun ScreenHeader(
     }
 }
 
-/** Kategorispalten till vänster i Live TV, Filmer och Serier. */
+/** En egen kategori överst i listan, som Disney och dess samlingar. [indent]: en underkategori. */
+class PinnedGroup(val key: String, val title: String, val count: Int, val indent: Boolean = false)
+
+/** Kategorispalten till vänster i Live TV, Filmer och Serier. [pinned] står överst, efter "Alla". */
 @Composable
 fun GroupColumn(
     allLabel: String,
@@ -425,9 +428,10 @@ fun GroupColumn(
     selected: String?,
     onSelect: (String?) -> Unit,
     title: String = "KATEGORIER",
+    pinned: List<PinnedGroup> = emptyList(),
 ) {
     if (tvLayout) {
-        TvGroupPanel(allLabel, total, groups, counts, selected, onSelect, title)
+        TvGroupPanel(allLabel, total, groups, counts, selected, onSelect, title, pinned)
         return
     }
     val palette = LocalPalette.current
@@ -448,6 +452,10 @@ fun GroupColumn(
                 item {
                     GroupRow(allLabel, total, selected == null) { onSelect(null) }
                 }
+                items(pinned, key = { it.key }) { group ->
+                    GroupRow(group.title, group.count, selected == group.key, indent = group.indent) { onSelect(group.key) }
+                }
+                if (pinned.isNotEmpty()) item { Spacer(Modifier.height(10.dp)) }
                 items(groups, key = { it }) { group ->
                     GroupRow(group, counts[group] ?: 0, selected == group) { onSelect(group) }
                 }
@@ -458,11 +466,11 @@ fun GroupColumn(
 }
 
 @Composable
-private fun GroupRow(name: String, count: Int, selected: Boolean, onClick: () -> Unit) {
+private fun GroupRow(name: String, count: Int, selected: Boolean, indent: Boolean = false, onClick: () -> Unit) {
     val palette = LocalPalette.current
     Pressable(onClick = onClick, selected = selected, modifier = Modifier.fillMaxWidth()) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp),
+            Modifier.fillMaxWidth().padding(start = if (indent) 26.dp else 12.dp, end = 12.dp, top = 9.dp, bottom = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -494,6 +502,7 @@ private fun TvGroupPanel(
     selected: String?,
     onSelect: (String?) -> Unit,
     title: String,
+    pinned: List<PinnedGroup>,
 ) {
     val palette = LocalPalette.current
     val listState = rememberLazyListState()
@@ -508,8 +517,13 @@ private fun TvGroupPanel(
     )
     val textAlpha = animateFloatAsState(if (open) 1f else 0f, tween(if (open) 260 else 120), label = "kategoritext")
     val shown = remember(textAlpha) { { textAlpha.value } }
-    // "Alla" står först, sedan kategorierna.
-    val selectedIndex = if (selected == null) 0 else (groups.indexOf(selected) + 1).coerceAtLeast(0)
+    // "Alla" står först, sedan de egna (Disney), sedan kategorierna.
+    val pinnedIndex = pinned.indexOfFirst { it.key == selected }
+    val selectedIndex = when {
+        selected == null -> 0
+        pinnedIndex >= 0 -> 1 + pinnedIndex
+        else -> (1 + pinned.size + (if (pinned.isNotEmpty()) 1 else 0) + groups.indexOf(selected)).coerceAtLeast(0)
+    }
     LaunchedEffect(open) {
         if (!open) return@LaunchedEffect
         // Markeringen hoppar till den valda kategorin, inte till raden man råkade komma in vid.
@@ -550,6 +564,18 @@ private fun TvGroupPanel(
                         onSelect(null)
                     }
                 }
+                items(pinned, key = { it.key }) { group ->
+                    TvGroupRow(
+                        group.title,
+                        group.count,
+                        selected == group.key,
+                        shown,
+                        enterable,
+                        if (group.key == selected) selectedRow else null,
+                        indent = group.indent,
+                    ) { onSelect(group.key) }
+                }
+                if (pinned.isNotEmpty()) item { Spacer(Modifier.height(10.dp)) }
                 items(groups, key = { it }) { group ->
                     TvGroupRow(group, counts[group] ?: 0, selected == group, shown, enterable, if (group == selected) selectedRow else null) {
                         onSelect(group)
@@ -578,6 +604,7 @@ private fun TvGroupRow(
     shown: () -> Float,
     enterable: Boolean,
     focus: FocusRequester?,
+    indent: Boolean = false,
     onClick: () -> Unit,
 ) {
     val palette = LocalPalette.current
@@ -590,7 +617,10 @@ private fun TvGroupRow(
             .then(if (focus != null) Modifier.focusRequester(focus) else Modifier),
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp).graphicsLayer { alpha = shown() },
+            Modifier
+                .fillMaxWidth()
+                .padding(start = if (indent) 30.dp else 14.dp, end = 14.dp, top = 10.dp, bottom = 10.dp)
+                .graphicsLayer { alpha = shown() },
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(

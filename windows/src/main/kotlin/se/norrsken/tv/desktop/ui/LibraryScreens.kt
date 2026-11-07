@@ -6,6 +6,8 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.draw.drawWithContent
 import se.norrsken.tv.desktop.data.WatchKind
 import se.norrsken.tv.desktop.data.ListKind
+import se.norrsken.tv.desktop.data.DisneyIndex
+import se.norrsken.tv.desktop.data.DisneyShelf
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.graphics.graphicsLayer
@@ -36,6 +38,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
@@ -105,10 +108,17 @@ fun MoviesScreen(state: AppState) {
     // markeringen hamnar där igen när man backar ur filmen.
     var focusedKey by remember { mutableStateOf<String?>(null) }
     var openedKey by remember { mutableStateOf<String?>(null) }
+    // Kortfilmer som ligger som serier öppnas härifrån, i Disneys samlingar.
+    var seriesFromHere by remember { mutableStateOf(false) }
 
     val selected = state.selectedMovie
     if (selected != null) {
         MovieDetail(state, selected)
+        return
+    }
+    val selectedSeries = state.selectedSeries
+    if (seriesFromHere && selectedSeries != null) {
+        SeriesDetail(state, selectedSeries)
         return
     }
     val library = state.library
@@ -116,7 +126,15 @@ fun MoviesScreen(state: AppState) {
         NoVideoLibrary(state, what = "filmer")
         return
     }
-    val movies = remember(library, group, query, state.movieSort, state.tmdbFacts, state.versions) { state.filteredMovies() }
+    val movies = remember(library, group, query, state.movieSort, state.tmdbFacts, state.versions, state.disney, state.disneyCharacter) {
+        state.filteredMovies()
+    }
+    // Disney: alla tre samlingarna, eller en av dem.
+    val disneyShelf = DisneyShelf.of(group)
+    val disneyView = DisneyShelf.isDisney(group)
+    val disneySeries = remember(library, group, query, state.versions, state.disney, state.disneyCharacter) {
+        if (disneyView) state.disneySeries(disneyShelf) else emptyList()
+    }
     // Filmen överst följer markeringen på tv:n och musen på datorn, med en kort
     // fördröjning så att snabbt bläddrande inte byter bakgrund för varje omslag.
     var spotlightKey by remember(movies) { mutableStateOf(movies.firstOrNull()?.key) }
@@ -125,7 +143,8 @@ fun MoviesScreen(state: AppState) {
     LaunchedEffect(activeKey) {
         val key = activeKey ?: return@LaunchedEffect
         delay(if (tvLayout) 180 else 260)
-        spotlightKey = key
+        // En serie bland Disneys kortfilmer byter inte bakgrund: den ovanför står kvar.
+        if (movies.any { it.key == key }) spotlightKey = key
     }
     val spotlight = remember(movies, spotlightKey) { movies.firstOrNull { it.key == spotlightKey } }
     val restore = remember { FocusRequester() }
@@ -145,7 +164,11 @@ fun MoviesScreen(state: AppState) {
             groups = state.visibleGroups(LibraryFilter.MOVIE, library.movieGroups),
             counts = library.movieCounts,
             selected = group,
-            onSelect = { state.movieGroup = it },
+            onSelect = {
+                state.movieGroup = it
+                state.disneyCharacter = null
+            },
+            pinned = disneyPinned(state),
         )
         Box(Modifier.weight(1f).fillMaxHeight()) {
             if (spotlight != null) {
@@ -158,13 +181,22 @@ fun MoviesScreen(state: AppState) {
             }
             Column(Modifier.fillMaxSize()) {
                 ScreenHeader(
-                    title = group ?: "Alla filmer",
-                    subtitle = "${movies.size.grouped()} filmer",
+                    title = when {
+                        disneyShelf != null -> disneyShelf.title
+                        disneyView -> "Disney"
+                        else -> group ?: "Alla filmer"
+                    },
+                    subtitle = if (disneyView) {
+                        disneySubtitle(state, disneyShelf, movies, movies.size + disneySeries.size)
+                    } else {
+                        "${movies.size.grouped()} filmer"
+                    },
                     query = query,
                     onQuery = { state.movieQuery = it },
                     placeholder = "Sök film",
                 )
                 SortRow(state.movieSort, series = false, onSelect = { state.sortMovies(it) })
+                if (disneyShelf == DisneyShelf.SHORTS) DisneyCharacterChips(state)
                 if (spotlight != null) {
                     val tmdb = state.tmdbFor(spotlight)
                     val facts = state.movieFacts[spotlight.key]
@@ -181,7 +213,7 @@ fun MoviesScreen(state: AppState) {
                         overview = tmdb?.overview?.ifBlank { null },
                     )
                 }
-                if (movies.isEmpty()) {
+                if (movies.isEmpty() && disneySeries.isEmpty()) {
                     EmptyState(title = "Inga träffar", body = "Ingen film matchar sökningen.")
                 } else {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -197,11 +229,11 @@ fun MoviesScreen(state: AppState) {
                             horizontalArrangement = Arrangement.spacedBy(if (tvLayout) 14.dp else 8.dp),
                             verticalArrangement = Arrangement.spacedBy(if (tvLayout) 18.dp else 12.dp),
                         ) {
-                            gridItems(movies, key = { it.key }) { movie ->
+                            val movieCell: @Composable (Movie) -> Unit = { movie ->
                                 PosterCard(
                                     title = state.titleOf(movie),
                                     images = state.posterCandidates(movie),
-                                    meta = movieMeta(state, movie),
+                                    meta = if (disneyView) disneyMeta(state, movie) else movieMeta(state, movie),
                                     onClick = {
                                         openedKey = movie.key
                                         state.showMovie(movie)
@@ -213,6 +245,45 @@ fun MoviesScreen(state: AppState) {
                                     onActive = { if (!tvLayout) hoveredKey = movie.key },
                                     badge = state.badgeFor(movie),
                                 )
+                            }
+                            if (!disneyView) {
+                                gridItems(movies, key = { it.key }) { movie -> movieCell(movie) }
+                            } else {
+                                // Disney: en rubrik per samling när alla tre visas, serierna först i kortfilmerna.
+                                for (section in DisneyShelf.entries) {
+                                    if (disneyShelf != null && section != disneyShelf) continue
+                                    val sectionMovies = movies.filter { state.disney.shelfOf(it) == section }
+                                    val sectionSeries = disneySeries.filter { state.disney.shelfOf(it) == section }
+                                    if (sectionMovies.isEmpty() && sectionSeries.isEmpty()) continue
+                                    if (disneyShelf == null) {
+                                        item(key = "rubrik-" + section.name, span = { GridItemSpan(maxLineSpan) }) {
+                                            DisneySectionHeader(section, sectionMovies.size + sectionSeries.size) {
+                                                state.movieGroup = section.key
+                                                state.disneyCharacter = null
+                                            }
+                                        }
+                                    }
+                                    gridItems(sectionSeries, key = { "serie-" + it.key }) { series ->
+                                        val key = "serie-" + series.key
+                                        PosterCard(
+                                            title = state.titleOf(series),
+                                            images = state.posterCandidates(series),
+                                            meta = seriesMeta(state, series),
+                                            onClick = {
+                                                openedKey = key
+                                                seriesFromHere = true
+                                                state.showSeries(series)
+                                            },
+                                            modifier = if (key == openedKey) Modifier.focusRequester(restore) else Modifier,
+                                            onFocusChange = { has ->
+                                                if (has) focusedKey = key else if (focusedKey == key) focusedKey = null
+                                            },
+                                            onActive = { if (!tvLayout) hoveredKey = key },
+                                            badge = state.badgeFor(series),
+                                        )
+                                    }
+                                    gridItems(sectionMovies, key = { it.key }) { movie -> movieCell(movie) }
+                                }
                             }
                         }
                         Scrollbar(gridState, modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(end = 6.dp, bottom = 12.dp))
@@ -234,6 +305,7 @@ internal fun MovieDetail(state: AppState, movie: Movie) {
     val infoState = state.movieInfo
     val info = (infoState as? MovieInfoState.Loaded)?.info
     val scroll = rememberScrollState()
+    var choosingDisney by remember(movie.key) { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxWidth().height(460.dp)) {
@@ -331,7 +403,17 @@ internal fun MovieDetail(state: AppState, movie: Movie) {
                             onClick = { state.toggleMyList(movie) },
                             icon = if (saved) Glyphs.Check else Glyphs.Add,
                         )
+                        // Disney: flytta filmen till en annan samling, lägg till den, eller ta bort den.
+                        if (state.isDisneyCandidate(movie)) {
+                            val shelf = state.disneyShelfOf(movie)
+                            SecondaryButton(
+                                shelf?.title ?: "Disney",
+                                onClick = { choosingDisney = !choosingDisney },
+                                icon = if (shelf != null) Glyphs.Check else Glyphs.Add,
+                            )
+                        }
                     }
+                    if (choosingDisney) DisneyChooser(state, movie, onDone = { choosingDisney = false })
                     // Handlingen på svenska från TMDB när den finns, annars leverantörens text.
                     val swedishPlot = state.tmdbFor(movie)?.overview?.takeIf { it.isNotBlank() }
                     when (infoState) {
@@ -1042,5 +1124,99 @@ private fun VersionPicker(labels: List<String>, selected: Int, onSelect: (Int) -
                 Chip(label, selected = index == selected, onClick = { if (index != selected) onSelect(index) })
             }
         }
+    }
+}
+
+/** Disney överst i kategorierna: alla tre samlingarna, och var och en för sig. Bara de som har något. */
+private fun disneyPinned(state: AppState): List<PinnedGroup> {
+    val disney = state.disney
+    if (disney.isEmpty) return emptyList()
+    return listOf(PinnedGroup(DisneyShelf.ALL_KEY, "Disney", disney.total)) +
+        DisneyShelf.entries.mapNotNull { shelf ->
+            disney.counts[shelf]?.takeIf { it > 0 }?.let { PinnedGroup(shelf.key, shelf.title, it, indent = true) }
+        }
+}
+
+/** "41 av 64 klassiker", "20 av 31 filmer", "86 titlar". */
+private fun disneySubtitle(state: AppState, shelf: DisneyShelf?, movies: List<Movie>, shown: Int): String {
+    val numbered = movies.filter { state.disney.shelfOf(it) == shelf }.mapNotNull { state.disney.numberOf(it) }.distinct().size
+    return when (shelf) {
+        DisneyShelf.CLASSICS -> "$numbered av ${DisneyIndex.CLASSICS_TOTAL} klassiker"
+        DisneyShelf.PIXAR -> "$numbered av ${DisneyIndex.PIXAR_TOTAL} filmer"
+        else -> if (shown == 1) "1 titel" else "${shown.grouped()} titlar"
+    }
+}
+
+/** Under omslaget: "Nr 12  1950" för klassikerna och Pixar, annars som vanligt. */
+private fun disneyMeta(state: AppState, movie: Movie): String? {
+    val number = state.disney.numberOf(movie) ?: return movieMeta(state, movie)
+    return listOfNotNull("Nr $number", state.versions.yearOf(movie)?.toString()).joinToString("  ")
+}
+
+/** Kortfilmerna: en knapp per figur, så att man kan visa bara Kalle Anka. */
+@Composable
+private fun DisneyCharacterChips(state: AppState) {
+    val names = state.disney.characterNames
+    if (names.size < 2) return
+    LazyRow(
+        contentPadding = PaddingValues(start = 28.dp, end = 28.dp, bottom = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item { Chip("Alla", selected = state.disneyCharacter == null, onClick = { state.disneyCharacter = null }) }
+        items(names) { name ->
+            Chip(name, selected = state.disneyCharacter == name, onClick = { state.disneyCharacter = name })
+        }
+    }
+}
+
+/** Rubriken för en samling när alla tre visas. Ett tryck visar bara den samlingen. */
+@Composable
+private fun DisneySectionHeader(shelf: DisneyShelf, count: Int, onClick: () -> Unit) {
+    val palette = LocalPalette.current
+    Row(
+        Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(shelf.title, style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.width(10.dp))
+        Text(
+            if (count == 1) "1 titel" else "$count titlar",
+            style = MaterialTheme.typography.bodyMedium,
+            color = palette.textTertiary,
+        )
+        Spacer(Modifier.weight(1f))
+        SecondaryButton("Visa alla", onClick = onClick)
+    }
+}
+
+/** Filmsidan: vilken Disneysamling filmen hör till, eller ingen. Gäller alla versioner av filmen. */
+@Composable
+private fun DisneyChooser(state: AppState, movie: Movie, onDone: () -> Unit) {
+    val palette = LocalPalette.current
+    val current = state.disneyShelfOf(movie)
+    Row(
+        Modifier.horizontalScroll(rememberScrollState()),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("Visa under", style = MaterialTheme.typography.labelMedium, color = palette.textTertiary)
+        DisneyShelf.entries.forEach { shelf ->
+            Chip(
+                shelf.title,
+                selected = current == shelf,
+                onClick = {
+                    state.setDisneyShelf(movie, shelf)
+                    onDone()
+                },
+            )
+        }
+        Chip(
+            "Inte Disney",
+            selected = current == null,
+            onClick = {
+                state.setDisneyShelf(movie, null)
+                onDone()
+            },
+        )
     }
 }

@@ -235,6 +235,7 @@ private fun LeagueChips(state: AppState, selected: League?, focus: FootballFocus
             LeagueChip(
                 text = league.title,
                 accent = Color(league.accent),
+                logo = state.footballLogos[league],
                 live = liveBy[league] ?: 0,
                 selected = selected == league,
                 onClick = { state.footballLeague = league },
@@ -249,6 +250,7 @@ private fun LeagueChips(state: AppState, selected: League?, focus: FootballFocus
 private fun LeagueChip(
     text: String,
     accent: Color?,
+    logo: String? = null,
     live: Int,
     selected: Boolean,
     onClick: () -> Unit,
@@ -263,7 +265,10 @@ private fun LeagueChip(
         shape = shape,
     ) { _ ->
         Row(Modifier.padding(horizontal = 14.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (accent != null) {
+            if (logo != null) {
+                LeagueLogo(logo, 20.dp)
+                Spacer(Modifier.width(9.dp))
+            } else if (accent != null) {
                 Box(Modifier.size(8.dp).clip(CircleShape).background(accent))
                 Spacer(Modifier.width(8.dp))
             }
@@ -443,7 +448,7 @@ private fun LiveCard(state: AppState, match: FootballMatch, focus: FootballFocus
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                LeagueTag(match.league)
+                LeagueTag(match.league, state.footballLogos[match.league])
                 Spacer(Modifier.weight(1f))
                 LiveDot()
                 Spacer(Modifier.width(6.dp))
@@ -514,7 +519,7 @@ private fun ResultCard(state: AppState, match: FootballMatch, focus: FootballFoc
             verticalArrangement = Arrangement.spacedBy(9.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                LeagueTag(match.league)
+                LeagueTag(match.league, state.footballLogos[match.league])
                 Spacer(Modifier.weight(1f))
                 Text(
                     shortDay(match.kickoff, today) + " · " + match.status,
@@ -580,7 +585,13 @@ private fun LeaderCard(state: AppState, league: League, rows: List<TableRow>) {
             TeamLogo(first.team, 48.dp)
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(league.title.uppercase(), style = MaterialTheme.typography.labelSmall, color = accent)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    state.footballLogos[league]?.let { logo ->
+                        LeagueLogo(logo, 14.dp)
+                        Spacer(Modifier.width(6.dp))
+                    }
+                    Text(league.title.uppercase(), style = MaterialTheme.typography.labelSmall, color = accent)
+                }
                 Text(first.team.short, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     "$line · ${first.points} p på ${first.played} matcher",
@@ -683,7 +694,7 @@ private fun MatchRow(
                 }
                 if (showLeague) {
                     Spacer(Modifier.width(10.dp))
-                    LeagueTag(match.league)
+                    LeagueTag(match.league, state.footballLogos[match.league])
                 }
             }
         }
@@ -1131,7 +1142,7 @@ private fun MatchTopBar(state: AppState, match: FootballMatch, backFocus: FocusR
             modifier = if (backFocus != null) Modifier.focusRequester(backFocus) else Modifier,
         )
         Spacer(Modifier.width(14.dp))
-        LeagueTag(match.league)
+        LeagueTag(match.league, state.footballLogos[match.league])
         Spacer(Modifier.width(12.dp))
         Text(dayAndTime(match.kickoff, state.clock), style = MaterialTheme.typography.bodyMedium, color = palette.textTertiary)
     }
@@ -1784,17 +1795,28 @@ private fun TeamLogo(team: FootballTeam, size: Dp) {
     )
 }
 
+/** Ligans märke på en match: loggan och förkortningen. Utan logga ännu en prick i ligans färg. */
 @Composable
-private fun LeagueTag(league: League) {
+private fun LeagueTag(league: League, logo: String?) {
     val color = Color(league.accent)
     Row(
         Modifier.clip(RoundedCornerShape(6.dp)).background(color.copy(alpha = 0.16f)).padding(horizontal = 8.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(6.dp).clip(CircleShape).background(color))
+        if (logo != null) {
+            LeagueLogo(logo, 14.dp)
+        } else {
+            Box(Modifier.size(6.dp).clip(CircleShape).background(color))
+        }
         Spacer(Modifier.width(6.dp))
         Text(league.short, style = MaterialTheme.typography.labelSmall, color = color, maxLines = 1)
     }
+}
+
+/** Ligans officiella logga från ESPN. */
+@Composable
+private fun LeagueLogo(url: String, size: Dp) {
+    RemoteImage(url = url, modifier = Modifier.size(size), maxSide = 128, contentScale = ContentScale.Fit)
 }
 
 /** Den röda pricken som pulserar när något är live. */

@@ -142,6 +142,7 @@ class FootballClient {
         val found = LinkedHashMap<String, FootballMatch>()
         for (value in dates) {
             val root = get("$SITE/${league.slug}/scoreboard?dates=$value&limit=1000")
+            root.optJSONArray("leagues")?.optJSONObject(0)?.let { rememberLogo(league, it) }
             val events = root.optJSONArray("events") ?: continue
             for (event in objects(events)) {
                 val match = runCatching { parseMatch(league, event) }.getOrNull() ?: continue
@@ -152,6 +153,28 @@ class FootballClient {
     }
 
     private fun localDay(ms: Long): LocalDate = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()
+
+    /** Ligornas officiella loggor, som ESPN skickar med matcherna. */
+    private val logos = ConcurrentHashMap<League, String>()
+
+    fun logoOf(league: League): String? = logos[league]
+
+    /** Den ljusa varianten för mörk bakgrund när den finns, annars den vanliga. */
+    private fun rememberLogo(league: League, json: JSONObject) {
+        val all = json.optJSONArray("logos") ?: return
+        var plain: String? = null
+        for (logo in objects(all)) {
+            val href = logo.text("href") ?: continue
+            val rel = logo.optJSONArray("rel")
+            val dark = rel != null && (0 until rel.length()).any { rel.optString(it) == "dark" }
+            if (dark) {
+                logos[league] = href
+                return
+            }
+            if (plain == null) plain = href
+        }
+        plain?.let { logos.putIfAbsent(league, it) }
+    }
 
     /** Ligatabellen, bäst först. ESPN har den under två sökvägar; den andra är reserv. */
     fun table(league: League): List<TableRow> {

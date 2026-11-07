@@ -1,6 +1,8 @@
 package se.norrsken.tv.desktop
 
 import se.norrsken.tv.desktop.data.VersionIndex
+import se.norrsken.tv.desktop.data.DisneyIndex
+import se.norrsken.tv.desktop.data.DisneyShelf
 import se.norrsken.tv.desktop.data.LibraryFilter
 import se.norrsken.tv.desktop.data.SeriesMark
 import se.norrsken.tv.desktop.data.SeriesMarksStore
@@ -192,6 +194,18 @@ class AppState {
     var liveGroup by mutableStateOf<String?>(null)
     var liveQuery by mutableStateOf("")
     var movieGroup by mutableStateOf<String?>(null)
+
+    // --- Disney under Filmer ----------------------------------------------------------
+
+    /** Vilka filmer och serier som hör till Disneys samlingar. */
+    var disney by mutableStateOf(DisneyIndex.EMPTY)
+        private set
+    /** Egna val på filmsidan: titeln och året → samlingen, eller "inte Disney". */
+    var disneyChoices by mutableStateOf<Map<String, String>>(emptyMap())
+        private set
+    /** Kortfilmerna: bara en figur, eller alla. */
+    var disneyCharacter by mutableStateOf<String?>(null)
+    private var disneyJob: Job? = null
     var movieQuery by mutableStateOf("")
     var seriesGroup by mutableStateOf<String?>(null)
     var seriesQuery by mutableStateOf("")
@@ -309,6 +323,9 @@ class AppState {
     var footballMatches by mutableStateOf<List<FootballMatch>>(emptyList())
         private set
     var footballTables by mutableStateOf<Map<League, List<TableRow>>>(emptyMap())
+        private set
+    /** Ligornas officiella loggor från ESPN. */
+    var footballLogos by mutableStateOf<Map<League, String>>(emptyMap())
         private set
     /** Tabellerna har hämtats minst en gång, lyckat eller inte. */
     var footballTablesTried by mutableStateOf(false)
@@ -498,6 +515,7 @@ class AppState {
         backgrounds = loaded.third.backgrounds.filter { File(it).isFile }
         hideForeign = loaded.third.hideForeign
         hiddenGroups = loaded.third.hiddenGroups.toSet()
+        disneyChoices = loaded.third.disneyChoices
         lastVisitUtc = loaded.third.lastVisitUtc
         val visitStart = System.currentTimeMillis()
         newSinceUtc = if (lastVisitUtc > 0L) lastVisitUtc.coerceAtLeast(visitStart - NEW_MAX_AGE_MS) else visitStart - NEW_FIRST_RUN_MS
@@ -578,10 +596,82 @@ class AppState {
         val query = movieQuery.trim().lowercase()
         val group = movieGroup
         val index = versions
+        if (DisneyShelf.isDisney(group)) return disneyMovies(DisneyShelf.of(group), query)
         return library.movies
             .filter { (group == null || it.group == group) && (query.isEmpty() || query in it.searchKey) }
             .ordered(movieSort, { index.titleOf(it) }, { it.addedUtc }, { scoreOf(it) }, { index.yearOf(it) }, { tmdbFor(it)?.popularity })
             .let { index.collapseMovies(it, preferDefault = group == null && query.isEmpty()) }
+    }
+
+    /**
+     * Filmerna i en Disneysamling, eller i alla tre ([shelf] null), samlingarna
+     * i ordning. Standard: klassikerna och Pixar i nummerordning, kortfilmerna efter år.
+     */
+    private fun disneyMovies(shelf: DisneyShelf?, query: String): List<Movie> {
+        val index = versions
+        val shelves = disney
+        val character = disneyCharacter
+        val list = library.movies.filter { movie ->
+            val found = shelves.shelfOf(movie) ?: return@filter false
+            (shelf == null || found == shelf) &&
+                (query.isEmpty() || query in movie.searchKey) &&
+                (character == null || shelves.characterOf(movie) == character)
+        }
+        val sorted = if (movieSort == SortOrder.PROVIDER) {
+            list.sortedWith(
+                compareBy<Movie>(
+                    { shelves.shelfOf(it)?.ordinal ?: Int.MAX_VALUE },
+                    { shelves.numberOf(it) ?: Int.MAX_VALUE },
+                    { index.yearOf(it) ?: Int.MAX_VALUE },
+                    { index.titleOf(it) },
+                ),
+            )
+        } else {
+            // Annan sortering inom varje samling; samlingarna står kvar i sin ordning.
+            list.ordered(movieSort, { index.titleOf(it) }, { it.addedUtc }, { scoreOf(it) }, { index.yearOf(it) }, { tmdbFor(it)?.popularity })
+                .sortedBy { shelves.shelfOf(it)?.ordinal ?: Int.MAX_VALUE }
+        }
+        return index.collapseMovies(sorted, preferDefault = true)
+    }
+
+    /** Kortfilmerna som ligger som serier, i Disneys samlingar. Efter år. */
+    fun disneySeries(shelf: DisneyShelf?): List<Series> {
+        if (shelf != null && shelf != DisneyShelf.SHORTS) return emptyList()
+        val query = movieQuery.trim().lowercase()
+        val index = versions
+        val shelves = disney
+        val character = disneyCharacter
+        val list = library.series.filter { series ->
+            shelves.shelfOf(series) != null &&
+                (query.isEmpty() || query in series.searchKey) &&
+                (character == null || shelves.characterOf(series) == character)
+        }.sortedWith(compareBy<Series>({ index.yearOf(it) ?: Int.MAX_VALUE }, { index.titleOf(it) }))
+        return index.collapseSeries(list, preferDefault = true)
+    }
+
+    fun disneyShelfOf(movie: Movie): DisneyShelf? = disney.shelfOf(movie)
+
+    /** Visas valet Disney på filmsidan. */
+    fun isDisneyCandidate(movie: Movie): Boolean =
+        disney.shelfOf(movie) != null || DisneyIndex.isCandidate(movie.group, versions.titleOf(movie))
+
+    /** Eget val på filmsidan: filmen i en samling, eller ([shelf] null) inte Disney. Gäller alla versioner. */
+    fun setDisneyShelf(movie: Movie, shelf: DisneyShelf?) {
+        val key = DisneyIndex.choiceKey(versions.titleOf(movie), versions.yearOf(movie))
+        disneyChoices = disneyChoices + (key to (shelf?.name ?: DisneyIndex.NONE))
+        saveSettings()
+        scheduleDisney()
+    }
+
+    /** Bygger om Disneys samlingar i bakgrunden. */
+    private fun scheduleDisney() {
+        disneyJob?.cancel()
+        disneyJob = scope.launch {
+            val lib = library
+            val index = versions
+            val choices = disneyChoices
+            disney = withContext(Dispatchers.Default) { DisneyIndex.build(lib, index, choices) }
+        }
     }
 
     fun filteredSeries(): List<Series> {
@@ -617,6 +707,7 @@ class AppState {
                 versions = withContext(Dispatchers.Default) { VersionIndex.build(lib, tmdb, names, filter) }
                 if (versionsDirty) delay(VERSIONS_PAUSE_MS)
             }
+            scheduleDisney()
         }
     }
 
@@ -767,6 +858,8 @@ class AppState {
             footballMatches.filter { it.id !in ids } + fresh
         }
         footballMatches = merged.sortedBy { it.kickoff }
+        val logos = League.entries.mapNotNull { league -> footballClient.logoOf(league)?.let { league to it } }.toMap()
+        if (logos != footballLogos) footballLogos = logos
         val now = System.currentTimeMillis()
         footballUpdatedAt = now
         if (full) footballFullAt = now
@@ -1982,6 +2075,7 @@ class AppState {
         lastVisitUtc = lastVisitUtc,
         hideForeign = hideForeign,
         hiddenGroups = hiddenGroups.toList(),
+        disneyChoices = disneyChoices,
     )
 
     private fun saveSettings() {

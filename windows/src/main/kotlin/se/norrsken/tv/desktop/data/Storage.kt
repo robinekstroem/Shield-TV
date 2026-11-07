@@ -36,6 +36,8 @@ data class Settings(
     val hideForeign: Boolean = false,
     /** Dolda kategorier, som "m|Action" (LibraryFilter.groupKey). */
     val hiddenGroups: List<String> = emptyList(),
+    /** Egna Disneyval: filmens titel och år → samlingen, eller "NONE" för inte Disney. */
+    val disneyChoices: Map<String, String> = emptyMap(),
 )
 
 class Storage {
@@ -106,6 +108,9 @@ class Storage {
             hiddenGroups = o.optJSONArray("hiddenGroups")?.let { array ->
                 (0 until array.length()).mapNotNull { array.optString(it, "").ifEmpty { null } }
             }.orEmpty(),
+            disneyChoices = o.optJSONObject("disneyChoices")?.let { choices ->
+                choices.keys().asSequence().mapNotNull { key -> choices.optString(key, "").ifEmpty { null }?.let { key to it } }.toMap()
+            }.orEmpty(),
         )
     }.getOrDefault(Settings())
 
@@ -124,6 +129,7 @@ class Storage {
                 .put("lastVisitUtc", settings.lastVisitUtc)
                 .put("hideForeign", settings.hideForeign)
                 .put("hiddenGroups", JSONArray(settings.hiddenGroups))
+                .put("disneyChoices", JSONObject(settings.disneyChoices))
             writeAtomically(settingsFile, o.toString(2).toByteArray(Charsets.UTF_8))
         }
     }
