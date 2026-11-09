@@ -8,7 +8,9 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -101,6 +103,16 @@ class MainActivity : ComponentActivity() {
                     }
                 } else {
                     TvTheme(state.theme, translucent = state.backgrounds.isNotEmpty()) {
+                        // Tv:ns bildfrekvens följer bilden: över hela tv:n, liten i hörnet eller ingen alls.
+                        LaunchedEffect(Unit) {
+                            snapshotFlow {
+                                when {
+                                    state.nowPlaying == null -> WindowsIntegration.PlayerView.NONE
+                                    state.miniPlayer -> WindowsIntegration.PlayerView.MINI
+                                    else -> WindowsIntegration.PlayerView.FULL
+                                }
+                            }.collect { WindowsIntegration.playerView(it) }
+                        }
                         Box(Modifier.fillMaxSize().onPreviewKeyEvent { handleRemote(it) }) {
                             AppRoot(state)
                             val playing = state.nowPlaying

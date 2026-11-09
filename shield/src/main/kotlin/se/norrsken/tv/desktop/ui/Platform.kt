@@ -46,6 +46,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import se.norrsken.tv.desktop.data.AppDirs
 import se.norrsken.tv.desktop.player.VideoPlayer
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import java.io.File
 
 // Det som skiljer Shield från Windows i gränssnittet. Samma namn och samma
@@ -125,11 +127,14 @@ internal val hiddenCursor: PointerIcon = PointerIcon.Default
  */
 @Composable
 internal fun VideoSurface(player: VideoPlayer, sampleAspect: Float, sharp: Boolean, modifier: Modifier) {
-    val status by player.status.collectAsState()
+    // Bara bildens storlek: tiden ändras fyra gånger i sekunden och ska inte rita om ytan.
+    val size by remember(player) { player.status.map { it.videoWidth to it.videoHeight }.distinctUntilChanged() }
+        .collectAsState(initial = 0 to 0)
     val cues by player.cues.collectAsState()
     Box(modifier, contentAlignment = Alignment.Center) {
-        val ratio = if (status.videoWidth > 0 && status.videoHeight > 0) {
-            status.videoWidth * sampleAspect / status.videoHeight
+        val (videoWidth, videoHeight) = size
+        val ratio = if (videoWidth > 0 && videoHeight > 0) {
+            videoWidth * sampleAspect / videoHeight
         } else {
             16f / 9f
         }

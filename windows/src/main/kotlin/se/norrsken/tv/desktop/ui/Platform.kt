@@ -203,7 +203,7 @@ internal fun VideoSurface(player: VideoPlayer, sampleAspect: Float, sharp: Boole
 
         when (frame) {
             is Frame.Yuv -> {
-                val paint = holder.yuvPaint(sharp) ?: return@Canvas
+                val paint = holder.yuvPaint(sharp, player.frames.range) ?: return@Canvas
                 drawIntoCanvas { canvas ->
                     val native = canvas.nativeCanvas
                     native.save()
@@ -237,6 +237,7 @@ private class FrameHolder : AutoCloseable {
     private var planes: List<SkImage> = emptyList()
     private var shader: Shader? = null
     private var shaderSharp = false
+    private var shaderRange = VideoPlayer.Range.SDR
     private val paint = SkPaint()
 
     fun replace(next: Frame) {
@@ -252,13 +253,14 @@ private class FrameHolder : AutoCloseable {
         }
     }
 
-    fun yuvPaint(sharp: Boolean): SkPaint? {
+    fun yuvPaint(sharp: Boolean, range: VideoPlayer.Range): SkPaint? {
         val current = frame as? Frame.Yuv ?: return null
         if (planes.size != 3) return null
-        if (shader == null || shaderSharp != sharp) {
+        if (shader == null || shaderSharp != sharp || shaderRange != range) {
             shader?.close()
-            shader = YuvRenderer.shader(planes[0], planes[1], planes[2], current.width, current.height, sharp)
+            shader = YuvRenderer.shader(planes[0], planes[1], planes[2], current.width, current.height, sharp, range)
             shaderSharp = sharp
+            shaderRange = range
         }
         val built = shader ?: return null
         paint.shader = built

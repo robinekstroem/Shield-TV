@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Håller wifi och processor vakna medan en film eller kanal spelas. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- En tv-app: ingen pekskärm, startas från Android TV:s hemskärm. -->
     <uses-feature android:name="android.software.leanback" android:required="true" />

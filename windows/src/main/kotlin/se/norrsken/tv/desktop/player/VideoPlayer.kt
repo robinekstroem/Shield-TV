@@ -51,6 +51,13 @@ class VideoPlayer(factory: MediaPlayerFactory) {
 
     enum class Phase { IDLE, OPENING, PLAYING, PAUSED, ENDED, ERROR }
 
+    /**
+     * Hur bilden är kodad: vanlig bild (SDR), HDR10 och Dolby Vision (PQ),
+     * eller HLG. HDR görs om till vanlig bild på grafikkortet (se [YuvRenderer]);
+     * utan det blir 4K-filmer bleka och gråa.
+     */
+    enum class Range { SDR, PQ, HLG }
+
     /** Ett ljud- eller undertextspår. [language] är VLC:s språknamn, för att hitta samma språk nästa gång. */
     data class Track(val id: Int, val name: String, val language: String?)
 
@@ -104,6 +111,9 @@ class VideoPlayer(factory: MediaPlayerFactory) {
     /** Undertextspråk att välja när en ström startar. "" betyder av, null låter VLC välja. */
     @Volatile var preferredSubtitle: String? = null
 
+    /** Vad titeln säger om HDR, sätts före play(). Null: spelaren avgör efter strömmen. */
+    @Volatile var rangeHint: Range? = null
+
     private val sessions = AtomicLong(0)
     private var currentSession = 0L
     private var poller: Job? = null
@@ -116,6 +126,8 @@ class VideoPlayer(factory: MediaPlayerFactory) {
     private var audioChosen = false
     private var subtitleChosen = false
     private var playingSince = 0L
+    private var rangeKnown = false
+    private var rangeReads = 0
 
     init {
         player.videoSurface().set(
@@ -126,9 +138,13 @@ class VideoPlayer(factory: MediaPlayerFactory) {
     /** Startar strömmen och svarar med ett id som statusen för just den bär. */
     fun play(url: String, userAgent: String, live: Boolean, startMs: Long = 0L): Long {
         val session = sessions.incrementAndGet()
+        val hint = rangeHint
         scope.launch {
             poller?.cancelAndJoin()
             frames.reset()
+            frames.range = hint ?: Range.SDR
+            rangeKnown = hint != null
+            rangeReads = 0
             sampleAspect = null
             aspectReads = 0
             audioTracks = emptyList()
@@ -262,6 +278,14 @@ class VideoPlayer(factory: MediaPlayerFactory) {
                     aspectReads++
                     readSampleAspect()?.let { sampleAspect = it }
                 }
+                // Sa namnet inget om HDR: titta på strömmen själv.
+                if (!rangeKnown && rangeReads < 20) {
+                    rangeReads++
+                    readRange()?.let {
+                        rangeKnown = true
+                        frames.range = it
+                    }
+                }
             }
             // Spåren ändras sällan; en gång i sekunden räcker.
             if (tick % 4 == 0 && (phase == Phase.PLAYING || phase == Phase.PAUSED)) {
@@ -374,6 +398,26 @@ class VideoPlayer(factory: MediaPlayerFactory) {
         val den = track.sampleAspectRatioBase()
         if (num > 0 && den > 0) num.toFloat() / den else 1f
     }.getOrNull()
+
+    /**
+     * HDR utan märkning i namnet: 4K i HEVC Main 10 (eller VP9 med tio bitar)
+     * är i praktiken alltid HDR10 eller Dolby Vision. Allt annat är vanlig
+     * bild. Null så länge VLC inte vet än — då frågar spelaren igen.
+     */
+    private fun readRange(): Range? = runCatching {
+        val track = player.media().info().videoTracks().firstOrNull() ?: return null
+        if (track.width() <= 0) return null
+        val codec = fourcc(track.codec())
+        val hevc = codec.equals("hevc", ignoreCase = true) || codec.equals("h265", ignoreCase = true)
+        val vp9 = codec.equals("vp90", ignoreCase = true) || codec.equals("vp09", ignoreCase = true)
+        val profile = track.profile()
+        if ((hevc || vp9) && profile <= 0) return null
+        val tenBit = (hevc && profile == 2) || (vp9 && profile >= 2)
+        if (tenBit && track.width() >= 3200) Range.PQ else Range.SDR
+    }.getOrNull()
+
+    /** VLC:s codec-kod som de fyra bokstäverna den består av: "hevc", "VP90". */
+    private fun fourcc(code: Int): String = String(CharArray(4) { ((code shr (8 * it)) and 0xFF).toChar() })
 }
 
 /** En bildruta från VLC. Den som har den äger den och stänger den när en ny tar över. */
@@ -425,6 +469,10 @@ class FrameSink(val yuv: Boolean) {
     var height = 0
         private set
 
+    /** Hur rutorna är kodade: HDR görs om till vanlig bild när de ritas. */
+    @Volatile
+    var range: VideoPlayer.Range = VideoPlayer.Range.SDR
+
     val formatCallback: BufferFormatCallback = object : BufferFormatCallbackAdapter() {
         override fun getBufferFormat(sourceWidth: Int, sourceHeight: Int): BufferFormat {
             val size = limit(sourceWidth, sourceHeight)
@@ -461,6 +509,7 @@ class FrameSink(val yuv: Boolean) {
     fun reset() {
         pending.getAndSet(null)?.close()
         counter.set(0)
+        range = VideoPlayer.Range.SDR
     }
 
     private fun yuvFrame(buffers: Array<ByteBuffer>, w: Int, h: Int): Frame? {

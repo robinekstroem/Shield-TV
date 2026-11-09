@@ -157,6 +157,8 @@ data class NowPlaying(
     val entry: WatchEntry? = null,
     /** Var uppspelningen börjar: där man slutade förra gången. */
     val startMs: Long = 0L,
+    /** Namnet som leverantören skrev det, med märkningar som "4K HDR". */
+    val name: String? = null,
 )
 
 /**
@@ -444,6 +446,10 @@ class AppState {
     /** Spelaren krympt till ett hörn: den spelar vidare medan man bläddrar. */
     var miniPlayer by mutableStateOf(false)
         private set
+
+    /** En film eller kanal fyller skärmen. Då vilar de tunga bakgrundsjobben. */
+    val watching: Boolean
+        get() = nowPlaying != null && !miniPlayer
     var volume by mutableStateOf(80)
         private set
     var muted by mutableStateOf(false)
@@ -537,7 +543,8 @@ class AppState {
                 clock = System.currentTimeMillis()
                 // Var tionde minut: är någon tablå äldre än tolv timmar hämtas den om,
                 // och står appen framme länge hämtas kanalerna om var tredje timme.
-                if (++ticks % 20 == 0) {
+                // Inte medan något fyller skärmen: en stor tablå tar kraft från bilden.
+                if (++ticks % 20 == 0 && !watching) {
                     queueStaleGuides()
                     if (appVisible) refreshChannelsAndGuide(CHANNELS_STALE_MS)
                 }
@@ -891,7 +898,6 @@ class AppState {
         delay(FOOTBALL_START_DELAY_MS)
         while (true) {
             val now = System.currentTimeMillis()
-            val watching = nowPlaying != null && !miniPlayer
             if (!footballVisible && appVisible && !watching) {
                 val ongoing = footballMatches.any { it.state == MatchState.LIVE || it.shouldHaveStarted(now) }
                 when {
@@ -1892,7 +1898,7 @@ class AppState {
             image = channel.logo,
             watchedAtUtc = System.currentTimeMillis(),
         )
-        val item = NowPlaying(title = channel.name, subtitle = channel.group, live = true, channel = channel, queue = queue, entry = entry)
+        val item = NowPlaying(title = channel.name, subtitle = channel.group, live = true, channel = channel, queue = queue, entry = entry, name = channel.name)
         launchPlayback(item) {
             channel.url ?: run {
                 val streamId = channel.streamId ?: return@run null
@@ -1917,7 +1923,14 @@ class AppState {
             durationMs = earlier?.durationMs ?: 0L,
             extension = movie.extension,
         )
-        val item = NowPlaying(title = titleOf(movie), subtitle = versions.labelOf(movie).ifEmpty { movie.group }, live = false, entry = entry, startMs = start)
+        val item = NowPlaying(
+            title = titleOf(movie),
+            subtitle = versions.labelOf(movie).ifEmpty { movie.group },
+            live = false,
+            entry = entry,
+            startMs = start,
+            name = movie.name,
+        )
         launchPlayback(item) {
             val account = credentials(movie.sourceId) ?: return@launchPlayback null
             xtream.movieUrl(account.second, movie.streamId, movie.extension)
@@ -1946,7 +1959,14 @@ class AppState {
             episode = episode.episode,
             extension = episode.containerExtension,
         )
-        val item = NowPlaying(title = titleOf(series), subtitle = subtitle, live = false, entry = entry, startMs = start)
+        val item = NowPlaying(
+            title = titleOf(series),
+            subtitle = subtitle,
+            live = false,
+            entry = entry,
+            startMs = start,
+            name = series.name + " " + episode.title,
+        )
         launchPlayback(item) {
             val account = credentials(series.sourceId) ?: return@launchPlayback null
             xtream.episodeUrl(account.second, episode.id, episode.containerExtension)
@@ -1992,6 +2012,8 @@ class AppState {
             player.setMuted(muted)
             player.preferredAudio = preferredAudio
             player.preferredSubtitle = preferredSubtitle
+            // Windows behöver veta om bilden är HDR för att visa rätt färger; Shield sköter det själv.
+            player.rangeHint = rangeHintOf(item.name)
             playbackSession = player.play(url, userAgent, live = item.live, startMs = item.startMs)
             trackPosition(item)
             WindowsIntegration.keepAwake(true)
@@ -2333,19 +2355,20 @@ class AppState {
             }
             WatchKind.EPISODE -> {
                 val start = if (entry.resumable) entry.positionMs else 0L
+                val series = library.series.firstOrNull { it.sourceId == entry.sourceId && it.seriesId == entry.seriesId }
                 val item = NowPlaying(
                     title = entry.title,
                     subtitle = entry.subtitle,
                     live = false,
                     entry = entry.copy(watchedAtUtc = System.currentTimeMillis(), upNext = false),
                     startMs = start,
+                    name = series?.name,
                 )
                 launchPlayback(item) {
                     val account = credentials(entry.sourceId) ?: return@launchPlayback null
                     xtream.episodeUrl(account.second, entry.itemId, entry.extension ?: "mp4")
                 }
-                library.series.firstOrNull { it.sourceId == entry.sourceId && it.seriesId == entry.seriesId }
-                    ?.let { startSeriesExtras(it, entry.itemId) }
+                series?.let { startSeriesExtras(it, entry.itemId) }
             }
         }
     }
@@ -2541,6 +2564,7 @@ class AppState {
             var batches = 0
             var lastPublish = System.currentTimeMillis()
             for (movie in missing) {
+                restWhileWatching()
                 val account = accounts.getOrPut(movie.sourceId) { credentials(movie.sourceId)?.second } ?: continue
                 val result = withContext(Dispatchers.IO) {
                     runCatching { xtream.vodInfo(account, movie.streamId) }
@@ -2574,6 +2598,15 @@ class AppState {
             publishFacts(fresh, save = true)
             factsProgress = done to wanted.size
         }
+    }
+
+    /**
+     * Medan en film eller kanal fyller skärmen väntar hämtningarna: varje ny
+     * omgång räknar om listor och sparar filer, och det ska aldrig ta kraft
+     * från bilden. De fortsätter när spelaren stängs eller krymps till hörnet.
+     */
+    private suspend fun restWhileWatching() {
+        while (watching) delay(WATCH_REST_MS)
     }
 
     private fun publishFacts(fresh: Map<String, MovieFacts>, save: Boolean) {
@@ -2717,6 +2750,9 @@ class AppState {
                 repeat(TMDB_WORKERS) {
                     launch {
                         while (!stopped && queue.hasNext()) {
+                            restWhileWatching()
+                            // Under pausen kan de andra ha tagit det sista.
+                            if (stopped || !queue.hasNext()) break
                             val (kind, title, year) = queue.next()
                             val result = withContext(Dispatchers.IO) {
                                 runCatching { client.search(kind, title, year, genres[kind].orEmpty()) }
@@ -2875,8 +2911,29 @@ private fun <T> List<T>.ordered(
         .map { it.first }
 }
 
+/**
+ * Vad namnet säger om bilden: "Dune [4K HDR]", "… DV", "… HLG". "SDR" betyder
+ * uttryckligen vanlig bild. Null när namnet inte säger något — då avgör
+ * spelaren själv, efter vad strömmen är.
+ */
+private fun rangeHintOf(name: String?): VideoPlayer.Range? {
+    if (name.isNullOrBlank()) return null
+    return when {
+        HLG_TAG.containsMatchIn(name) -> VideoPlayer.Range.HLG
+        HDR_TAG.containsMatchIn(name) -> VideoPlayer.Range.PQ
+        SDR_TAG.containsMatchIn(name) -> VideoPlayer.Range.SDR
+        else -> null
+    }
+}
+
+private val HDR_TAG = Regex("""(?i)(?<![a-z0-9])(hdr10\+?|hdr|dovi|dolby[\s._-]?vision|dv)(?![a-z0-9])""")
+private val HLG_TAG = Regex("""(?i)(?<![a-z0-9])hlg(?![a-z0-9])""")
+private val SDR_TAG = Regex("""(?i)(?<![a-z0-9])sdr(?![a-z0-9])""")
+
 private const val MAX_HISTORY = 300
 private const val FACTS_PACE_MS = 500L
+/** Hur ofta en vilande hämtning tittar om spelaren stängts. */
+private const val WATCH_REST_MS = 3_000L
 /** Nya TMDB-svar och infosidor visas i klumpar: så här många, eller så här ofta. */
 private const val PUBLISH_BATCH = 500
 private const val PUBLISH_EVERY_MS = 20_000L

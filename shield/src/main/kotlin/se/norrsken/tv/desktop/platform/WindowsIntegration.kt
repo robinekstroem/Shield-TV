@@ -1,7 +1,10 @@
 package se.norrsken.tv.desktop.platform
 
 import android.app.Activity
+import android.hardware.display.DisplayManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.view.Display
 import android.view.WindowManager
 import kotlin.math.abs
@@ -9,16 +12,92 @@ import kotlin.math.roundToInt
 
 /**
  * Shield-versionen. Samma namn som Windows-filen, så att den delade koden
- * hittar den: vaken skärm under uppspelning, och bildfrekvensen som följer
- * innehållet.
+ * hittar den: vaken skärm under uppspelning, och tv:ns bildfrekvens som
+ * följer det som spelas.
+ *
+ * Bildfrekvensen: en film i 23,976 bilder per sekund visas på 23,976 Hz,
+ * svensk tv och fotboll (25 eller 50 bilder) på 50 Hz. På tv:ns vanliga
+ * 60 Hz hackar rörelserna annars, eftersom en bild då och då visas en gång
+ * för mycket. Bland lägen som går jämnt upp väljs det snabbaste, så att
+ * menyerna ovanpå bilden rör sig mjukt: 50 Hz hellre än 25.
+ *
+ * Läget gäller bara medan bilden syns. Stängs spelaren går tv:n tillbaka
+ * till sitt vanliga läge, så att menyerna aldrig fastnar på 24 Hz. Den
+ * lilla bilden i hörnet behåller 50 och 60 Hz, men inte filmens 24.
+ *
+ * Allt här körs på huvudtråden.
  */
 object WindowsIntegration {
-    @Volatile
+
+    /** Var bilden syns: ingenstans, liten i hörnet eller över hela tv:n. */
+    enum class PlayerView { NONE, MINI, FULL }
+
+    private val main = Handler(Looper.getMainLooper())
     private var activity: Activity? = null
 
+    /** Tv:ns läge när appen inte önskar något: dit går den tillbaka. */
+    private var uiMode: Display.Mode? = null
+    private var view = PlayerView.NONE
+
+    /** Bildfrekvensen i det som spelas, när den är känd. */
+    private var contentFps: Float? = null
+
+    /**
+     * Anropas med true när tv:n byter läge medan bilden fyller skärmen, och
+     * med false när den har ställt om sig. Spelaren låter en film vänta så
+     * länge, så att inget hinner spelas medan tv:n är svart.
+     */
+    var onSwitching: ((Boolean) -> Unit)? = null
+
+    private var settle: Runnable? = null
+    private var awaitedMode = 0
+    private var modeReached = false
+
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) = Unit
+
+        override fun onDisplayRemoved(displayId: Int) = Unit
+
+        override fun onDisplayChanged(displayId: Int) {
+            val current = activity ?: return
+            val display = displayOf(current) ?: return
+            if (display.displayId != displayId) return
+            // Ändrar man tv:ns läge i Shields inställningar blir det det nya vanliga.
+            if (current.window.attributes.preferredDisplayModeId == 0) uiMode = display.mode
+            val done = settle ?: return
+            if (modeReached || display.mode.modeId != awaitedMode) return
+            // Läget är bytt. Tv:n behöver ändå en stund innan bilden syns igen.
+            modeReached = true
+            main.removeCallbacks(done)
+            main.postDelayed(done, SETTLE_MS)
+        }
+    }
+
     fun attach(activity: Activity?) {
-        if (activity == null) resetFrameRate()
+        val previous = this.activity
+        if (activity == null) {
+            finishSwitch()
+            contentFps = null
+            view = PlayerView.NONE
+            if (previous != null) {
+                runCatching { previous.getSystemService(DisplayManager::class.java)?.unregisterDisplayListener(displayListener) }
+                runCatching {
+                    val attributes = previous.window.attributes
+                    if (attributes.preferredDisplayModeId != 0) {
+                        attributes.preferredDisplayModeId = 0
+                        previous.window.attributes = attributes
+                    }
+                }
+            }
+            this.activity = null
+            return
+        }
+        if (previous != null && previous !== activity) {
+            runCatching { previous.getSystemService(DisplayManager::class.java)?.unregisterDisplayListener(displayListener) }
+        }
         this.activity = activity
+        uiMode = displayOf(activity)?.mode
+        runCatching { activity.getSystemService(DisplayManager::class.java)?.registerDisplayListener(displayListener, main) }
     }
 
     fun keepAwake(enabled: Boolean) {
@@ -33,47 +112,106 @@ object WindowsIntegration {
     }
 
     /**
-     * Ställer tv:n på en bildfrekvens som går jämnt upp med strömmen: 50 Hz för
-     * svenska kanaler i 25 eller 50 bilder per sekund, 23,976 Hz för film. Utan
-     * det hackar rörelser när 50 Hz-tv visas på 60 Hz. Byts bara när det
-     * behövs; tv:n kan blinka till en gång när det sker.
+     * Bildfrekvensen i det som spelas: angiven av strömmen, eller uppmätt när
+     * den inte säger något (direktsänd tv). Samma värde två gånger gör inget.
      */
     fun matchFrameRate(fps: Float?) {
-        val current = activity ?: return
         if (fps == null || fps <= 0f) return
-        current.runOnUiThread {
-            val display = displayOf(current) ?: return@runOnUiThread
-            val active = display.mode
-            if (score(active.refreshRate, fps) < 0.002f) return@runOnUiThread
-            val best = display.supportedModes
-                .filter { it.physicalWidth == active.physicalWidth && it.physicalHeight == active.physicalHeight }
-                .minByOrNull { score(it.refreshRate, fps) }
-                ?.takeIf { score(it.refreshRate, fps) < 0.002f }
-                ?: return@runOnUiThread
-            val attributes = current.window.attributes
-            if (attributes.preferredDisplayModeId != best.modeId) {
-                attributes.preferredDisplayModeId = best.modeId
-                current.window.attributes = attributes
-            }
+        onMain {
+            contentFps = fps
+            apply()
         }
     }
 
-    private fun resetFrameRate() {
+    /** Var bilden syns. Utan spelare glöms bildfrekvensen och tv:n går tillbaka. */
+    fun playerView(next: PlayerView) {
+        onMain {
+            if (next == PlayerView.NONE) contentFps = null
+            view = next
+            apply()
+        }
+    }
+
+    private fun apply() {
         val current = activity ?: return
-        current.runOnUiThread {
-            val attributes = current.window.attributes
-            attributes.preferredDisplayModeId = 0
-            current.window.attributes = attributes
+        val display = displayOf(current) ?: return
+        val attributes = current.window.attributes
+        if (attributes.preferredDisplayModeId == 0) uiMode = display.mode
+        val fps = contentFps
+        val target = if (fps == null || view == PlayerView.NONE) {
+            null
+        } else {
+            // Liten bild i hörnet: menyerna går före, så 24 Hz gäller bara i helbild.
+            bestMode(display, fps)?.takeIf { view == PlayerView.FULL || it.refreshRate >= SMOOTH_HZ }
+        }
+        val id = target?.modeId ?: 0
+        if (attributes.preferredDisplayModeId == id) return
+        attributes.preferredDisplayModeId = id
+        current.window.attributes = attributes
+        // Tv:n blir svart en stund när läget byts. Fyller bilden skärmen får en film vänta.
+        if (target != null && view == PlayerView.FULL && target.modeId != display.mode.modeId) {
+            beginSwitch(target.modeId)
+        } else {
+            finishSwitch()
         }
     }
 
-    /** Hur väl en uppdateringsfrekvens passar: 0 är en jämn multipel. Lägre multipel vinner vid lika. */
-    private fun score(refresh: Float, fps: Float): Float {
-        val multiple = (refresh / fps).roundToInt().coerceIn(1, 3)
-        return abs(refresh - fps * multiple) / refresh + (multiple - 1) * 0.0001f
+    /**
+     * Det snabbaste läget i tv:ns vanliga upplösning som går jämnt upp med
+     * bildfrekvensen. Upplösningen behålls: Shield skalar själv upp till 4K,
+     * bättre än många tv-apparater. Finns inget exakt läge duger ett som
+     * nästan går jämnt upp (24 bilder på 23,976 Hz) — det är ändå mjukare
+     * än 60 Hz.
+     */
+    private fun bestMode(display: Display, fps: Float): Display.Mode? {
+        val base = uiMode ?: display.mode
+        val sameSize = display.supportedModes.filter {
+            it.physicalWidth == base.physicalWidth && it.physicalHeight == base.physicalHeight
+        }
+        return sameSize.filter { fits(it.refreshRate, fps, EXACT) }.maxByOrNull { it.refreshRate }
+            ?: sameSize.filter { fits(it.refreshRate, fps, NEAR) }.maxByOrNull { it.refreshRate }
+    }
+
+    /** Om frekvensen är en jämn multipel av bildfrekvensen: 50 Hz för 25 bilder, 23,976 Hz för 23,976. */
+    private fun fits(refresh: Float, fps: Float, tolerance: Float): Boolean {
+        val multiple = (refresh / fps).roundToInt()
+        return multiple >= 1 && abs(refresh - fps * multiple) / refresh < tolerance
+    }
+
+    private fun beginSwitch(modeId: Int) {
+        settle?.let { main.removeCallbacks(it) }
+        val done = Runnable { finishSwitch() }
+        settle = done
+        awaitedMode = modeId
+        modeReached = false
+        onSwitching?.invoke(true)
+        // Säger tv:n aldrig att den bytt fortsätter filmen ändå efter en stund.
+        main.postDelayed(done, SWITCH_TIMEOUT_MS)
+    }
+
+    private fun finishSwitch() {
+        val pending = settle ?: return
+        main.removeCallbacks(pending)
+        settle = null
+        onSwitching?.invoke(false)
+    }
+
+    private fun onMain(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) block() else main.post(block)
     }
 
     @Suppress("DEPRECATION")
     private fun displayOf(activity: Activity): Display? =
         if (Build.VERSION.SDK_INT >= 30) activity.display else activity.windowManager.defaultDisplay
 }
+
+/** 48 Hz och uppåt räcker för att menyerna ska röra sig mjukt. */
+private const val SMOOTH_HZ = 47f
+
+/** 23,976 och 24 skiljer en promille: exakt betyder under en halv. */
+private const val EXACT = 0.0005f
+private const val NEAR = 0.0015f
+
+/** Efter bytet: så länge brukar tv:n vara svart innan bilden kommer tillbaka. */
+private const val SETTLE_MS = 1_800L
+private const val SWITCH_TIMEOUT_MS = 4_500L
