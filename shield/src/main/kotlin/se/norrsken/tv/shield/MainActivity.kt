@@ -24,7 +24,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import se.norrsken.tv.desktop.AppState
 import se.norrsken.tv.desktop.data.AppDirs
-import se.norrsken.tv.desktop.data.DisneyShelf
+import se.norrsken.tv.desktop.data.CollectionKeys
 import se.norrsken.tv.desktop.platform.WindowsIntegration
 import se.norrsken.tv.desktop.ui.AppRoot
 import se.norrsken.tv.desktop.ui.AppTheme
@@ -137,7 +137,9 @@ class MainActivity : ComponentActivity() {
                         state.trackPanelOpen -> state.trackPanelOpen = false
                         // Rutan Nästa avsnitt: Tillbaka betyder "titta klart".
                         playing != null && !state.miniPlayer && state.dismissPlayerPrompt() -> Unit
-                        // Som Esc i Windows: bilden krymper upp i sidofältet och fortsätter där.
+                        // Knapparna i spelaren: tillbaka till bilden först.
+                        playing != null && !state.miniPlayer && state.leavePlayerControls() -> Unit
+                        // Som Esc i Windows: bilden krymper till en liten bild i hörnet och fortsätter där.
                         playing != null && !state.miniPlayer -> state.minimizePlayer()
                         // Kategorierna framme: tillbaka in i innehållet, som pil höger.
                         TvNav.drawer == TvDrawer.CATEGORIES && TvNav.leaveCategories != null -> TvNav.leaveCategories?.invoke()
@@ -147,11 +149,9 @@ class MainActivity : ComponentActivity() {
                         playing != null -> state.closePlayer()
                         // Fotboll: från en liga tillbaka till översikten.
                         state.screen == Screen.FOOTBALL && state.footballLeague != null -> state.footballLeague = null
-                        // Disney: från en samling tillbaka till alla tre.
-                        state.screen == Screen.MOVIES && DisneyShelf.of(state.movieGroup) != null -> {
-                            state.movieGroup = DisneyShelf.ALL_KEY
-                            state.disneyCharacter = null
-                        }
+                        // Samlingar: från en samling (eller Disney) tillbaka till galleriet.
+                        state.screen == Screen.MOVIES && CollectionKeys.isInside(state.movieGroup) ->
+                            state.openCollection(CollectionKeys.GALLERY)
                         // Som på andra tv-appar: Tillbaka leder till startsidan innan appen stängs.
                         state.screen != Screen.HOME -> state.screen = Screen.HOME
                         else -> {
@@ -181,6 +181,17 @@ class MainActivity : ComponentActivity() {
         // Kanallistan och panelen för ljud och undertext styrs med pilarna som resten av appen.
         if (channelsOpen || state.trackPanelOpen) return false
 
+        // Spelarens knappar har markeringen: pilarna flyttar mellan dem och OK
+        // trycker på den man står på. Knapparna står kvar så länge man använder dem.
+        if (state.playerControlsFocused) {
+            state.touchPlayer(force = true)
+            if (event.key == Key.MediaPlayPause || event.key == Key.MediaPlay || event.key == Key.MediaPause) {
+                state.togglePause()
+                return true
+            }
+            return false
+        }
+
         val live = playing.live
         when (event.key) {
             Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
@@ -192,6 +203,12 @@ class MainActivity : ComponentActivity() {
             }
             Key.DirectionLeft -> if (live) {
                 channelsOpen = true
+                return true
+            }
+            // Pil upp eller ner i en film: knapparna fram, med markeringen på Spela/Paus.
+            // (Ljudet sköts med tv:ns egen fjärrkontroll.) I direktsänt byter de kanal.
+            Key.DirectionUp, Key.DirectionDown -> if (!live) {
+                state.focusPlayerControls()
                 return true
             }
             Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> {

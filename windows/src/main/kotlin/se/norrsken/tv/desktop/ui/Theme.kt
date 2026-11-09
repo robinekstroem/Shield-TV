@@ -378,9 +378,9 @@ fun rememberCardShine(active: Boolean): CardShine? {
         launch { shine.sweep.animateTo(1f, tween(SHINE_MS, easing = FastOutSlowInEasing)) }
         val start = TimeSource.Monotonic.markNow()
         val from = shine.turn.floatValue
-        // Trettio gånger i sekunden räcker för en kant som vandrar så sakta.
+        // Tjugo gånger i sekunden räcker för en kant som vandrar så sakta.
         while (true) {
-            delay(33)
+            delay(50)
             shine.turn.floatValue = from + start.elapsedNow().inWholeMilliseconds / RING_TURN_MS.toFloat()
         }
     }

@@ -729,7 +729,8 @@ private fun CrystalLight(running: Boolean, modifier: Modifier) {
             )
         }
     }
-    val seconds = rememberSeconds(running, fps = 24)
+    // Färgfälten rör sig så sakta att femton bilder i sekunden räcker, och lämnar kraft åt resten.
+    val seconds = rememberSeconds(running, fps = 15)
     Spacer(
         modifier.drawWithCache {
             val w = size.width

@@ -135,26 +135,44 @@ fun FootballScreen(state: AppState) {
             focus.started = true
             if (changed) {
                 withFrameNanos { }
-                runCatching { focus.chip.requestFocus() }
+                // Tv: ligorna ligger i kategorilistan, som tar emot markeringen
+                // (om man inte redan bläddrar i den).
+                if (TvNav.drawer != TvDrawer.CATEGORIES) TvNav.openCategories()
             }
         }
     }
     val palette = LocalPalette.current
-    Column(Modifier.fillMaxSize()) {
-        FootballHeader(state)
-        LeagueChips(state, league, focus)
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            when {
-                state.footballMatches.isEmpty() && state.footballError == null -> Spinner(Modifier.align(Alignment.Center))
-                state.footballMatches.isEmpty() -> Text(
-                    state.footballError.orEmpty(),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = palette.textTertiary,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.align(Alignment.Center).padding(32.dp),
-                )
-                league == null -> Overview(state, focus, lists)
-                else -> LeagueView(state, league, focus, lists, scrolls)
+    Row(Modifier.fillMaxSize()) {
+        // Tv: ligorna är kategorierna, som i Filmer — de glider fram med pil
+        // vänster, och ligan byts medan man bläddrar bland dem.
+        if (tvLayout) {
+            val counts = remember(state.footballMatches) { state.footballMatches.groupingBy { it.league.title }.eachCount() }
+            GroupColumn(
+                allLabel = "Översikt",
+                total = state.footballMatches.size,
+                groups = League.entries.map { it.title },
+                counts = counts,
+                selected = league?.title,
+                onSelect = { title -> state.footballLeague = League.entries.firstOrNull { it.title == title } },
+                title = "LIGOR",
+            )
+        }
+        Column(Modifier.weight(1f).fillMaxHeight()) {
+            FootballHeader(state)
+            if (!tvLayout) LeagueChips(state, league, focus)
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                when {
+                    state.footballMatches.isEmpty() && state.footballError == null -> Spinner(Modifier.align(Alignment.Center))
+                    state.footballMatches.isEmpty() -> Text(
+                        state.footballError.orEmpty(),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = palette.textTertiary,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.align(Alignment.Center).padding(32.dp),
+                    )
+                    league == null -> Overview(state, focus, lists)
+                    else -> LeagueView(state, league, focus, lists, scrolls)
+                }
             }
         }
     }

@@ -7,6 +7,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -106,7 +107,13 @@ fun PlayerScreen(state: AppState, collapse: Float = 0f, highlighted: Boolean = f
     val problem = problemFor(state, playing, status)
     val waiting = problem == null && (player == null || status.phase == Phase.OPENING || status.phase == Phase.IDLE || status.stalled)
     val controlsVisible = problem != null || status.phase == Phase.PAUSED || state.trackPanelOpen ||
-        now - state.lastActivity < 3_500
+        now - state.lastActivity < 3_500 ||
+        // Tv: medan man står på knapparna står de kvar en stund längre.
+        (tvLayout && state.playerControlsFocused && now - state.lastActivity < 8_000)
+    // Tv: tonar knapparna bort medan en av dem har markeringen går den tillbaka till bilden.
+    if (tvLayout) {
+        LaunchedEffect(controlsVisible) { if (!controlsVisible) state.leavePlayerControls() }
+    }
     val mini = collapse > 0.5f
     val hoverSource = remember { MutableInteractionSource() }
     val hovered by hoverSource.collectIsHoveredAsState()
@@ -185,7 +192,11 @@ fun PlayerScreen(state: AppState, collapse: Float = 0f, highlighted: Boolean = f
             // Kontrollerna tonar bort redan i början av krympningen.
             modifier = Modifier.fillMaxSize().graphicsLayer { alpha = (1f - collapse * 3f).coerceIn(0f, 1f) },
         ) {
-            Box(Modifier.fillMaxSize()) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .onFocusChanged { if (tvLayout) state.playerControlsFocused = it.hasFocus },
+            ) {
                 TopBar(state, playing, status, now, Modifier.align(Alignment.TopCenter))
                 BottomBar(state, playing, status, Modifier.align(Alignment.BottomCenter))
             }
@@ -284,6 +295,16 @@ private fun BottomBar(state: AppState, playing: NowPlaying, status: VideoPlayer.
     val palette = LocalPalette.current
     val player = state.videoPlayer
     val paused = status.phase == Phase.PAUSED
+    // Tv: pil upp eller ner tar fram knapparna med markeringen på Spela/Paus.
+    val playButton = remember { FocusRequester() }
+    if (tvLayout) {
+        LaunchedEffect(state.controlsFocusTick) {
+            if (state.takeControlsFocus()) {
+                repeat(2) { withFrameNanos { } }
+                runCatching { playButton.requestFocus() }
+            }
+        }
+    }
     Column(
         modifier
             .fillMaxWidth()
@@ -291,18 +312,20 @@ private fun BottomBar(state: AppState, playing: NowPlaying, status: VideoPlayer.
             .padding(start = 20.dp, end = 20.dp, top = 40.dp, bottom = 14.dp),
     ) {
         if (!playing.live && status.lengthMs > 0) {
-            SeekBar(status, onSeek = { fraction -> state.seekTo(fraction) })
+            // Tv: tidslinjen visar bara var man är. Man spolar med pil vänster och
+            // höger på bilden, eller knapparna — ett reglage fångar markeringen.
+            if (tvLayout) TvTimeline(status) else SeekBar(status, onSeek = { fraction -> state.seekTo(fraction) })
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             val playPause = if (paused) Glyphs.Play else Glyphs.Pause
             val playPauseLabel = if (paused) "Spela" else "Paus"
             if (playing.live) {
                 IconAction(Glyphs.SkipPrevious, "Föregående kanal", onClick = { state.switchChannel(-1) })
-                IconAction(playPause, playPauseLabel, onClick = { state.togglePause() }, size = 52.dp, iconSize = 30.dp, emphasized = true)
+                IconAction(playPause, playPauseLabel, onClick = { state.togglePause() }, size = 52.dp, iconSize = 30.dp, emphasized = true, modifier = Modifier.focusRequester(playButton))
                 IconAction(Glyphs.SkipNext, "Nästa kanal", onClick = { state.switchChannel(1) })
             } else {
                 IconAction(Glyphs.Replay10, "Bakåt 10 sekunder", onClick = { state.seekBy(-10_000) })
-                IconAction(playPause, playPauseLabel, onClick = { state.togglePause() }, size = 52.dp, iconSize = 30.dp, emphasized = true)
+                IconAction(playPause, playPauseLabel, onClick = { state.togglePause() }, size = 52.dp, iconSize = 30.dp, emphasized = true, modifier = Modifier.focusRequester(playButton))
                 IconAction(Glyphs.Forward10, "Framåt 10 sekunder", onClick = { state.seekBy(10_000) })
                 if (status.lengthMs > 0) {
                     Spacer(Modifier.width(10.dp))
@@ -322,24 +345,27 @@ private fun BottomBar(state: AppState, playing: NowPlaying, status: VideoPlayer.
                 onClick = { state.trackPanelOpen = !state.trackPanelOpen },
                 emphasized = state.trackPanelOpen,
             )
-            Spacer(Modifier.width(4.dp))
-            IconAction(
-                if (state.muted || state.volume == 0) Glyphs.VolumeOff else Glyphs.Volume,
-                if (state.muted) "Slå på ljudet" else "Stäng av ljudet",
-                onClick = { state.toggleMute() },
-            )
-            Slider(
-                value = if (state.muted) 0f else state.volume / 100f,
-                onValueChange = { state.setVolumeLevel((it * 100).roundToInt()) },
-                modifier = Modifier.width(130.dp),
-                colors = sliderColors(),
-            )
-            Spacer(Modifier.width(8.dp))
-            IconAction(
-                if (state.fullscreen) Glyphs.FullscreenExit else Glyphs.Fullscreen,
-                if (state.fullscreen) "Lämna helskärm" else "Helskärm",
-                onClick = { state.toggleFullscreen() },
-            )
+            // Tv: ljudet sköts med tv:ns egen fjärrkontroll, och bilden är alltid i helskärm.
+            if (!tvLayout) {
+                Spacer(Modifier.width(4.dp))
+                IconAction(
+                    if (state.muted || state.volume == 0) Glyphs.VolumeOff else Glyphs.Volume,
+                    if (state.muted) "Slå på ljudet" else "Stäng av ljudet",
+                    onClick = { state.toggleMute() },
+                )
+                Slider(
+                    value = if (state.muted) 0f else state.volume / 100f,
+                    onValueChange = { state.setVolumeLevel((it * 100).roundToInt()) },
+                    modifier = Modifier.width(130.dp),
+                    colors = sliderColors(),
+                )
+                Spacer(Modifier.width(8.dp))
+                IconAction(
+                    if (state.fullscreen) Glyphs.FullscreenExit else Glyphs.Fullscreen,
+                    if (state.fullscreen) "Lämna helskärm" else "Helskärm",
+                    onClick = { state.toggleFullscreen() },
+                )
+            }
         }
     }
 }
@@ -449,6 +475,23 @@ private fun TrackList(
                 modifier = Modifier.padding(start = 10.dp, top = 6.dp),
             )
         }
+    }
+}
+
+/** Tv: var i filmen man är, som en tunn linje utan reglage. */
+@Composable
+private fun TvTimeline(status: VideoPlayer.Status) {
+    val palette = LocalPalette.current
+    val position = (status.timeMs.toFloat() / status.lengthMs).coerceIn(0f, 1f)
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 6.dp, end = 6.dp, top = 12.dp, bottom = 16.dp)
+            .height(5.dp)
+            .clip(RoundedCornerShape(3.dp))
+            .background(palette.focus.copy(alpha = 0.22f)),
+    ) {
+        Box(Modifier.fillMaxHeight().fillMaxWidth(position).background(palette.focus))
     }
 }
 

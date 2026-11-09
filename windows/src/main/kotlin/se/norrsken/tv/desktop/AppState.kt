@@ -1,7 +1,10 @@
 package se.norrsken.tv.desktop
 
 import se.norrsken.tv.desktop.data.VersionIndex
+import se.norrsken.tv.desktop.data.CollectionIndex
 import se.norrsken.tv.desktop.data.DisneyIndex
+import se.norrsken.tv.desktop.data.Franchise
+import se.norrsken.tv.desktop.data.FranchiseFilm
 import se.norrsken.tv.desktop.data.DisneyShelf
 import se.norrsken.tv.desktop.data.LibraryFilter
 import se.norrsken.tv.desktop.data.SeriesMark
@@ -66,6 +69,7 @@ import androidx.compose.ui.input.key.type
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -73,6 +77,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import se.norrsken.tv.data.playlist.ImportState
 import se.norrsken.tv.data.playlist.XtreamCredentials
 import se.norrsken.tv.data.playlist.extractXtreamCredentials
@@ -118,6 +123,8 @@ enum class SortOrder(val label: String) {
 }
 
 private const val HOUR = 3_600_000L
+/** Så länge de tunga bakgrundsjobben som längst väntar på att startsidan ska bli klar. */
+private const val STARTUP_GRACE_MS = 12_000L
 /** Kommer appen fram igen efter så här länge hämtas kanalerna och tablån om. */
 private const val CHANNELS_FRESH_MS = 20 * 60_000L
 /** Står appen framme hela tiden hämtas kanalerna om så här ofta. */
@@ -202,6 +209,13 @@ class AppState {
     // --- Disney under Filmer ----------------------------------------------------------
 
     /** Vilka filmer och serier som hör till Disneys samlingar. */
+    /** Filmserierna man har något ur: Marvel, Star Wars och de andra (se Collections.kt). */
+    var collections by mutableStateOf(CollectionIndex.EMPTY)
+        private set
+    /** Delen av samlingen som visas, som Marvels faser. Null: hela samlingen. */
+    var collectionPart by mutableStateOf<Int?>(null)
+    /** Berättelsens ordning i stället för utgivningens, där samlingen har en. */
+    var collectionStory by mutableStateOf(false)
     var disney by mutableStateOf(DisneyIndex.EMPTY)
         private set
     /** Egna val på filmsidan: titeln och året → samlingen, eller "inte Disney". */
@@ -265,7 +279,8 @@ class AppState {
     private var tmdbJob: Job? = null
     private var tmdbLoaded = false
     /** Titel till TMDB-nyckel, per film och serie: titelstädningen körs en gång. */
-    private val tmdbKeys = HashMap<String, String>()
+    // Listorna räknas fram i bakgrunden, så nycklarna kan slås upp från flera trådar.
+    private val tmdbKeys = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     // --- Versioner: samma film i flera utföranden (4K, svensk text, andra språk) ---
     /**
@@ -452,6 +467,36 @@ class AppState {
     var playerFocusTick by mutableStateOf(0)
         private set
 
+    /** Tv: markeringen står på en av spelarens knappar, inte på bilden. */
+    var playerControlsFocused by mutableStateOf(false)
+
+    /** Ökar när spelarens knappar ska få markeringen (pil upp eller ner på tv:n). */
+    var controlsFocusTick by mutableStateOf(0)
+        private set
+    private var controlsFocusPending = false
+
+    /** Tv: knapparna fram, med markeringen på Spela/Paus. */
+    fun focusPlayerControls() {
+        touchPlayer(force = true)
+        controlsFocusPending = true
+        controlsFocusTick++
+    }
+
+    /** Sant en gång per begäran: knapparna tar markeringen när de visas. */
+    fun takeControlsFocus(): Boolean {
+        val pending = controlsFocusPending
+        controlsFocusPending = false
+        return pending
+    }
+
+    /** Tv: från knapparna tillbaka till bilden. Falskt om ingen knapp hade markeringen. */
+    fun leavePlayerControls(): Boolean {
+        if (!playerControlsFocused) return false
+        playerControlsFocused = false
+        playerFocusTick++
+        return true
+    }
+
     /** Ger bilden markeringen igen, så att fjärrkontrollen styr spelaren direkt. */
     fun focusPlayer() {
         playerFocusTick++
@@ -535,7 +580,6 @@ class AppState {
         }
         rebuildLibrary()
         loading = false
-        loadGuides()
         history = withContext(Dispatchers.IO) { historyStore.load() }
         myList = withContext(Dispatchers.IO) { myListStore.load() }
         movieFacts = withContext(Dispatchers.IO) { factsStore.load() }
@@ -556,6 +600,13 @@ class AppState {
         tmdbLoaded = true
         startTmdbScan()
         startFactsScan()
+        // Tablåerna från disken, och sedan kanalerna och tablån på nytt, när
+        // startsidan har fått sina rader: det tunga ska inte göra starten seg.
+        scope.launch {
+            afterStartup()
+            loadGuides()
+            refreshChannelsAndGuide()
+        }
 
         if (sources.isEmpty()) {
             screen = Screen.SETTINGS
@@ -564,9 +615,19 @@ class AppState {
             // av appen, eller en cache som inte gick att läsa — hämtas om, en i taget.
             refreshQueue.addAll(sources.filter { it.id !in contents }.map { it.id })
             refreshNextQueued()
-            // Övriga källor: kanalerna och tablån hämtas om vid varje start.
-            refreshChannelsAndGuide()
         }
+    }
+
+    /** Startsidan har fått sina rader. Tunga bakgrundsjobb väntar på den, högst en stund. */
+    private val homeReady = CompletableDeferred<Unit>()
+
+    fun markHomeReady() {
+        homeReady.complete(Unit)
+    }
+
+    /** Väntar tills startsidan är klar, eller som längst [STARTUP_GRACE_MS]: starten går först. */
+    private suspend fun afterStartup() {
+        withTimeoutOrNull(STARTUP_GRACE_MS) { homeReady.await() }
     }
 
     private fun rebuildLibrary() {
@@ -574,7 +635,8 @@ class AppState {
         library = merged
         // En vald kategori som försvann med en borttagen källa ska inte lämna en tom lista.
         if (liveGroup?.let { merged.liveCounts.containsKey(it) } == false) liveGroup = null
-        if (movieGroup?.let { merged.movieCounts.containsKey(it) } == false) movieGroup = null
+        // Samlingarna och Disney (nycklar som börjar med \u0001) finns inte bland kategorierna.
+        if (movieGroup?.let { it.startsWith('\u0001') || merged.movieCounts.containsKey(it) } == false) movieGroup = null
         if (seriesGroup?.let { merged.seriesCounts.containsKey(it) } == false) seriesGroup = null
         val movie = selectedMovie
         if (movie != null && movie.sourceId !in contents) selectedMovie = null
@@ -661,6 +723,15 @@ class AppState {
 
     fun disneyShelfOf(movie: Movie): DisneyShelf? = disney.shelfOf(movie)
 
+    /** Den första filmen i en av Disneys samlingar, för bakgrundsbilden i galleriet. */
+    fun disneyFeature(shelf: DisneyShelf): Movie? {
+        val shelves = disney
+        val index = versions
+        return library.movies.asSequence()
+            .filter { shelves.shelfOf(it) == shelf && !index.isHidden(it) }
+            .minWithOrNull(compareBy<Movie>({ shelves.numberOf(it) ?: Int.MAX_VALUE }, { index.yearOf(it) ?: Int.MAX_VALUE }))
+    }
+
     /**
      * Omslagen på Disneys samlingskort: de första titlarna i samlingen som har
      * omslag — klassikerna och Pixar i nummerordning, kortfilmerna äldst först.
@@ -695,11 +766,30 @@ class AppState {
     private fun scheduleDisney() {
         disneyJob?.cancel()
         disneyJob = scope.launch {
+            afterStartup()
             val lib = library
             val index = versions
             val choices = disneyChoices
             disney = withContext(Dispatchers.Default) { DisneyIndex.build(lib, index, choices) }
+            collections = withContext(Dispatchers.Default) { CollectionIndex.build(lib, index) }
         }
+    }
+
+    /** En samlings filmer i ordning, med numret i den ordningen och filmen om man har den. */
+    fun collectionSlots(franchise: Franchise): List<CollectionSlot> {
+        val owned = collections.ownedIn(franchise)
+        val order = (if (collectionStory) franchise.story else null) ?: franchise.films
+        val part = collectionPart?.let { franchise.parts.getOrNull(it) }?.films?.toSet()
+        return order
+            .filter { part == null || it in part }
+            .mapIndexed { index, film -> CollectionSlot(index + 1, film, owned[franchise.positionOf(film)]) }
+    }
+
+    /** Öppnar en samling, ett av Disneys kort eller galleriet, från början. */
+    fun openCollection(group: String) {
+        movieGroup = group
+        collectionPart = null
+        disneyCharacter = null
     }
 
     fun filteredSeries(): List<Series> {
@@ -1566,6 +1656,7 @@ class AppState {
         val due = sources.filter { it.id in contents && now - (channelsFetchedAt[it.id] ?: 0L) > maxAgeMs }
         if (due.isEmpty()) return
         channelsJob = scope.launch {
+            afterStartup()
             for (source in due) {
                 // En hel hämtning av källan pågår redan: den tar med kanalerna och tablån.
                 if (importingId == source.id) continue
@@ -2424,6 +2515,7 @@ class AppState {
         val useTmdb = tmdbConnected
         val matched = tmdbFacts
         factsJob = scope.launch {
+            afterStartup()
             val wanted = withContext(Dispatchers.Default) {
                 movies
                     .filter { it.sourceId in xtreamSources }
@@ -2447,6 +2539,7 @@ class AppState {
             val fresh = HashMap<String, MovieFacts>()
             var failures = 0
             var batches = 0
+            var lastPublish = System.currentTimeMillis()
             for (movie in missing) {
                 val account = accounts.getOrPut(movie.sourceId) { credentials(movie.sourceId)?.second } ?: continue
                 val result = withContext(Dispatchers.IO) {
@@ -2467,10 +2560,12 @@ class AppState {
                 fresh[MovieFactsStore.keyOf(movie.sourceId, movie.streamId)] =
                     MovieFacts(info?.genre.orEmpty(), releaseYear(info?.releaseDate))
                 done++
-                // Skärmen uppdateras i klumpar om 50, disken var 500:e.
-                if (fresh.size >= 50) {
+                // Skärmen uppdateras sällan och i stora klumpar — var tjugonde
+                // sekund — så att listorna inte räknas om medan man bläddrar.
+                if (fresh.size >= PUBLISH_BATCH || (fresh.isNotEmpty() && System.currentTimeMillis() - lastPublish >= PUBLISH_EVERY_MS)) {
                     batches++
-                    publishFacts(HashMap(fresh), save = batches % 10 == 0)
+                    lastPublish = System.currentTimeMillis()
+                    publishFacts(HashMap(fresh), save = batches % 3 == 0)
                     fresh.clear()
                     factsProgress = done to wanted.size
                 }
@@ -2575,6 +2670,7 @@ class AppState {
         val movies = library.movies
         val series = library.series
         tmdbJob = scope.launch {
+            afterStartup()
             val wanted: List<Triple<String, String, Int?>> = withContext(Dispatchers.Default) {
                 // Titlar utan eget omslag först: för dem är TMDB enda chansen till en bild.
                 val movieTitles = movies
@@ -2613,6 +2709,7 @@ class AppState {
             var failures = 0
             var batches = 0
             var stopped = false
+            var lastPublish = System.currentTimeMillis()
             // Flera uppslag samtidigt. Kön, räknarna och resultaten hanteras på
             // UI-tråden, så inget behöver låsas; bara själva anropet går på nätet.
             val queue = missing.iterator()
@@ -2643,9 +2740,11 @@ class AppState {
                             failures = 0
                             fresh[TmdbStore.keyOf(kind, title, year)] = facts
                             done++
-                            if (fresh.size >= 50) {
+                            // Sällan och i stora klumpar, så att listorna inte räknas om medan man bläddrar.
+                            if (fresh.size >= PUBLISH_BATCH || System.currentTimeMillis() - lastPublish >= PUBLISH_EVERY_MS) {
                                 batches++
-                                publishTmdb(HashMap(fresh), save = batches % 10 == 0)
+                                lastPublish = System.currentTimeMillis()
+                                publishTmdb(HashMap(fresh), save = batches % 3 == 0)
                                 fresh.clear()
                                 tmdbProgress = done to wanted.size
                             }
@@ -2748,7 +2847,8 @@ class AppState {
     }
 }
 
-private val swedishOrder: Collator = Collator.getInstance(Locale.forLanguageTag("sv-SE")).apply { strength = Collator.SECONDARY }
+/** Svensk bokstavsordning. En ny för varje sortering: en Collator klarar inte flera trådar samtidigt. */
+private fun swedishOrder(): Collator = Collator.getInstance(Locale.forLanguageTag("sv-SE")).apply { strength = Collator.SECONDARY }
 
 /** "SE - Titel" och "[4K] Titel" sorteras på Titel. */
 private val sortPrefix = Regex("""^\s*(?:\[[^\]]*\]\s*|[A-Za-z]{2,4}\s*[-|:]\s+)""")
@@ -2770,13 +2870,16 @@ private fun <T> List<T>.ordered(
     SortOrder.ADDED -> sortedByDescending { added(it) }
     SortOrder.RATING -> sortedByDescending { rating(it) ?: -1.0 }
     SortOrder.YEAR -> sortedByDescending { year(it) ?: -1 }
-    SortOrder.TITLE -> map { it to swedishOrder.getCollationKey(name(it).replaceFirst(sortPrefix, "").trim()) }
+    SortOrder.TITLE -> swedishOrder().let { collator -> map { it to collator.getCollationKey(name(it).replaceFirst(sortPrefix, "").trim()) } }
         .sortedBy { it.second }
         .map { it.first }
 }
 
 private const val MAX_HISTORY = 300
 private const val FACTS_PACE_MS = 500L
+/** Nya TMDB-svar och infosidor visas i klumpar: så här många, eller så här ofta. */
+private const val PUBLISH_BATCH = 500
+private const val PUBLISH_EVERY_MS = 20_000L
 /** Leverantörens betyg saknar röster; det väger som om så här många röstat. */
 private const val PROVIDER_VOTES = 30
 /** Uppslag hos TMDB samtidigt. TMDB tål runt 50 i sekunden; sex ger ett par dussin. */
@@ -2835,3 +2938,6 @@ class NextUp(val series: Series, val episode: XtreamEpisode) {
     val heading: String get() = "Säsong ${episode.season} · Avsnitt ${episode.episode}"
 }
 private const val MAX_BACKGROUNDS = 3
+
+/** En plats i en samling: numret i ordningen, filmen i serien, och filmen i biblioteket om man har den. */
+class CollectionSlot(val number: Int, val film: FranchiseFilm, val movie: Movie?)

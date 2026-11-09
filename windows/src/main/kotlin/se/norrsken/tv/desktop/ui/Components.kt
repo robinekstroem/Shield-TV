@@ -100,8 +100,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 
 /** Leverantörer anger trailern som YouTube-id eller som hel adress. */
@@ -820,6 +822,21 @@ private val TV_GROUPS_CLOSED = 36.dp
 private val TV_GROUPS_OPEN = 340.dp
 /** Så länge markeringen ska stå still på en kategori innan den väljs. */
 private const val GROUP_PICK_MS = 300L
+
+/**
+ * Räknar fram ett värde i bakgrunden när [keys] ändras och behåller det förra
+ * under tiden, så att tunga listor — tiotusentals filmer som sorteras — aldrig
+ * låser menyerna. Null tills det första värdet är klart.
+ */
+@Composable
+internal fun <T> rememberInBackground(vararg keys: Any?, compute: () -> T): T? {
+    val result = remember { mutableStateOf<T?>(null) }
+    val latest by rememberUpdatedState(compute)
+    LaunchedEffect(*keys) {
+        result.value = withContext(Dispatchers.Default) { latest() }
+    }
+    return result.value
+}
 
 /**
  * Tv: var markeringen landar när man går in i en lista eller ett rutnät från

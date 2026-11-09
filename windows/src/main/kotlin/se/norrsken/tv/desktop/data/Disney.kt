@@ -400,6 +400,9 @@ private val CANDIDATE_WORDS = listOf(
     "disney", "pixar", "walt", "kids", "barn", "family", "familj", "animat", "tecknat", "cartoon", "klassiker", "classic",
 )
 
+/** Samma vikning som Disney använder, för samlingarna. */
+internal fun foldTitle(value: String): String = fold(value)
+
 /** Små bokstäver utan accenter, bara bokstäver och siffror med ett mellanslag emellan. */
 private fun fold(value: String): String {
     val out = StringBuilder(value.length)

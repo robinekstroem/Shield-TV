@@ -181,6 +181,8 @@ fun HomeScreen(state: AppState) {
         }
     }
     val current = catalog
+    // Startsidan har sina rader: de tunga bakgrundsjobben får börja.
+    LaunchedEffect(current != null) { if (current != null) state.markHomeReady() }
     if (current == null) {
         Box(Modifier.fillMaxSize().padding(48.dp), contentAlignment = Alignment.Center) {
             val error = catalogError
@@ -989,13 +991,15 @@ internal fun buildCatalog(
 
     val leading = ArrayList<HomeRow>()
     val trailing = ArrayList<HomeRow>()
+    // Bara så långt in i listan som raden behöver: titlarna jämförs en i taget
+    // tills raden är full, inte alla tiotusentals i förväg.
     fun movieRow(title: String, list: List<Movie>, into: MutableList<HomeRow>) {
         // Filmens bästa version på kortet, oavsett vilken version som tog den hit.
-        val items = list.distinctBy { identity(it) }.take(ROW).map { MovieItem(versions.versionsOf(it).first()) }
+        val items = list.asSequence().distinctBy { identity(it) }.take(ROW).map { MovieItem(versions.versionsOf(it).first()) }.toList()
         if (items.size >= 6) into += HomeRow(title, items)
     }
     fun seriesRow(title: String, list: List<Series>, into: MutableList<HomeRow>) {
-        val items = list.distinctBy { seriesIdentity(it) }.take(ROW).map { SeriesItem(versions.versionsOf(it).first()) }
+        val items = list.asSequence().distinctBy { seriesIdentity(it) }.take(ROW).map { SeriesItem(versions.versionsOf(it).first()) }.toList()
         if (items.size >= 6) into += HomeRow(title, items)
     }
 
@@ -1060,7 +1064,7 @@ internal fun buildCatalog(
     val genresOfMovie = HashMap<String, MutableList<Genre>>()
     index.movies.forEach { (genre, list) -> list.forEach { genresOfMovie.getOrPut(it.key) { ArrayList(3) } += genre } }
     val bestByGenre = index.movies.mapValues { (_, list) ->
-        list.filterNot { versions.isHidden(it) }.sortedByDescending { score[it.key] ?: 0.0 }.distinctBy { identity(it) }.take(60)
+        list.filterNot { versions.isHidden(it) }.sortedByDescending { score[it.key] ?: 0.0 }.asSequence().distinctBy { identity(it) }.take(60).toList()
     }
     for (genre in homeGenres) movieRow(genre.label, bestByGenre[genre] ?: emptyList(), trailing)
     // Julfilmerna i november och december.
