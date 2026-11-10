@@ -5,11 +5,9 @@ name: Build Mac
 # Releases som "Tv för Mac", med ett installationsskript som väljer rätt
 # version åt datorn.
 #
-# Byggs bara när man startar det för hand: Actions → Build Mac → Run
-# workflow. GitHubs Macar kostar tio gånger så många byggminuter som en
-# vanlig maskin, och två Mac-byggen vid varje ändring åt upp kontots
-# gratisminuter. Att Windows-koden (som Mac bygger på) går att kompilera
-# kontrolleras i stället billigt vid varje ändring (windows-check.yml).
+# Byggs inte längre automatiskt: bara Shield-appen och Windows byggs.
+# Går fortfarande att starta för hand: Actions → Build Mac → Run workflow.
+# GitHubs Macar kostar tio gånger så många byggminuter som en vanlig maskin.
 on:
   workflow_dispatch:
 

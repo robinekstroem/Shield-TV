@@ -1,22 +1,8 @@
 name: Build APK
 
+# Telefonappen byggs bara när man startar det för hand: Actions → Build APK
+# → Run workflow. Automatiskt byggs bara Shield-appen och Windows-koden.
 on:
-  push:
-    branches: [ main ]
-    tags: [ 'v*' ]
-    # Ändringar som bara rör Windows-versionen bygger inte om APK:n.
-    # (Taggar påverkas inte: GitHub tittar inte på sökvägar för taggar.)
-    paths-ignore:
-      - 'windows/**'
-      - '.github/workflows/windows.yml'
-      - 'shield/**'
-      - '.github/workflows/shield.yml'
-      - 'ipad/**'
-      - '.github/workflows/ipad.yml'
-      - 'mac/**'
-      - '.github/workflows/mac.yml'
-      - '.github/workflows/windows-check.yml'
-  pull_request:
   workflow_dispatch:
 
 permissions:
