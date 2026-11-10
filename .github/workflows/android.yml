@@ -15,6 +15,7 @@ on:
       - '.github/workflows/ipad.yml'
       - 'mac/**'
       - '.github/workflows/mac.yml'
+      - '.github/workflows/windows-check.yml'
   pull_request:
   workflow_dispatch:
 
