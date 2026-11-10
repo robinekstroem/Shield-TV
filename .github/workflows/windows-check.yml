@@ -1,0 +1,78 @@
+name: Kontroll Windows
+
+# Kompilerar Windows-versionen (samma kod som Mac-appen) på en vanlig
+# Linux-maskin hos GitHub vid varje ändring, så att ett fel syns direkt och
+# inte först när "Installera Tv" körs på datorn. Billigt: bara kompilering,
+# ingen installationsfil. Mac-appen byggs för hand (Build Mac).
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'windows/src/**'
+      - 'windows/build.gradle.kts'
+      - 'windows/settings.gradle.kts'
+      - 'windows/gradle.properties'
+      - '.github/workflows/windows-check.yml'
+      - 'app/src/main/java/se/norrsken/tv/data/playlist/M3uParser.kt'
+      - 'app/src/main/java/se/norrsken/tv/data/playlist/SourceDetection.kt'
+      - 'app/src/main/java/se/norrsken/tv/data/playlist/ImportState.kt'
+      - 'app/src/main/java/se/norrsken/tv/data/remote/PlaylistDownloader.kt'
+      - 'app/src/main/java/se/norrsken/tv/data/xtream/XtreamClient.kt'
+      - 'app/src/main/java/se/norrsken/tv/data/xtream/XtreamModels.kt'
+      - 'app/src/main/java/se/norrsken/tv/data/security/UrlSanitizer.kt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Två pushar tätt efter varandra: den senaste vinner.
+concurrency:
+  group: check-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    name: Kompilera
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: current
+
+      - name: Kompilera Windows-koden
+        id: build
+        working-directory: windows
+        run: |
+          set -o pipefail
+          status=0
+          gradle compileKotlin --stacktrace 2>&1 | tee build.log || status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      # Felet ska gå att läsa utan att gräva i tusen rader logg.
+      - name: Sammanfatta felet
+        if: steps.build.outputs.status != '0'
+        working-directory: windows
+        run: |
+          KOTLIN=$(grep -E '^e: ' build.log | head -n 40)
+          WHAT=$(sed -n '/\* What went wrong:/,/\* Try:/p' build.log | head -n 25)
+          {
+            echo '## Windows-koden gick inte att kompilera'
+            echo ''
+            echo 'Kopiera allt i rutan nedan och klistra in det i chatten.'
+            echo ''
+            echo '```'
+            if [ -n "$KOTLIN" ]; then printf '%s\n' "$KOTLIN"; fi
+            if [ -n "$WHAT" ]; then printf '%s\n' "$WHAT"; fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Kompileringen misslyckades. Se sammanfattningen för körningen."
+          exit 1

@@ -5,28 +5,12 @@ name: Build Mac
 # Releases som "Tv för Mac", med ett installationsskript som väljer rätt
 # version åt datorn.
 #
-# Körs när Windows-koden (som Mac bygger på), Mac-filerna eller koden som
-# delas med telefonappen ändras. Går också att starta för hand: Actions →
-# Build Mac → Run workflow.
+# Byggs bara när man startar det för hand: Actions → Build Mac → Run
+# workflow. GitHubs Macar kostar tio gånger så många byggminuter som en
+# vanlig maskin, och två Mac-byggen vid varje ändring åt upp kontots
+# gratisminuter. Att Windows-koden (som Mac bygger på) går att kompilera
+# kontrolleras i stället billigt vid varje ändring (windows-check.yml).
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - 'windows/src/**'
-      - 'windows/build.gradle.kts'
-      - 'windows/settings.gradle.kts'
-      - 'windows/gradle.properties'
-      - 'windows/icon.icns'
-      - 'windows/app-resources/**'
-      - 'mac/**'
-      - '.github/workflows/mac.yml'
-      - 'app/src/main/java/se/norrsken/tv/data/playlist/M3uParser.kt'
-      - 'app/src/main/java/se/norrsken/tv/data/playlist/SourceDetection.kt'
-      - 'app/src/main/java/se/norrsken/tv/data/playlist/ImportState.kt'
-      - 'app/src/main/java/se/norrsken/tv/data/remote/PlaylistDownloader.kt'
-      - 'app/src/main/java/se/norrsken/tv/data/xtream/XtreamClient.kt'
-      - 'app/src/main/java/se/norrsken/tv/data/xtream/XtreamModels.kt'
-      - 'app/src/main/java/se/norrsken/tv/data/security/UrlSanitizer.kt'
   workflow_dispatch:
 
 permissions:
