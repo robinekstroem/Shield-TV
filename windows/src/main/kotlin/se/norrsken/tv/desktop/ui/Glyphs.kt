@@ -1,5 +1,7 @@
 package se.norrsken.tv.desktop.ui
 
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
@@ -47,33 +49,77 @@ object Glyphs {
     val Home = glyph("M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z")
 
     /**
-     * Appens märke: samma VHS-kassett som Android-ikonen
-     * (res/drawable/ic_launcher.xml), utan den svarta helbildsbakgrunden.
+     * Appens märke: en tv med antenner och en play-knapp, i norrskenets
+     * färger — från grönt över blått till violett, som appens första namn.
+     * Samma form som Shield-ikonen och bannern (shield/src/main/res/drawable)
+     * och Windows-ikonen.
      */
     val AppMark: ImageVector = ImageVector.Builder(
         name = "Tv",
-        defaultWidth = 88.dp,
-        defaultHeight = 88.dp,
-        viewportWidth = 88f,
-        viewportHeight = 88f,
+        defaultWidth = 96.dp,
+        defaultHeight = 96.dp,
+        viewportWidth = 96f,
+        viewportHeight = 96f,
     )
-        .fill("M20,0 H68 A20,20 0 0 1 88,20 V68 A20,20 0 0 1 68,88 H20 A20,20 0 0 1 0,68 V20 A20,20 0 0 1 20,0 Z", 0xFF120C06)
-        .fill("M17,23 H71 A7,7 0 0 1 78,30 V58 A7,7 0 0 1 71,65 H17 A7,7 0 0 1 10,58 V30 A7,7 0 0 1 17,23 Z", 0xFFC75F10)
-        .fill("M17,23 H71 A7,7 0 0 1 78,30 V54 A7,7 0 0 1 71,61 H17 A7,7 0 0 1 10,54 V30 A7,7 0 0 1 17,23 Z", 0xFFF57C1F)
-        .fill("M24,30 H64 A4,4 0 0 1 68,34 V44 A4,4 0 0 1 64,48 H24 A4,4 0 0 1 20,44 V34 A4,4 0 0 1 24,30 Z", 0xFF0A0A0A)
+        // Antennerna, med en kula i toppen.
         .addPath(
-            pathData = addPathNodes("M39,39 L49,39"),
-            stroke = SolidColor(Color(0xFFF57C1F)),
-            strokeLineWidth = 3f,
+            pathData = addPathNodes("M48,26 L34,10 M48,26 L62,10"),
+            stroke = Brush.linearGradient(listOf(Brand.teal, Brand.sky), start = Offset(30f, 0f), end = Offset(66f, 0f)),
+            strokeLineWidth = 5.5f,
             strokeLineCap = StrokeCap.Round,
         )
-        .fill("M32,32 a7,7 0 1 0 0.01,0 z", 0xFFFFB265)
-        .fill("M56,32 a7,7 0 1 0 0.01,0 z", 0xFFFFB265)
-        .fill("M32,36.2 a2.8,2.8 0 1 0 0.01,0 z", 0xFF0A0A0A)
-        .fill("M56,36.2 a2.8,2.8 0 1 0 0.01,0 z", 0xFF0A0A0A)
-        .fill("M19,52 H69 A2,2 0 0 1 71,54 V57 A2,2 0 0 1 69,59 H19 A2,2 0 0 1 17,57 V54 A2,2 0 0 1 19,52 Z", 0xFFF2E7DC)
+        .addPath(pathData = addPathNodes("M34,5.6 a4.4,4.4 0 1 0 0.01,0 z"), fill = SolidColor(Brand.teal))
+        .addPath(pathData = addPathNodes("M62,5.6 a4.4,4.4 0 1 0 0.01,0 z"), fill = SolidColor(Brand.sky))
+        // Rutan.
+        .addPath(
+            pathData = addPathNodes(SCREEN),
+            fill = Brush.linearGradient(
+                0f to Brand.teal,
+                0.42f to Brand.blue,
+                0.78f to Brand.violet,
+                1f to Brand.magenta,
+                start = Offset(8f, 22f),
+                end = Offset(88f, 88f),
+            ),
+        )
+        // Ett norrskensband och ljus uppifrån, inne i rutan.
+        .addGroup(clipPathData = addPathNodes(SCREEN))
+        .addPath(
+            pathData = addPathNodes("M6,62 C22,50 36,70 54,58 C68,49 80,52 90,46 V60 C78,66 66,62 54,72 C36,86 22,66 6,76 Z"),
+            fill = Brush.linearGradient(
+                0f to Color.White.copy(alpha = 0f),
+                0.35f to Color.White.copy(alpha = 0.22f),
+                1f to Color.White.copy(alpha = 0.04f),
+                start = Offset(6f, 0f),
+                end = Offset(90f, 0f),
+            ),
+        )
+        .addPath(
+            pathData = addPathNodes("M6,22 H90 V50 H6 Z"),
+            fill = Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0f)), startY = 22f, endY = 50f),
+        )
+        .clearGroup()
+        // Play-knappen, med en mjuk skugga.
+        .addPath(pathData = addPathNodes(PLAY_SHADOW), fill = SolidColor(Color(0x4D14093A)))
+        .addPath(pathData = addPathNodes(PLAY), fill = SolidColor(Color.White))
         .build()
 }
+
+/** Märkets färger: norrsken från grönt till violett. Används också i menyn. */
+internal object Brand {
+    val teal = Color(0xFF2EE6C5)
+    val sky = Color(0xFF5B8CFF)
+    val blue = Color(0xFF3D7BFF)
+    val violet = Color(0xFF7B4DFF)
+    val magenta = Color(0xFFC13DF0)
+
+    /** Strecket vid fliken man är i, uppifrån och ned. */
+    val stripe: Brush = Brush.verticalGradient(listOf(teal, blue, violet))
+}
+
+private const val SCREEN = "M26,22 H70 A20,20 0 0 1 90,42 V68 A20,20 0 0 1 70,88 H26 A20,20 0 0 1 6,68 V42 A20,20 0 0 1 26,22 Z"
+private const val PLAY = "M40,44 L40,66 Q40,70 43.46,68 L62.54,57 Q66,55 62.54,53 L43.46,42 Q40,40 40,44 Z"
+private const val PLAY_SHADOW = "M40,45.6 L40,67.6 Q40,71.6 43.46,69.6 L62.54,58.6 Q66,56.6 62.54,54.6 L43.46,43.6 Q40,41.6 40,45.6 Z"
 
 private fun glyph(pathData: String): ImageVector =
     ImageVector.Builder(
@@ -84,6 +130,3 @@ private fun glyph(pathData: String): ImageVector =
     )
         .addPath(pathData = addPathNodes(pathData), fill = SolidColor(Color.White))
         .build()
-
-private fun ImageVector.Builder.fill(pathData: String, argb: Long): ImageVector.Builder =
-    addPath(pathData = addPathNodes(pathData), fill = SolidColor(Color(argb)))

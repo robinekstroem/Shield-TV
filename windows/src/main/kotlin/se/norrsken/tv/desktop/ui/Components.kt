@@ -823,6 +823,29 @@ private val TV_GROUPS_OPEN = 340.dp
 /** Så länge markeringen ska stå still på en kategori innan den väljs. */
 private const val GROUP_PICK_MS = 300L
 
+/** Ett uträknat värde, och vad användaren själv valt när det räknades (kategori, sökning, sortering). */
+internal class Computed<T>(val inputs: Any?, val value: T)
+
+/**
+ * Tv: listan man bläddrar i byts inte ut under en. Nya betyg, år och
+ * versioner som kommer i bakgrunden ändrar ordningen, och då hoppar
+ * omslagen; det väntar tills markeringen lämnat rutnätet. Det man själv
+ * ändrar — kategori, sökning, sortering — gäller direkt.
+ */
+@Composable
+internal fun <T> rememberSteady(computed: Computed<T>?, browsing: Boolean): T? {
+    val shown = remember { SteadyHolder<T>() }
+    val current = shown.value
+    if (computed != null && (current == null || !browsing || computed.inputs != current.inputs)) {
+        shown.value = computed
+    }
+    return shown.value?.value
+}
+
+private class SteadyHolder<T> {
+    var value: Computed<T>? = null
+}
+
 /**
  * Räknar fram ett värde i bakgrunden när [keys] ändras och behåller det förra
  * under tiden, så att tunga listor — tiotusentals filmer som sorteras — aldrig

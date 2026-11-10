@@ -143,9 +143,13 @@ fun MoviesScreen(state: AppState) {
         return
     }
     // Sorteringen av tiotusentals filmer görs i bakgrunden; listan står kvar under tiden.
-    val computedMovies = rememberInBackground(library, group, query, state.movieSort, state.tmdbFacts, state.versions, state.disney, state.disneyCharacter) {
-        state.filteredMovies()
+    val sort = state.movieSort
+    val character = state.disneyCharacter
+    val computed = rememberInBackground(library, group, query, sort, state.tmdbFacts, state.versions, state.disney, character) {
+        Computed(listOf(group, query, sort, character), state.filteredMovies())
     }
+    // Tv: medan man bläddrar bland omslagen byts listan inte ut under en.
+    val computedMovies = rememberSteady(computed, browsing = tvLayout && focusedKey != null)
     val movies = computedMovies ?: emptyList()
     // Disney: alla tre samlingarna, eller en av dem.
     val disneyShelf = DisneyShelf.of(group)
@@ -160,7 +164,9 @@ fun MoviesScreen(state: AppState) {
     val activeKey = if (tvLayout) focusedKey else hoveredKey
     LaunchedEffect(activeKey) {
         val key = activeKey ?: return@LaunchedEffect
-        delay(if (tvLayout) 180 else 260)
+        // Tv: bakgrund och text byts först när markeringen stannat, inte för
+        // varje omslag man passerar — annars blinkar hela skärmen när man bläddrar.
+        delay(if (tvLayout) SPOTLIGHT_SETTLE_MS else 260)
         // En serie bland Disneys kortfilmer byter inte bakgrund: den ovanför står kvar.
         if (movies.any { it.key == key }) spotlightKey = key
     }
@@ -641,14 +647,19 @@ fun SeriesScreen(state: AppState) {
     }
     val group = state.seriesGroup
     val query = state.seriesQuery
-    val computedSeries = rememberInBackground(library, group, query, state.seriesSort, state.tmdbFacts, state.versions) { state.filteredSeries() }
+    val sort = state.seriesSort
+    val computed = rememberInBackground(library, group, query, sort, state.tmdbFacts, state.versions) {
+        Computed(listOf(group, query, sort), state.filteredSeries())
+    }
+    // Tv: medan man bläddrar bland omslagen byts listan inte ut under en.
+    val computedSeries = rememberSteady(computed, browsing = tvLayout && focusedKey != null)
     val series = computedSeries ?: emptyList()
     var spotlightKey by remember(series) { mutableStateOf(series.firstOrNull()?.key) }
     var hoveredKey by remember { mutableStateOf<String?>(null) }
     val activeKey = if (tvLayout) focusedKey else hoveredKey
     LaunchedEffect(activeKey) {
         val key = activeKey ?: return@LaunchedEffect
-        delay(if (tvLayout) 180 else 260)
+        delay(if (tvLayout) SPOTLIGHT_SETTLE_MS else 260)
         spotlightKey = key
     }
     val spotlight = remember(series, spotlightKey) { series.firstOrNull { it.key == spotlightKey } }
@@ -1212,6 +1223,9 @@ internal fun SpotlightBackdrop(url: String?, fallback: String?, running: Boolean
 /** Tv: minsta omslagsbredd. Med infälld meny och kategorier blir det sex omslag i bredd vid 1600. */
 internal val TV_POSTER_MIN = 200.dp
 
+/** Tv: så länge markeringen ska stå still innan bakgrunden och texten överst byts. */
+internal const val SPOTLIGHT_SETTLE_MS = 420L
+
 /**
  * Titeln man står på, med logga, år, betyg, genrer och handling. Fast höjd,
  * så att omslagen inte hoppar när markeringen flyttas.
@@ -1226,16 +1240,23 @@ internal fun SpotlightInfo(state: AppState, kind: String, tmdbId: Int?, title: S
             .padding(start = if (tvLayout) 46.dp else 24.dp, end = 36.dp, top = if (tvLayout) 12.dp else 6.dp, bottom = 10.dp),
         verticalArrangement = Arrangement.spacedBy(if (tvLayout) 9.dp else 6.dp),
     ) {
-        TitleLogo(
-            state = state,
-            kind = kind,
-            tmdbId = tmdbId,
-            title = title,
-            style = if (tvLayout) MaterialTheme.typography.displaySmall else MaterialTheme.typography.headlineMedium,
-            maxHeight = if (tvLayout) 92.dp else 64.dp,
-            maxWidth = if (tvLayout) 540.dp else 380.dp,
-            maxLines = 1,
-        )
+        // Loggan eller titeln i ett fack med fast höjd, mot underkanten: år och
+        // handling står still när loggan laddas eller när man går till nästa film.
+        Box(
+            Modifier.fillMaxWidth().height(if (tvLayout) 92.dp else 64.dp),
+            contentAlignment = Alignment.BottomStart,
+        ) {
+            TitleLogo(
+                state = state,
+                kind = kind,
+                tmdbId = tmdbId,
+                title = title,
+                style = if (tvLayout) MaterialTheme.typography.displaySmall else MaterialTheme.typography.headlineMedium,
+                maxHeight = if (tvLayout) 92.dp else 64.dp,
+                maxWidth = if (tvLayout) 540.dp else 380.dp,
+                maxLines = 1,
+            )
+        }
         if (meta != null) {
             Text(
                 meta,

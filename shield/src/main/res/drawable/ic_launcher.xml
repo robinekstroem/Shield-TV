@@ -1,65 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
 <!--
-  Tv — VHS-kassett i orange mot svart.
-  Ritad för 48 dp först. Det som avgör om formen känns igen där är kroppens
-  proportion, det mörka fönstret och två spolar. Allt annat är stöd:
-  spolarna är ringar och inte prickar (annars blir de ögon), etiketten är
-  ljus för kontrast mot orange, och en mörkare kant längs nederkanten gör
-  kassetten till ett föremål i stället för en dekal.
+  Tv — en tv med antenner och en play-knapp, i norrskenets färger: grönt,
+  blått, violett. Samma märke som i appens meny (Glyphs.AppMark) och på
+  Windows. Ritat i en ruta på 96, här centrerat på en mörk platta.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
 
     <path
-        android:fillColor="#000000"
+        android:fillColor="#FF0A0C18"
         android:pathData="M0,0h108v108h-108z" />
 
-    <!-- Svagt varmare platta bakom. Svart mot svart ger djup utan att synas. -->
-    <path
-        android:fillColor="#120C06"
-        android:pathData="M30,10 H78 A20,20 0 0 1 98,30 V78 A20,20 0 0 1 78,98 H30 A20,20 0 0 1 10,78 V30 A20,20 0 0 1 30,10 Z" />
+    <group
+        android:translateX="8.4"
+        android:translateY="10.5"
+        android:scaleX="0.95"
+        android:scaleY="0.95">
 
-    <!-- Kroppens undersida: mörkare orange, syns som en kant -->
-    <path
-        android:fillColor="#C75F10"
-        android:pathData="M27,33 H81 A7,7 0 0 1 88,40 V68 A7,7 0 0 1 81,75 H27 A7,7 0 0 1 20,68 V40 A7,7 0 0 1 27,33 Z" />
+        <!-- Antennerna -->
+        <path
+            android:pathData="M48,26 L34,10 M48,26 L62,10"
+            android:strokeWidth="5.5"
+            android:strokeLineCap="round"
+            android:fillColor="#00000000">
+            <aapt:attr name="android:strokeColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="30"
+                    android:startY="0"
+                    android:endX="66"
+                    android:endY="0">
+                    <item android:offset="0" android:color="#FF2EE6C5" />
+                    <item android:offset="1" android:color="#FF5B8CFF" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path android:fillColor="#FF2EE6C5" android:pathData="M34,5.6 a4.4,4.4 0 1 0 0.01,0 z" />
+        <path android:fillColor="#FF5B8CFF" android:pathData="M62,5.6 a4.4,4.4 0 1 0 0.01,0 z" />
 
-    <!-- Kroppen -->
-    <path
-        android:fillColor="#F57C1F"
-        android:pathData="M27,33 H81 A7,7 0 0 1 88,40 V64 A7,7 0 0 1 81,71 H27 A7,7 0 0 1 20,64 V40 A7,7 0 0 1 27,33 Z" />
+        <!-- Rutan -->
+        <path android:pathData="M26,22 H70 A20,20 0 0 1 90,42 V68 A20,20 0 0 1 70,88 H26 A20,20 0 0 1 6,68 V42 A20,20 0 0 1 26,22 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="8"
+                    android:startY="22"
+                    android:endX="88"
+                    android:endY="88">
+                    <item android:offset="0" android:color="#FF2EE6C5" />
+                    <item android:offset="0.42" android:color="#FF3D7BFF" />
+                    <item android:offset="0.78" android:color="#FF7B4DFF" />
+                    <item android:offset="1" android:color="#FFC13DF0" />
+                </gradient>
+            </aapt:attr>
+        </path>
 
-    <!-- Fönstret -->
-    <path
-        android:fillColor="#0A0A0A"
-        android:pathData="M34,40 H74 A4,4 0 0 1 78,44 V54 A4,4 0 0 1 74,58 H34 A4,4 0 0 1 30,54 V44 A4,4 0 0 1 34,40 Z" />
+        <!-- Norrskensbandet och ljuset uppifrån, inne i rutan -->
+        <group>
+            <clip-path android:pathData="M26,22 H70 A20,20 0 0 1 90,42 V68 A20,20 0 0 1 70,88 H26 A20,20 0 0 1 6,68 V42 A20,20 0 0 1 26,22 Z" />
+            <path android:pathData="M6,62 C22,50 36,70 54,58 C68,49 80,52 90,46 V60 C78,66 66,62 54,72 C36,86 22,66 6,76 Z">
+                <aapt:attr name="android:fillColor">
+                    <gradient
+                        android:type="linear"
+                        android:startX="6"
+                        android:startY="0"
+                        android:endX="90"
+                        android:endY="0">
+                        <item android:offset="0" android:color="#00FFFFFF" />
+                        <item android:offset="0.35" android:color="#38FFFFFF" />
+                        <item android:offset="1" android:color="#0AFFFFFF" />
+                    </gradient>
+                </aapt:attr>
+            </path>
+            <path android:pathData="M6,22 H90 V50 H6 Z">
+                <aapt:attr name="android:fillColor">
+                    <gradient
+                        android:type="linear"
+                        android:startX="0"
+                        android:startY="22"
+                        android:endX="0"
+                        android:endY="50">
+                        <item android:offset="0" android:color="#38FFFFFF" />
+                        <item android:offset="1" android:color="#00FFFFFF" />
+                    </gradient>
+                </aapt:attr>
+            </path>
+        </group>
 
-    <!-- Bandet mellan spolarna -->
-    <path
-        android:pathData="M49,49 L59,49"
-        android:strokeColor="#F57C1F"
-        android:strokeWidth="3"
-        android:strokeLineCap="round"
-        android:fillColor="#00000000" />
-
-    <!-- Spolarna, som ringar -->
-    <path
-        android:fillColor="#FFB265"
-        android:pathData="M42,42 a7,7 0 1 0 0.01,0 z" />
-    <path
-        android:fillColor="#FFB265"
-        android:pathData="M66,42 a7,7 0 1 0 0.01,0 z" />
-    <path
-        android:fillColor="#0A0A0A"
-        android:pathData="M42,46.2 a2.8,2.8 0 1 0 0.01,0 z" />
-    <path
-        android:fillColor="#0A0A0A"
-        android:pathData="M66,46.2 a2.8,2.8 0 1 0 0.01,0 z" />
-
-    <!-- Etiketten -->
-    <path
-        android:fillColor="#F2E7DC"
-        android:pathData="M29,62 H79 A2,2 0 0 1 81,64 V67 A2,2 0 0 1 79,69 H29 A2,2 0 0 1 27,67 V64 A2,2 0 0 1 29,62 Z" />
+        <!-- Play-knappen, med en mjuk skugga -->
+        <path
+            android:fillColor="#4D14093A"
+            android:pathData="M40,45.6 L40,67.6 Q40,71.6 43.46,69.6 L62.54,58.6 Q66,56.6 62.54,54.6 L43.46,43.6 Q40,41.6 40,45.6 Z" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M40,44 L40,66 Q40,70 43.46,68 L62.54,57 Q66,55 62.54,53 L43.46,42 Q40,40 40,44 Z" />
+    </group>
 </vector>

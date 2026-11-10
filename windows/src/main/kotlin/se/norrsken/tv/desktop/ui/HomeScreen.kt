@@ -137,8 +137,8 @@ fun HomeScreen(state: AppState) {
     var openedKey by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(pending) {
         val next = pending ?: return@LaunchedEffect
-        // Kort paus: snabbt bläddrande ska inte byta bakgrund för varje titel man passerar.
-        delay(200)
+        // Paus: snabbt bläddrande ska inte byta bakgrund för varje titel man passerar.
+        delay(if (tvLayout) SPOTLIGHT_SETTLE_MS else 200L)
         hero = next
     }
 
@@ -396,16 +396,23 @@ private fun HeroInfo(
             }
             val logoKind = hero.logoKind
             if (logoKind != null) {
-                TitleLogo(
-                    state = state,
-                    kind = logoKind,
-                    tmdbId = hero.tmdbId,
-                    title = hero.title,
-                    style = MaterialTheme.typography.headlineLarge,
-                    maxHeight = if (tvLayout) 104.dp else 96.dp,
-                    maxWidth = 460.dp,
-                    modifier = Modifier.widthIn(max = 820.dp),
-                )
+                // Fast höjd, mot underkanten: texten under står still när loggan laddas
+                // eller när man går till nästa titel.
+                Box(
+                    Modifier.fillMaxWidth().height(if (tvLayout) 104.dp else 96.dp),
+                    contentAlignment = Alignment.BottomStart,
+                ) {
+                    TitleLogo(
+                        state = state,
+                        kind = logoKind,
+                        tmdbId = hero.tmdbId,
+                        title = hero.title,
+                        style = MaterialTheme.typography.headlineLarge,
+                        maxHeight = if (tvLayout) 104.dp else 96.dp,
+                        maxWidth = 460.dp,
+                        modifier = Modifier.widthIn(max = 820.dp),
+                    )
+                }
             } else {
                 Text(
                     hero.title,

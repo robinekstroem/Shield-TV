@@ -3,6 +3,7 @@ package se.norrsken.tv.desktop.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
@@ -17,7 +18,13 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,10 +50,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,31 +62,42 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.platform.LocalFocusManager
-import kotlinx.coroutines.launch
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.zIndex
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import kotlinx.coroutines.launch
 import se.norrsken.tv.data.playlist.ImportState
 import se.norrsken.tv.desktop.AppState
 import se.norrsken.tv.desktop.Screen
@@ -103,6 +121,12 @@ internal object MiniDock {
 }
 
 private val SIDEBAR_WIDTH = 236.dp
+
+/** Tv: menyn som glider fram är bredare, med luft för loggan och klockan. */
+private val TV_MENU_WIDTH = 300.dp
+
+/** Hur fort markeringen i menyn tonar mellan raderna. */
+private const val MENU_MS = 170
 
 /** Vad som syns till vänster om innehållet på tv:n. */
 internal enum class TvDrawer { NONE, CATEGORIES, MENU }
@@ -319,7 +343,11 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
     // medan den står i fältet glider fältet tillbaka till sin vanliga bredd.
     val widthSpec: AnimationSpec<Dp> = if (state.nowPlaying == null) tween(320, easing = FastOutSlowInEasing) else snap()
     val width by animateDpAsState(
-        targetValue = if (docked) MiniDock.sidebarWidth else SIDEBAR_WIDTH,
+        targetValue = when {
+            docked -> MiniDock.sidebarWidth
+            tv -> TV_MENU_WIDTH
+            else -> SIDEBAR_WIDTH
+        },
         animationSpec = widthSpec,
         label = "sidofält",
     )
@@ -330,6 +358,7 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
             // Tv: täckande över innehållet, med en skugga mot det som ligger under.
             .then(if (tv) Modifier.shadow(24.dp).background(palette.background) else Modifier)
             .background(palette.ambient)
+            .then(if (tv) Modifier.drawBehind { menuGlow(palette.hairline) } else Modifier)
             .onFocusChanged {
                 // Markeringen gick vidare: menyn glider undan.
                 if (tv && focused && !it.hasFocus && TvNav.drawer == TvDrawer.MENU) TvNav.drawer = TvDrawer.NONE
@@ -339,23 +368,7 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
             .padding(start = MiniDock.inset, end = MiniDock.inset, top = MiniDock.top, bottom = 22.dp),
     ) {
         AnimatedVisibility(visible = !docked, enter = dockEnter, exit = dockExit) {
-            Row(
-                Modifier.padding(start = 10.dp, top = 8.dp, bottom = 26.dp - NAV_AIR),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Image(rememberVectorPainter(Glyphs.AppMark), contentDescription = null, modifier = Modifier.size(36.dp).glow(palette.glowOf(0.55f), RoundedCornerShape(9.dp), 22.dp))
-                Spacer(Modifier.width(12.dp))
-                Column {
-                    Text("Tv", style = MaterialTheme.typography.titleLarge, maxLines = 1, softWrap = false)
-                    Text(
-                        "för $platformName",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = palette.textTertiary,
-                        maxLines = 1,
-                        softWrap = false,
-                    )
-                }
-            }
+            MenuBrand(state, tv)
         }
         // Tv: bilden ligger i hörnet medan man bläddrar. Menyn har dess knappar
         // överst: vad som spelas, paus, förstora och stäng.
@@ -381,36 +394,37 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
                 .padding(vertical = NAV_AIR),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(if (tv) 6.dp else 4.dp),
         ) {
-            NavItem(Glyphs.Home, "Hem", "Fortsätt titta & tips", null, state.screen == Screen.HOME, docked, modifier = navModifier(Screen.HOME)) {
+            NavItem(Glyphs.Home, "Hem", "Fortsätt titta & tips", null, state.screen == Screen.HOME, docked, tv = tv, modifier = navModifier(Screen.HOME)) {
                 go(Screen.HOME)
             }
-            NavItem(Glyphs.Live, "Live TV", "Direktsändning", library.channels.size, state.screen == Screen.LIVE, docked, modifier = navModifier(Screen.LIVE)) {
+            NavItem(Glyphs.Live, "Live TV", "Direktsändning", library.channels.size, state.screen == Screen.LIVE, docked, tv = tv, modifier = navModifier(Screen.LIVE)) {
                 go(Screen.LIVE)
             }
-            NavItem(Glyphs.Guide, "Tablå", "Vad som sänds", state.guide.channelCount, state.screen == Screen.GUIDE, docked, modifier = navModifier(Screen.GUIDE)) {
+            NavItem(Glyphs.Guide, "Tablå", "Vad som sänds", state.guide.channelCount, state.screen == Screen.GUIDE, docked, tv = tv, modifier = navModifier(Screen.GUIDE)) {
                 go(Screen.GUIDE)
             }
             // Antalet matcher som pågår just nu.
             val liveMatches = state.footballMatches.count { it.state == MatchState.LIVE }
-            NavItem(Glyphs.Football, "Fotboll", "Matcher & tabeller", liveMatches.takeIf { it > 0 }, state.screen == Screen.FOOTBALL, docked, live = true, modifier = navModifier(Screen.FOOTBALL)) {
+            NavItem(Glyphs.Football, "Fotboll", "Matcher & tabeller", liveMatches.takeIf { it > 0 }, state.screen == Screen.FOOTBALL, docked, tv = tv, live = true, modifier = navModifier(Screen.FOOTBALL)) {
                 go(Screen.FOOTBALL)
             }
+            NavDivider(tv)
             // Varje film och serie en gång, hur många versioner den än finns i.
             val versions = state.versions
             val movieCount = if (versions.isEmpty) library.movies.size else versions.movieCount
             val seriesCount = if (versions.isEmpty) library.series.size else versions.seriesCount
-            NavItem(Glyphs.Movies, "Filmer", "Filmbiblioteket", movieCount, state.screen == Screen.MOVIES, docked, modifier = navModifier(Screen.MOVIES)) {
+            NavItem(Glyphs.Movies, "Filmer", "Filmbiblioteket", movieCount, state.screen == Screen.MOVIES, docked, tv = tv, modifier = navModifier(Screen.MOVIES)) {
                 go(Screen.MOVIES)
             }
-            NavItem(Glyphs.Series, "Serier", "Säsonger & avsnitt", seriesCount, state.screen == Screen.SERIES, docked, modifier = navModifier(Screen.SERIES)) {
+            NavItem(Glyphs.Series, "Serier", "Säsonger & avsnitt", seriesCount, state.screen == Screen.SERIES, docked, tv = tv, modifier = navModifier(Screen.SERIES)) {
                 go(Screen.SERIES)
             }
-            NavItem(Glyphs.Genres, "Genrer", "Topplistor efter betyg", null, state.screen == Screen.GENRES, docked, modifier = navModifier(Screen.GENRES)) {
+            NavItem(Glyphs.Genres, "Genrer", "Topplistor efter betyg", null, state.screen == Screen.GENRES, docked, tv = tv, modifier = navModifier(Screen.GENRES)) {
                 go(Screen.GENRES)
             }
-            NavItem(Glyphs.History, "Historik", "Fortsätt där du slutade", null, state.screen == Screen.HISTORY, docked, modifier = navModifier(Screen.HISTORY)) {
+            NavItem(Glyphs.History, "Historik", "Fortsätt där du slutade", null, state.screen == Screen.HISTORY, docked, tv = tv, modifier = navModifier(Screen.HISTORY)) {
                 go(Screen.HISTORY)
             }
         }
@@ -420,12 +434,114 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
             Spacer(Modifier.height(8.dp))
         }
 
-        NavItem(Glyphs.Settings, "Inställningar", "Källor & uppspelning", null, state.screen == Screen.SETTINGS, docked, modifier = navModifier(Screen.SETTINGS)) {
+        NavItem(Glyphs.Settings, "Inställningar", "Källor & uppspelning", null, state.screen == Screen.SETTINGS, docked, tv = tv, modifier = navModifier(Screen.SETTINGS)) {
             go(Screen.SETTINGS)
         }
     }
 }
 
+/**
+ * Menyns överdel: märket och namnet, och på tv:n klockan under, som i
+ * tv-boxarnas egna menyer.
+ */
+@Composable
+private fun MenuBrand(state: AppState, tv: Boolean) {
+    val palette = LocalPalette.current
+    Column(Modifier.padding(start = if (tv) 8.dp else 10.dp, top = 8.dp, bottom = if (tv) 24.dp else 26.dp - NAV_AIR)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Image(
+                rememberVectorPainter(Glyphs.AppMark),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(if (tv) 50.dp else 40.dp)
+                    .glow(Brand.blue.copy(alpha = 0.32f), RoundedCornerShape(16.dp), 26.dp),
+            )
+            Spacer(Modifier.width(if (tv) 14.dp else 12.dp))
+            Column {
+                Text(
+                    "Tv",
+                    style = TextStyle(
+                        fontWeight = FontWeight.Black,
+                        fontSize = if (tv) 30.sp else 24.sp,
+                        lineHeight = if (tv) 32.sp else 26.sp,
+                        letterSpacing = (-0.6).sp,
+                    ),
+                    color = palette.textPrimary,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+                Text(
+                    "FÖR ${platformName.uppercase()}",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 1.8.sp),
+                    color = palette.textTertiary,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+        }
+        if (tv) {
+            Text(
+                clockLine(state.clock),
+                style = MaterialTheme.typography.labelLarge,
+                color = palette.textSecondary,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.padding(start = 4.dp, top = 20.dp),
+            )
+        }
+    }
+}
+
+/** "21.40  ·  tisdag 10 november". */
+private fun clockLine(ms: Long): String {
+    val time = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault())
+    return time.format(MENU_TIME) + "  ·  " + time.format(MENU_DATE)
+}
+
+private val MENU_TIME = DateTimeFormatter.ofPattern("HH:mm")
+private val MENU_DATE = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.forLanguageTag("sv-SE"))
+
+/** Mellan det som sänds och biblioteket: en tunn linje på tv:n, lite luft på datorn. */
+@Composable
+private fun NavDivider(tv: Boolean) {
+    val palette = LocalPalette.current
+    if (!tv) {
+        Spacer(Modifier.height(6.dp))
+        return
+    }
+    Box(
+        Modifier
+            .padding(horizontal = 18.dp, vertical = 8.dp)
+            .fillMaxWidth()
+            .height(1.dp)
+            .background(palette.hairline.copy(alpha = palette.hairline.alpha * 0.7f)),
+    )
+}
+
+/**
+ * Tv-menyns bakgrund: ett svagt sken i märkets färger uppe till vänster, där
+ * loggan står, och en tunn kant mot innehållet.
+ */
+private fun DrawScope.menuGlow(edge: Color) {
+    drawRect(
+        Brush.radialGradient(
+            listOf(Brand.blue.copy(alpha = 0.16f), Brand.violet.copy(alpha = 0.06f), Color.Transparent),
+            center = Offset(size.width * 0.18f, size.height * 0.06f),
+            radius = size.width * 1.25f,
+        ),
+    )
+    drawRect(
+        Brush.verticalGradient(listOf(Color.Transparent, Brand.violet.copy(alpha = 0.05f))),
+    )
+    drawLine(edge, Offset(size.width - 0.5f, 0f), Offset(size.width - 0.5f, size.height), strokeWidth = 1f)
+}
+
+/**
+ * En rad i menyn. Markerad blir raden en fylld platta i temats färg, med
+ * texten i kontrast — som knapparna — och växer lite på tv:n. Fliken man är
+ * i har ett streck i kanten i märkets färger. På datorn står också en rad
+ * förklaring och antalet; på tv:n bara namnet, och LIVE när något pågår.
+ */
 @Composable
 private fun NavItem(
     icon: ImageVector,
@@ -435,76 +551,126 @@ private fun NavItem(
     selected: Boolean,
     /** Utan undertext, när minispelaren tar plats i sidofältet. */
     compact: Boolean,
-    /** Siffran räknar det som pågår just nu: röd, med en prick framför. */
+    tv: Boolean,
+    /** Siffran räknar det som pågår just nu: röd, som LIVE. */
     live: Boolean = false,
-    /** Hur synlig texten är: 0 när tv-menyn är infälld till ikonerna. Läses när det ritas. */
-    labels: () -> Float = { 1f },
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val palette = LocalPalette.current
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val focused by interaction.collectIsFocusedAsState()
+    val shape = RoundedCornerShape(if (tv) 14.dp else 10.dp)
+    val fill by animateColorAsState(
+        targetValue = when {
+            focused -> palette.focus
+            hovered -> palette.focus.copy(alpha = 0.09f)
+            selected -> palette.focus.copy(alpha = 0.07f)
+            else -> Color.Transparent
+        },
+        animationSpec = tween(MENU_MS),
+        label = "menyrad",
+    )
+    val ink by animateColorAsState(
+        targetValue = when {
+            focused -> palette.onFocus
+            selected || hovered -> palette.textPrimary
+            else -> palette.textSecondary
+        },
+        animationSpec = tween(MENU_MS),
+        label = "menytext",
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (focused && tv) 1.035f else 1f,
+        animationSpec = tween(MENU_MS, easing = FastOutSlowInEasing),
+        label = "menyskala",
+    )
     val counted = count != null && count > 0
-    Pressable(onClick = onClick, selected = selected, modifier = modifier.fillMaxWidth()) {
+    Box(
+        modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .then(if (focused) Modifier.glow(palette.glowOf(0.6f), shape, 20.dp) else Modifier)
+            .clip(shape)
+            .background(fill)
+            .hoverable(interaction)
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .pointerHoverIcon(PointerIcon.Hand),
+    ) {
+        // Fliken man är i.
+        if (selected && !focused) {
+            Box(
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 4.dp)
+                    .size(width = 3.dp, height = if (tv) 24.dp else 20.dp)
+                    .clip(CircleShape)
+                    .background(Brand.stripe),
+            )
+        }
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = if (tv) 16.dp else 12.dp, vertical = if (tv) 13.dp else 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box {
-                Icon(
-                    icon,
-                    contentDescription = label,
-                    tint = if (selected) palette.focus else palette.textSecondary,
-                    modifier = Modifier.size(22.dp),
-                )
-                // Infälld meny: en röd prick på ikonen när något pågår.
-                if (live && counted) {
-                    Box(
-                        Modifier
-                            .align(Alignment.TopEnd)
-                            .offset(x = 3.dp, y = (-2).dp)
-                            .size(7.dp)
-                            .graphicsLayer { alpha = 1f - labels() }
-                            .clip(CircleShape)
-                            .background(LIVE_COUNT),
-                    )
-                }
-            }
-            Spacer(Modifier.width(14.dp))
-            // En rad var, utan radbrytning: medan menyn fälls ut växer texten fram i stället för att hoppa.
-            Column(Modifier.weight(1f).graphicsLayer { alpha = labels() }) {
+            Icon(icon, contentDescription = label, tint = ink, modifier = Modifier.size(if (tv) 24.dp else 22.dp))
+            Spacer(Modifier.width(if (tv) 16.dp else 14.dp))
+            Column(Modifier.weight(1f)) {
                 Text(
                     label,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = if (selected) palette.textPrimary else palette.textSecondary,
+                    style = if (tv) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleSmall,
+                    fontWeight = if (selected || focused) FontWeight.SemiBold else FontWeight.Medium,
+                    color = ink,
                     maxLines = 1,
                     softWrap = false,
                 )
-                AnimatedVisibility(visible = !compact, enter = dockEnter, exit = dockExit) {
-                    Text(
-                        subtitle,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = palette.textTertiary,
-                        maxLines = 1,
-                        softWrap = false,
-                    )
+                if (!tv) {
+                    AnimatedVisibility(visible = !compact, enter = dockEnter, exit = dockExit) {
+                        Text(
+                            subtitle,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (focused) palette.onFocus.copy(alpha = 0.7f) else palette.textTertiary,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
                 }
             }
-            if (count != null && count > 0) {
-                Row(Modifier.graphicsLayer { alpha = labels() }, verticalAlignment = Alignment.CenterVertically) {
-                    if (live) {
-                        Box(Modifier.size(6.dp).clip(CircleShape).background(LIVE_COUNT))
-                        Spacer(Modifier.width(5.dp))
-                    }
-                    Text(
-                        count.grouped(),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (live) LIVE_COUNT else palette.textTertiary,
-                        maxLines = 1,
-                        softWrap = false,
-                    )
-                }
+            when {
+                live && counted -> LiveBadge(count ?: 0)
+                !tv && counted -> Text(
+                    (count ?: 0).grouped(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (focused) palette.onFocus.copy(alpha = 0.7f) else palette.textTertiary,
+                    maxLines = 1,
+                    softWrap = false,
+                )
             }
         }
+    }
+}
+
+/** "2 LIVE": det som pågår just nu, i rött. */
+@Composable
+private fun LiveBadge(count: Int) {
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(LIVE_COUNT)
+            .padding(horizontal = 7.dp, vertical = 2.dp),
+    ) {
+        Text(
+            "$count LIVE",
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp),
+            color = Color.White,
+            maxLines = 1,
+            softWrap = false,
+        )
     }
 }
 
