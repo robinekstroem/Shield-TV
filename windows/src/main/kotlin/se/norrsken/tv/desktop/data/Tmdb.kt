@@ -50,6 +50,8 @@ object TitleCleaner {
     // ] och } som tecken skrivs \] och \}: Androids reguljära uttryck kräver det.
     private val bracketed = Regex("""\[[^\]]*\]|\{[^}]*\}|\((?:19|20)\d{2}\)""")
     private val prefix = Regex("""^\s*[A-Z]{2,4}\s*[-|:]\s+""")
+    // Julkalendrar: "22/12: It's a Wonderful Life", "1.12 - Elf". Inte "9/11" eller "12/12/12".
+    private val calendarDay = Regex("""^\s*\d{1,2}\s*[/.]\s*\d{1,2}\s*[:.\-–|]+\s*""")
     private val bareYear = Regex("""[\s\-–|]+(?:19|20)\d{2}\s*$""")
     private val spaces = Regex("""\s{2,}""")
 
@@ -57,6 +59,7 @@ object TitleCleaner {
         val withoutQuality = quality.replace(name, " ")
         val year = titleYear(withoutQuality.trim())
         var title = bracketed.replace(withoutQuality, " ")
+        title = calendarDay.replace(title, "")
         title = prefix.replace(title, "")
         // Årtalet i slutet tas bara bort om det faktiskt var ett år: "Blade Runner 2049" behåller sitt.
         if (year != null) title = bareYear.replace(title.trimEnd(), "")

@@ -58,9 +58,25 @@ class VersionIndex private constructor(
 
     fun groupKeyOf(series: Series): String = seriesGroupOf[series.key]?.let { "s$it" } ?: "x" + series.key
 
-    fun titleOf(movie: Movie): String = titles[M + movie.key] ?: movie.name
+    /**
+     * Samma värde för alla versioner av en film. Innan indexet hunnit byggas,
+     * eller för en film som kommit till sedan dess, räcker titeln utan taggar
+     * och årtalet — så att samma film inte står två gånger i en rad.
+     */
+    fun identityOf(movie: Movie): String =
+        movieGroupOf[movie.key]?.let { "m$it" } ?: ("t|" + TitleCleaner.normalize(quickTitle(movie.name)) + "|" + (movie.year?.toString() ?: ""))
 
-    fun titleOf(series: Series): String = titles[S + series.key] ?: series.name
+    fun identityOf(series: Series): String =
+        seriesGroupOf[series.key]?.let { "s$it" } ?: ("u|" + TitleCleaner.normalize(quickTitle(series.name)) + "|" + series.year.orEmpty())
+
+    /**
+     * Titeln utan leverantörens taggar. Även medan indexet byggs (en stund
+     * efter starten på Shield): då rensas namnet direkt, i stället för att
+     * visas som "Hope [PRE] [2026]".
+     */
+    fun titleOf(movie: Movie): String = titles[M + movie.key] ?: quickTitle(movie.name)
+
+    fun titleOf(series: Series): String = titles[S + series.key] ?: quickTitle(series.name)
 
     fun yearOf(movie: Movie): Int? = years[M + movie.key] ?: movie.year
 
@@ -209,6 +225,13 @@ class VersionIndex private constructor(
             val (seriesGroupOf, seriesGroups) = finish(visibleSeries, S)
             return VersionIndex(movieGroupOf, movieGroups, seriesGroupOf, seriesGroups, rank, titles, years, labels, uhd, hidden)
         }
+
+        /** Titeln utan taggar för ett namn som inte finns i indexet än. Bara titeln: det går fort. */
+        internal fun quickTitle(name: String): String =
+            parsed[name]?.title?.ifBlank { null }
+                ?: quickTitles.getOrPut(name) { TitleCleaner.searchTitle(name).first.ifBlank { name } }
+
+        private val quickTitles = ConcurrentHashMap<String, String>()
 
         private fun parse(name: String): Parsed = parsed.getOrPut(name) {
             val (title, cleanerYear) = TitleCleaner.searchTitle(name)

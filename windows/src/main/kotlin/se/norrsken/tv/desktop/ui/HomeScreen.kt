@@ -1,18 +1,12 @@
 package se.norrsken.tv.desktop.ui
 
-import se.norrsken.tv.desktop.data.VersionIndex
-import androidx.compose.runtime.mutableLongStateOf
-import kotlinx.coroutines.CancellationException
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,17 +27,17 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import se.norrsken.tv.desktop.data.LibraryFilter
-import se.norrsken.tv.desktop.data.TrendingTitle
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -52,13 +46,25 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -66,6 +72,7 @@ import se.norrsken.tv.desktop.AppState
 import se.norrsken.tv.desktop.data.Genre
 import se.norrsken.tv.desktop.data.GenreIndex
 import se.norrsken.tv.desktop.data.Library
+import se.norrsken.tv.desktop.data.LibraryFilter
 import se.norrsken.tv.desktop.data.ListEntry
 import se.norrsken.tv.desktop.data.ListKind
 import se.norrsken.tv.desktop.data.LiveChannel
@@ -76,13 +83,11 @@ import se.norrsken.tv.desktop.data.Series
 import se.norrsken.tv.desktop.data.TitleCleaner
 import se.norrsken.tv.desktop.data.TmdbFacts
 import se.norrsken.tv.desktop.data.TmdbStore
+import se.norrsken.tv.desktop.data.TrendingTitle
+import se.norrsken.tv.desktop.data.VersionIndex
 import se.norrsken.tv.desktop.data.WatchEntry
 import se.norrsken.tv.desktop.data.WatchKind
 import se.norrsken.tv.desktop.data.weightedScore
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.util.concurrent.ConcurrentHashMap
 
 // --- Startsidan ----------------------------------------------------------------------
 //
@@ -121,6 +126,7 @@ internal class HomeRow(
 
 private const val ROW = 30
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(state: AppState) {
     // Före förgreningen: sidan ska stå där den stod när man backar ur en titel.
@@ -234,26 +240,59 @@ fun HomeScreen(state: AppState) {
         )
         Column(Modifier.fillMaxSize()) {
             HeroInfo(state, current, shown, heroHeight, firstFocus, onOpen = { openedKey = it })
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                contentPadding = PaddingValues(bottom = 40.dp),
-            ) {
-                items(rows, key = { it.title }) { row ->
-                    HomeRowView(
-                        state = state,
-                        row = row,
-                        rowState = rowStates.getOrPut(row.title) { LazyListState() },
-                        restoreKey = openedKey,
-                        restore = restore,
-                        onActive = { pending = it },
-                        onOpen = { openedKey = it.key },
-                    )
+            // Korten i raderna rullar som förut; bara raderna själva lägger sig överst.
+            val cardScrolling = LocalBringIntoViewSpec.current
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                HomeRowsScrolling {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 40.dp),
+                    ) {
+                        items(rows, key = { it.title }) { row ->
+                            CompositionLocalProvider(LocalBringIntoViewSpec provides cardScrolling) {
+                                HomeRowView(
+                                    state = state,
+                                    row = row,
+                                    rowState = rowStates.getOrPut(row.title) { LazyListState() },
+                                    restoreKey = openedKey,
+                                    restore = restore,
+                                    onActive = { pending = it },
+                                    onOpen = { openedKey = it.key },
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 }
+
+/**
+ * Tv: raderna rullar en hel rad i taget. Raden man går till lägger sig
+ * överst under titelinformationen, med sin rubrik synlig — aldrig en halv
+ * rad kvar ovanför. Syns raden redan hel står sidan still.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun HomeRowsScrolling(content: @Composable () -> Unit) {
+    if (!tvLayout) {
+        content()
+        return
+    }
+    val lead = with(LocalDensity.current) { HOME_ROW_LEAD.toPx() }
+    val spec = remember(lead) {
+        object : BringIntoViewSpec {
+            override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float =
+                if (offset >= lead && offset + size <= containerSize) 0f else offset - lead
+        }
+    }
+    CompositionLocalProvider(LocalBringIntoViewSpec provides spec, content = content)
+}
+
+/** Från radernas överkant till kortens: plats för radens rubrik och lite luft ovanför. */
+private val HOME_ROW_LEAD = 58.dp
 
 // --- Bakgrund och information ------------------------------------------------------
 
@@ -967,13 +1006,13 @@ internal fun buildCatalog(
     fun movieTmdb(movie: Movie): TmdbFacts? = if (tmdb.isEmpty()) null else tmdb[HomeKeys.movie(movie)]?.takeIf { it.found }
     fun seriesTmdb(series: Series): TmdbFacts? = if (tmdb.isEmpty()) null else tmdb[HomeKeys.series(series)]?.takeIf { it.found }
     // Samma film finns ofta flera gånger hos leverantören (HD, 4K, språk): en gång per rad.
-    // Versionerna avgör; tills de är klara duger TMDB-id eller titeln.
+    // Versionerna avgör; tills de är klara duger TMDB-id eller titeln utan taggar och året.
     fun identity(movie: Movie): String =
-        if (!versions.isEmpty) versions.groupKeyOf(movie)
-        else movieTmdb(movie)?.id?.let { "tmdb:$it" } ?: TitleCleaner.normalize(movie.name)
+        if (!versions.isEmpty) versions.identityOf(movie)
+        else movieTmdb(movie)?.id?.let { "tmdb:$it" } ?: versions.identityOf(movie)
     fun seriesIdentity(series: Series): String =
-        if (!versions.isEmpty) versions.groupKeyOf(series)
-        else seriesTmdb(series)?.id?.let { "tmdb:$it" } ?: TitleCleaner.normalize(series.name)
+        if (!versions.isEmpty) versions.identityOf(series)
+        else seriesTmdb(series)?.id?.let { "tmdb:$it" } ?: versions.identityOf(series)
 
     // Det som döljs av språkvalet eller en dold kategori syns inte heller här.
     val movies = library.movies.filterNot { versions.isHidden(it) }

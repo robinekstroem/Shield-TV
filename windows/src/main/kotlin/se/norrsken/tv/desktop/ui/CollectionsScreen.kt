@@ -98,6 +98,9 @@ internal fun collectionCards(state: AppState): List<CollectionCard> {
     val disney = DisneyShelf.entries.mapNotNull { shelf ->
         val count = state.disney.counts[shelf] ?: 0
         if (count == 0) return@mapNotNull null
+        // Klassikerna och Pixar räknas mot listan, varje film en gång. Kortfilmerna har ingen lista.
+        val canon = state.disney.canonCounts[shelf] ?: 0
+        val numbered = shelf != DisneyShelf.SHORTS && canon > 0
         val look = shelfLook(shelf)
         CollectionCard(
             id = disneyCardId(shelf),
@@ -108,11 +111,11 @@ internal fun collectionCards(state: AppState): List<CollectionCard> {
                 DisneyShelf.PIXAR -> "Från Toy Story och framåt"
                 DisneyShelf.SHORTS -> "Kortfilmerna från 30-talet och framåt"
             },
-            owned = count,
-            total = when (shelf) {
-                DisneyShelf.CLASSICS -> DisneyIndex.CLASSICS_TOTAL
-                DisneyShelf.PIXAR -> DisneyIndex.PIXAR_TOTAL
-                DisneyShelf.SHORTS -> null
+            owned = if (numbered) canon else count,
+            total = when {
+                !numbered -> null
+                shelf == DisneyShelf.CLASSICS -> DisneyIndex.CLASSICS_TOTAL
+                else -> DisneyIndex.PIXAR_TOTAL
             },
             covers = state.disneyCovers(shelf, 3),
             feature = state.disneyFeature(shelf),

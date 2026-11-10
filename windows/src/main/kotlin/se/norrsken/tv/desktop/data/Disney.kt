@@ -45,6 +45,12 @@ class DisneyIndex private constructor(
     val counts: Map<DisneyShelf, Int>,
     /** Figurerna som finns bland kortfilmerna, i fast ordning. */
     val characterNames: List<String>,
+    /**
+     * Hur många av klassikerna och Pixarfilmerna i listan man har, var och en
+     * en gång. Kan aldrig bli fler än listan: "31 av 31", inte "33 av 31" när
+     * en film finns i två versioner som inte gått att para ihop.
+     */
+    val canonCounts: Map<DisneyShelf, Int> = emptyMap(),
 ) {
     val isEmpty: Boolean get() = shelves.isEmpty()
 
@@ -84,6 +90,7 @@ class DisneyIndex private constructor(
             val numbers = HashMap<String, Int>()
             val characters = HashMap<String, String>()
             val groups = HashMap<DisneyShelf, HashSet<String>>()
+            val canonOwned = HashMap<DisneyShelf, HashSet<Int>>()
 
             for (movie in library.movies) {
                 if (versions.isHidden(movie)) continue
@@ -109,7 +116,10 @@ class DisneyIndex private constructor(
                 if (shelf == null) continue
                 val key = M + movie.key
                 shelves[key] = shelf
-                if (canon != null && canon.first == shelf) numbers[key] = canon.second.number
+                if (canon != null && canon.first == shelf) {
+                    numbers[key] = canon.second.number
+                    canonOwned.getOrPut(shelf) { HashSet() }.add(canon.second.number)
+                }
                 character?.let { characters[key] = it }
                 groups.getOrPut(shelf) { HashSet() }.add(versions.groupKeyOf(movie))
             }
@@ -132,6 +142,7 @@ class DisneyIndex private constructor(
                 characters = characters,
                 counts = groups.mapValues { it.value.size },
                 characterNames = CHARACTER_ORDER.filter { it in present },
+                canonCounts = canonOwned.mapValues { it.value.size },
             )
         }
 
