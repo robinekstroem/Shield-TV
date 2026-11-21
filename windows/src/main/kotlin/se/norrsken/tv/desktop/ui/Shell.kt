@@ -251,7 +251,18 @@ fun AppRoot(state: AppState) {
     // Tv: menyn och kategorierna göms medan man är i innehållet — också när
     // minispelaren går, som då ligger som en liten bild i hörnet.
     val drawers = tvLayout
-    Box(Modifier.fillMaxSize().background(palette.background)) {
+    var introSkip by remember { mutableStateOf(false) }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(palette.background)
+            .onPreviewKeyEvent { event ->
+                // Medan starten visas hoppar en knapptryckning över den, och går inte vidare till sidan bakom.
+                if (state.introDone) return@onPreviewKeyEvent false
+                if (event.type == KeyEventType.KeyDown) introSkip = true
+                true
+            },
+    ) {
         // Temats dekor rör sig bara när spelaren inte täcker allt.
         val decorated = state.nowPlaying == null || state.miniPlayer
         // Egna lager: det som rör sig i bakgrunden ritas om för sig, inte hela skärmen
@@ -349,7 +360,7 @@ fun AppRoot(state: AppState) {
             val library = state.library
             val nothing = library.movies.isEmpty() && library.series.isEmpty() && library.channels.isEmpty()
             val ready = state.homeShown || (!state.loading && (state.screen != Screen.HOME || nothing)) || state.nowPlaying != null
-            StartIntro(state = state, ready = ready, onFinished = { state.introDone = true })
+            StartIntro(state = state, ready = ready, skip = introSkip, onFinished = { state.introDone = true })
         }
     }
 }

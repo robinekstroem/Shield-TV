@@ -734,17 +734,29 @@ class AppState {
             }
             if (score > 0.0) scored += Triple(movie, tmdb, score)
         }
+        // Samma film bara en gång: inte via en annan version, en annan titel eller samma omslag.
         val seen = HashSet<String>()
+        val seenTitles = HashSet<String>()
+        val seenTmdb = HashSet<Int>()
+        val seenPosters = HashSet<String>()
         val result = ArrayList<IntroReelItem>()
         for ((movie, tmdb, _) in scored.sortedByDescending { it.third }) {
             if (result.size >= INTRO_REEL_SIZE) break
-            if (!seen.add(index.groupKeyOf(movie))) continue
+            if (index.groupKeyOf(movie) in seen) continue
+            if (tmdb != null && tmdb.id in seenTmdb) continue
+            val title = index.titleOf(movie)
+            val titleKey = title.lowercase().filter { it.isLetterOrDigit() }
+            if (titleKey.isNotEmpty() && titleKey in seenTitles) continue
             val poster = usable(tmdb?.takeIf { it.sure }?.poster)
                 ?: usable(movie.poster)
                 ?: index.versionsOf(movie).firstNotNullOfOrNull { usable(it.poster) }
                 ?: usable(tmdb?.poster)
                 ?: continue
-            result += IntroReelItem(index.titleOf(movie), poster, usable(tmdb?.backdrop))
+            if (!seenPosters.add(poster)) continue
+            seen += index.groupKeyOf(movie)
+            if (tmdb != null) seenTmdb += tmdb.id
+            if (titleKey.isNotEmpty()) seenTitles += titleKey
+            result += IntroReelItem(title, poster, usable(tmdb?.backdrop))
         }
         return result
     }
@@ -3372,7 +3384,8 @@ private const val TEAMS_EVERY_MS = 6 * 60 * 60_000L
 /** Senast sedda bland kanalerna: så många. */
 private const val RECENT_CHANNELS = 30
 /** Startens filmvägg: så många filmer, ur de senaste årens; sparas en stund efter starten. */
-private const val INTRO_REEL_SIZE = 32
+/** Startens filmvägg: så många filmer att samma omslag aldrig behöver synas två gånger samtidigt. */
+private const val INTRO_REEL_SIZE = 72
 private const val INTRO_REEL_MIN = 12
 private const val INTRO_REEL_YEARS = 5
 private const val INTRO_REEL_SAVE_DELAY_MS = 25_000L
