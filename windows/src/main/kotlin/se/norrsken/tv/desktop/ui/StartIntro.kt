@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Matrix
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -877,25 +878,23 @@ private class IntroScene {
 
     private fun DrawScope.drawWall(t: Long, u: Long) {
         raised.clear()
-        for (i in tiles.indices) {
-            val tile = tiles[i]
-            if (tile.poster < 0 || tile.hero || t < tile.igniteAt) continue
-            if (t < tile.igniteAt + IGNITE_MS.toLong() || tile.flipAt >= 0) {
-                tile.lift = liftOf(tile, t)
-                // Det närmast kameran ritas sist.
-                var at = raised.size
-                while (at > 0 && raised[at - 1].lift > tile.lift) at--
-                raised.add(at, tile)
-                continue
-            }
-            val left = tileLeft(tile, u)
-            val top = tileTop(tile)
-            withTransform({
-                transform(wallMatrix)
-                translate(left, top)
-            }) {
-                poster(tile.poster, 1f)
-                glint(tile, t)
+        // Omslagen som sitter på väggen: en och samma projektion, bara flyttade.
+        withTransform({ transform(wallMatrix) }) {
+            for (i in tiles.indices) {
+                val tile = tiles[i]
+                if (tile.poster < 0 || tile.hero || t < tile.igniteAt) continue
+                if (t < tile.igniteAt + IGNITE_MS.toLong() || tile.flipAt >= 0) {
+                    tile.lift = liftOf(tile, t)
+                    // Det närmast kameran ritas sist.
+                    var at = raised.size
+                    while (at > 0 && raised[at - 1].lift > tile.lift) at--
+                    raised.add(at, tile)
+                    continue
+                }
+                translate(tileLeft(tile, u), tileTop(tile)) {
+                    poster(tile.poster, 1f)
+                    glint(tile, t)
+                }
             }
         }
         for (i in raised.indices) drawRaised(raised[i], t, u)
