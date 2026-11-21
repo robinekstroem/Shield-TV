@@ -30,6 +30,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -289,3 +290,15 @@ internal fun BackgroundUploadHint(state: AppState) {
  * Något eget helskärmsfönster finns inte, och skärmen under ska aldrig bli svart.
  */
 internal const val separateFullscreenWindow = false
+
+/** Återanvänds: ritningen sker bara på UI-tråden, och duken kopierar matrisen. */
+private val perspectiveMatrix = android.graphics.Matrix()
+
+/**
+ * Lägger en 3×3-matris med perspektiv (radvis: x, y och perspektivraden) på
+ * ritytan, ovanpå det som redan gäller. Startens filmvägg ritas med den.
+ */
+internal fun androidx.compose.ui.graphics.drawscope.DrawScope.concatPerspective(m: FloatArray) {
+    perspectiveMatrix.setValues(m)
+    drawContext.canvas.nativeCanvas.concat(perspectiveMatrix)
+}

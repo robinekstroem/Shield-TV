@@ -27,10 +27,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.Matrix
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.translate
-import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
@@ -254,8 +252,6 @@ private class IntroScene {
     private val rot = FloatArray(9)
     private val wall = FloatArray(9)
     private val wallInverse = FloatArray(9)
-    private val wallMatrix = Matrix()
-    private val tileMatrix = Matrix()
     private val h = FloatArray(9)
     private var bar = 0f
     private var projX = 0f
@@ -473,7 +469,6 @@ private class IntroScene {
         val s = zoom
         homography(0f, 0f, 0f, s * rot[0], s * rot[3], s * rot[6], s * rot[1], s * rot[4], s * rot[7], wall)
         invert(wall, wallInverse)
-        toMatrix(wall, wallMatrix)
     }
 
     /** Vridningen: lutning runt x, sidvridning runt y och rotation runt z, i grader. */
@@ -541,7 +536,6 @@ private class IntroScene {
         val hw = tileW / 2f
         val hh = tileH / 2f
         homography(qx - ax * hw - bx * hh, qy - ay * hw - by * hh, qz - az * hw - bz * hh, ax, ay, az, bx, by, bz, h)
-        toMatrix(h, tileMatrix)
     }
 
     /** Väggens punkt (x, y) på skärmen, i [projX] och [projY]. */
@@ -879,7 +873,7 @@ private class IntroScene {
     private fun DrawScope.drawWall(t: Long, u: Long) {
         raised.clear()
         // Omslagen som sitter på väggen: en och samma projektion, bara flyttade.
-        withTransform({ transform(wallMatrix) }) {
+        projected(wall) {
             for (i in tiles.indices) {
                 val tile = tiles[i]
                 if (tile.poster < 0 || tile.hero || t < tile.igniteAt) continue
@@ -939,7 +933,7 @@ private class IntroScene {
         val turned = (abs(theta) - SPEC_ANGLE) / SPEC_WIDTH
         val spec = SPEC_MAX * exp(-turned * turned)
         val area = Size(tileW.toFloat(), tileH.toFloat())
-        withTransform({ transform(tileMatrix) }) {
+        projected(h) {
             poster(shown, alpha)
             if (shade > 0.01f) drawRect(Color.Black, size = area, alpha = shade * alpha)
             if (spec > 0.01f) drawRect(SHINE, size = area, alpha = spec * alpha)
@@ -980,7 +974,7 @@ private class IntroScene {
         val area = Size(viewRight - viewLeft, viewBottom - viewTop)
         val center = Offset(lightX, lightY)
         val radius = POOL_RADIUS * unit
-        withTransform({ transform(wallMatrix) }) {
+        projected(wall) {
             drawRect(
                 Brush.radialGradient(
                     0f to Color.Transparent,
@@ -1098,11 +1092,10 @@ private class IntroScene {
         val bY = by * length
         val bZ = bz2 * length
         homography(cx - aX * hw - bX * hh, cy - aY * hw - bY * hh, cz - aZ * hw - bZ * hh, aX, aY, aZ, bX, bY, bZ, h)
-        toMatrix(h, tileMatrix)
         val glow = smoothstep(0.08f, 0.5f, e)
         val w = tileW.toFloat()
         val ht = tileH.toFloat()
-        withTransform({ transform(tileMatrix) }) {
+        projected(h) {
             if (glow > 0f) {
                 // Ljus bakom filmen och en tunn ljus kant.
                 val r = ht * 0.9f
@@ -1186,25 +1179,13 @@ private class IntroScene {
 
 // --- Matriser ------------------------------------------------------------------------
 
-/** 3×3-matrisen (radvis) som Compose-matris: x, y och perspektivet; z orört. */
-private fun toMatrix(m: FloatArray, out: Matrix) {
-    val v = out.values
-    v[0] = m[0]
-    v[4] = m[1]
-    v[12] = m[2]
-    v[1] = m[3]
-    v[5] = m[4]
-    v[13] = m[5]
-    v[3] = m[6]
-    v[7] = m[7]
-    v[15] = m[8]
-    v[2] = 0f
-    v[6] = 0f
-    v[8] = 0f
-    v[9] = 0f
-    v[10] = 1f
-    v[11] = 0f
-    v[14] = 0f
+/** Ritar [block] genom matrisen [m] (3×3 radvis, med perspektiv), och återställer sedan. */
+private inline fun DrawScope.projected(m: FloatArray, block: DrawScope.() -> Unit) {
+    val canvas = drawContext.canvas
+    canvas.save()
+    concatPerspective(m)
+    block()
+    canvas.restore()
 }
 
 private fun invert(m: FloatArray, out: FloatArray) {

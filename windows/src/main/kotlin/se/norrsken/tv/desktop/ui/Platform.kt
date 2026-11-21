@@ -315,3 +315,11 @@ internal fun BackgroundUploadHint(state: AppState) = Unit
 /** TMDB-nyckeln skrivs med tangentbordet i Windows; på Shield kan den skickas från telefonen. */
 @Composable
 internal fun TmdbPhoneHint(state: AppState) = Unit
+
+/**
+ * Lägger en 3×3-matris med perspektiv (radvis: x, y och perspektivraden) på
+ * ritytan, ovanpå det som redan gäller. Startens filmvägg ritas med den.
+ */
+internal fun androidx.compose.ui.graphics.drawscope.DrawScope.concatPerspective(m: FloatArray) {
+    drawContext.canvas.nativeCanvas.concat(org.jetbrains.skia.Matrix33(*m))
+}
