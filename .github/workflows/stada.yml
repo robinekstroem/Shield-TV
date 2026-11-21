@@ -1,0 +1,34 @@
+name: Städa releaser
+
+# Körs en gång när projektet blivit offentligt. Releaser som var öppna blir
+# dolda utkast (filerna ligger kvar, men bara ägaren ser dem), och alla
+# taggar tas bort eftersom de pekade på den gamla historiken.
+# Går att köra igen: Actions → Städa releaser → Run workflow.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  stada:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dölj öppna releaser och ta bort taggar
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          for id in $(gh api "repos/${REPO}/releases?per_page=100" --jq '.[] | select(.draft == false) | .id'); do
+            gh api -X PATCH "repos/${REPO}/releases/${id}" -F draft=true >/dev/null
+            echo "Dold: release ${id}"
+          done
+          for ref in $(gh api "repos/${REPO}/git/matching-refs/tags" --jq '.[].ref'); do
+            gh api -X DELETE "repos/${REPO}/git/${ref}" >/dev/null
+            echo "Borttagen: ${ref}"
+          done
+          echo "Releaser nu:"
+          gh api "repos/${REPO}/releases?per_page=100" --jq '.[] | "  \(.tag_name) utkast=\(.draft)"'
+          echo "Taggar kvar: $(gh api "repos/${REPO}/git/matching-refs/tags" --jq 'length')"
