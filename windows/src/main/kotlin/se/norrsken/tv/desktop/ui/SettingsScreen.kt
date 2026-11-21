@@ -26,7 +26,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,12 +63,34 @@ private val syncFormat: DateTimeFormatter =
 fun SettingsScreen(state: AppState) {
     val palette = LocalPalette.current
     val scroll = rememberScrollState()
-    // Kategorierna väljs på en egen sida: listorna är långa.
-    var managing by remember { mutableStateOf<Char?>(null) }
-    managing?.let { kind ->
-        CategoryManager(state, kind, onKind = { managing = it }, onClose = { managing = null })
+    // Kategorierna väljs på en egen sida: listorna är långa. Den står i AppState,
+    // så att Tillbaka på tv:n stänger den; lämnar man Inställningar stängs den.
+    DisposableEffect(Unit) {
+        onDispose { state.managingCategories = null }
+    }
+    // Tv: tillbaka från kategorisidan hamnar markeringen på knappen som öppnade den.
+    var lastManaged by remember { mutableStateOf<Char?>(null) }
+    val managedFocus = remember { FocusRequester() }
+    fun manage(kind: Char?) {
+        if (kind != null) lastManaged = kind
+        state.managingCategories = kind
+    }
+    state.managingCategories?.let { kind ->
+        CategoryManager(state, kind, onKind = { manage(it) }, onClose = { manage(null) })
         return
     }
+    if (tvLayout) {
+        LaunchedEffect(Unit) {
+            if (lastManaged != null) {
+                repeat(2) { withFrameNanos { } }
+                runCatching { managedFocus.requestFocus() }
+            }
+        }
+    }
+    fun managedButton(kind: Char): Modifier =
+        if (kind == (lastManaged ?: LibraryFilter.LIVE)) Modifier.focusRequester(managedFocus) else Modifier
+    // Tv: tappas markeringen hamnar den på kategoriknapparna, som alltid finns.
+    TvFocusFallback { runCatching { managedFocus.requestFocus() }.isSuccess }
     Box(Modifier.fillMaxSize()) {
         Column(
             Modifier
@@ -141,9 +167,21 @@ fun SettingsScreen(state: AppState) {
                             color = palette.textTertiary,
                             modifier = Modifier.width(140.dp),
                         )
-                        SecondaryButton("Live-tv" + hiddenSuffix(state.hiddenCount(LibraryFilter.LIVE)), onClick = { managing = LibraryFilter.LIVE })
-                        SecondaryButton("Filmer" + hiddenSuffix(state.hiddenCount(LibraryFilter.MOVIE)), onClick = { managing = LibraryFilter.MOVIE })
-                        SecondaryButton("Serier" + hiddenSuffix(state.hiddenCount(LibraryFilter.SERIES)), onClick = { managing = LibraryFilter.SERIES })
+                        SecondaryButton(
+                            "Live-tv" + hiddenSuffix(state.hiddenCount(LibraryFilter.LIVE)),
+                            onClick = { manage(LibraryFilter.LIVE) },
+                            modifier = managedButton(LibraryFilter.LIVE),
+                        )
+                        SecondaryButton(
+                            "Filmer" + hiddenSuffix(state.hiddenCount(LibraryFilter.MOVIE)),
+                            onClick = { manage(LibraryFilter.MOVIE) },
+                            modifier = managedButton(LibraryFilter.MOVIE),
+                        )
+                        SecondaryButton(
+                            "Serier" + hiddenSuffix(state.hiddenCount(LibraryFilter.SERIES)),
+                            onClick = { manage(LibraryFilter.SERIES) },
+                            modifier = managedButton(LibraryFilter.SERIES),
+                        )
                     }
                     Text(
                         "Välj vilka kategorier som syns. Dolda kategorier försvinner ur listorna, tablån och startsidan.",
@@ -183,9 +221,14 @@ fun SettingsScreen(state: AppState) {
                 }
 
                 Section("Uppspelning") {
-                    InfoRow("Spelarmotor", VlcRuntime.description)
-                    InfoRow("User-Agent", state.userAgent)
-                    InfoRow("Lösenord", SecretBox.description)
+                    // Tv: rader utan knappar går ändå att nå med pilarna.
+                    TvFocusBox {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            InfoRow("Spelarmotor", VlcRuntime.description)
+                            InfoRow("User-Agent", state.userAgent)
+                            InfoRow("Lösenord", SecretBox.description)
+                        }
+                    }
                 }
 
                 Section("Tablå") {
@@ -210,16 +253,21 @@ fun SettingsScreen(state: AppState) {
                 }
 
                 Section("Om appen") {
-                    InfoRow("Version", System.getProperty("tv.version") ?: "Utvecklingsversion")
-                    state.factsProgress?.let { (done, total) ->
-                        InfoRow(
-                            "Filmgenrer",
-                            if (done < total) "Hämtas i bakgrunden: ${done.grouped()} av ${total.grouped()} filmer" else "Klara för ${total.grouped()} filmer",
-                        )
+                    // Tv: versionen ska gå att se, längst ner på sidan.
+                    TvFocusBox {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            InfoRow("Version", System.getProperty("tv.version") ?: "Utvecklingsversion")
+                            state.factsProgress?.let { (done, total) ->
+                                InfoRow(
+                                    "Filmgenrer",
+                                    if (done < total) "Hämtas i bakgrunden: ${done.grouped()} av ${total.grouped()} filmer" else "Klara för ${total.grouped()} filmer",
+                                )
+                            }
+                            InfoRow("Data", AppDirs.config.absolutePath)
+                            InfoRow("Bibliotek", AppDirs.cache.absolutePath)
+                            state.coverStatus?.let { InfoRow("Omslag", it) }
+                        }
                     }
-                    InfoRow("Data", AppDirs.config.absolutePath)
-                    InfoRow("Bibliotek", AppDirs.cache.absolutePath)
-                    state.coverStatus?.let { InfoRow("Omslag", it) }
                 }
             }
         }

@@ -25,7 +25,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.onFocusChanged
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -68,6 +71,17 @@ fun HistoryScreen(state: AppState) {
         entries.filter { kindFilter == null || it.kind == kindFilter }.groupBy { dayLabel(it.watchedAtUtc) }
     }
     val listState = rememberLazyListState()
+    // Tv: tappas markeringen (till exempel när spelaren stängs) hamnar den på raden man senast stod på.
+    val rowFocus = remember { TvEntry() }
+    val scope = rememberCoroutineScope()
+    TvFocusFallback {
+        scope.launch {
+            rowFocus.enter {
+                listState.layoutInfo.visibleItemsInfo.mapNotNull { info -> (info.key as? String)?.takeIf { !it.startsWith("dag:") } }
+            }
+        }
+        days.isNotEmpty()
+    }
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -141,6 +155,7 @@ fun HistoryScreen(state: AppState) {
                                 entry = entry,
                                 onPlay = { state.playFromHistory(entry) },
                                 onRemove = { state.removeFromHistory(entry) },
+                                focus = rowFocus.mark(entry.identity).onFocusChanged { if (it.isFocused) rowFocus.last = entry.identity },
                             )
                         }
                     }
@@ -152,10 +167,26 @@ fun HistoryScreen(state: AppState) {
 }
 
 @Composable
-private fun HistoryRow(entry: WatchEntry, onPlay: () -> Unit, onRemove: () -> Unit) {
+private fun HistoryRow(entry: WatchEntry, onPlay: () -> Unit, onRemove: () -> Unit, focus: Modifier = Modifier) {
+    if (!tvLayout) {
+        HistoryRowContent(entry, onPlay, onRemove, focus)
+        return
+    }
+    // Tv: Ta bort står bredvid raden och syns alltid, så att pil höger når den.
+    // Inne i raden går den inte att markera.
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f)) { HistoryRowContent(entry, onPlay, onRemove = null, focus = focus) }
+        Spacer(Modifier.width(10.dp))
+        IconAction(Glyphs.Close, "Ta bort ur historiken", onClick = onRemove, size = 40.dp, iconSize = 20.dp)
+    }
+}
+
+/** Raden: bild, titel och läge. [onRemove]: krysset i raden när musen står på den (datorn). */
+@Composable
+private fun HistoryRowContent(entry: WatchEntry, onPlay: () -> Unit, onRemove: (() -> Unit)?, focus: Modifier = Modifier) {
     val palette = LocalPalette.current
     val live = entry.kind == WatchKind.LIVE
-    Pressable(onClick = onPlay, modifier = Modifier.fillMaxWidth()) { hovered ->
+    Pressable(onClick = onPlay, modifier = focus.fillMaxWidth()) { hovered ->
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -211,8 +242,10 @@ private fun HistoryRow(entry: WatchEntry, onPlay: () -> Unit, onRemove: () -> Un
                     style = MaterialTheme.typography.labelLarge,
                     color = palette.focus,
                 )
-                Spacer(Modifier.width(8.dp))
-                IconAction(Glyphs.Close, "Ta bort ur historiken", onClick = onRemove, size = 34.dp, iconSize = 18.dp)
+                if (onRemove != null) {
+                    Spacer(Modifier.width(8.dp))
+                    IconAction(Glyphs.Close, "Ta bort ur historiken", onClick = onRemove, size = 34.dp, iconSize = 18.dp)
+                }
             }
         }
     }

@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -44,14 +45,20 @@ import se.norrsken.tv.desktop.ui.TvTheme
  *
  * I spelaren:
  * - OK eller vänster (live-tv): kanallistan ovanpå bilden. OK (film): paus.
- * - Upp och ner, kanal upp och ner: byter kanal.
+ * - Upp och ner (live-tv), kanal upp och ner: byter kanal.
+ * - Höger (live-tv), upp och ner (film): knapparna fram — paus, kanalbyte
+ *   eller spolning, ljud och undertext, minimera och stäng.
  * - Vänster och höger (film): spolar tio sekunder; snabbspolning trettio.
  * - Play/paus: paus. I minispelaren: tillbaka till helskärm.
- * - ≡: ljud och undertext.
- * - Tillbaka: stänger listan eller panelen, krymper sedan bilden till en
- *   liten bild nere i högra hörnet, stänger den, och leder till startsidan
- *   innan appen stängs. Play (eller OK på den lilla bilden) gör den stor
- *   igen; menyn har dess knappar överst medan den spelar.
+ * - ≡: ljud och undertext, och stänger panelen igen.
+ *
+ * Den lilla bilden nere i högra hörnet: pil höger eller ner förbi
+ * innehållets kant markerar den. Då förstorar OK den och Tillbaka stänger den.
+ *
+ * Tillbaka, ett steg i taget: listan eller panelen i spelaren, knapparna,
+ * bilden krymper till hörnet (och en gång till stänger den, så länge den är
+ * markerad), kategorierna, film-, serie- och matchsidan, och sist menyn. I
+ * menyn leder Tillbaka till startsidan, och från startsidan stängs appen.
  */
 class MainActivity : ComponentActivity() {
     private lateinit var state: AppState
@@ -63,6 +70,12 @@ class MainActivity : ComponentActivity() {
     private var crashReport by mutableStateOf<String?>(null)
 
     private val ready: Boolean get() = ::state.isInitialized
+
+    /** Något i appen har markeringen. Falskt när det man stod på just försvann. */
+    private var anyFocus = false
+
+    /** Försök i rad att lägga tillbaka en tappad markering (se dispatchKeyEvent). */
+    private var focusRescues = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -113,7 +126,15 @@ class MainActivity : ComponentActivity() {
                                 }
                             }.collect { WindowsIntegration.playerView(it) }
                         }
-                        Box(Modifier.fillMaxSize().onPreviewKeyEvent { handleRemote(it) }) {
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .onFocusChanged {
+                                    anyFocus = it.hasFocus
+                                    if (it.hasFocus) focusRescues = 0
+                                }
+                                .onPreviewKeyEvent { handleRemote(it) },
+                        ) {
                             AppRoot(state)
                             val playing = state.nowPlaying
                             if (channelsOpen && playing != null && playing.live && !state.miniPlayer) {
@@ -131,50 +152,103 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        onBackPressedDispatcher.addCallback(
-            this,
-            object : OnBackPressedCallback(true) {
-                override fun handleOnBackPressed() {
-                    if (!ready || crashReport != null) {
-                        isEnabled = false
-                        onBackPressedDispatcher.onBackPressed()
-                        return
-                    }
-                    val playing = state.nowPlaying
-                    when {
-                        channelsOpen -> {
-                            channelsOpen = false
-                            state.focusPlayer()
-                        }
-                        state.trackPanelOpen -> state.trackPanelOpen = false
-                        // Rutan Nästa avsnitt: Tillbaka betyder "titta klart".
-                        playing != null && !state.miniPlayer && state.dismissPlayerPrompt() -> Unit
-                        // Knapparna i spelaren: tillbaka till bilden först.
-                        playing != null && !state.miniPlayer && state.leavePlayerControls() -> Unit
-                        // Som Esc i Windows: bilden krymper till en liten bild i hörnet och fortsätter där.
-                        playing != null && !state.miniPlayer -> state.minimizePlayer()
-                        // Kategorierna framme: tillbaka in i innehållet, som pil höger.
-                        TvNav.drawer == TvDrawer.CATEGORIES && TvNav.leaveCategories != null -> TvNav.leaveCategories?.invoke()
-                        state.selectedMatch != null -> state.closeMatch()
-                        state.selectedMovie != null -> state.closeMovie()
-                        state.selectedSeries != null -> state.closeSeries()
-                        playing != null -> state.closePlayer()
-                        // Fotboll: från en liga tillbaka till översikten.
-                        state.screen == Screen.FOOTBALL && state.footballLeague != null -> state.footballLeague = null
-                        // Samlingar: från en samling (eller Disney) tillbaka till galleriet.
-                        state.screen == Screen.MOVIES && CollectionKeys.isInside(state.movieGroup) ->
-                            state.openCollection(CollectionKeys.GALLERY)
-                        // Som på andra tv-appar: Tillbaka leder till startsidan innan appen stängs.
-                        state.screen != Screen.HOME -> state.screen = Screen.HOME
-                        else -> {
-                            // Ingenting kvar att stänga: lämna appen som vanligt.
-                            isEnabled = false
-                            onBackPressedDispatcher.onBackPressed()
-                        }
-                    }
+        onBackPressedDispatcher.addCallback(this, backCallback)
+    }
+
+    /** Tillbaka-knappen, ett steg i taget (se klassens beskrivning). */
+    private val backCallback = object : OnBackPressedCallback(true) {
+        override fun handleOnBackPressed() {
+            if (!ready || crashReport != null) {
+                leaveApp()
+                return
+            }
+            val playing = state.nowPlaying
+            when {
+                channelsOpen -> {
+                    channelsOpen = false
+                    state.focusPlayer()
                 }
-            },
-        )
+                state.trackPanelOpen -> state.trackPanelOpen = false
+                // Rutan Nästa avsnitt: Tillbaka betyder "titta klart".
+                playing != null && !state.miniPlayer && state.dismissPlayerPrompt() -> Unit
+                // Knapparna i spelaren: tillbaka till bilden först.
+                playing != null && !state.miniPlayer && state.leavePlayerControls() -> Unit
+                // Som Esc i Windows: bilden krymper till en liten bild i hörnet och fortsätter där.
+                playing != null && !state.miniPlayer -> state.minimizePlayer()
+                // Den lilla bilden är markerad (som direkt efter att den krympt): stäng den.
+                playing != null && state.playerBoxFocused -> {
+                    state.closePlayer()
+                    TvNav.restoreFocus()
+                }
+                // Kategorierna framme: tillbaka in i innehållet, som pil höger.
+                TvNav.drawer == TvDrawer.CATEGORIES && TvNav.leaveCategories != null -> TvNav.leaveCategories?.invoke()
+                // Menyn framme: in i det man var i igen om det finns en sida att backa
+                // ur, annars till startsidan — och från startsidan stängs appen.
+                TvNav.drawer == TvDrawer.MENU -> when {
+                    hasSubPage() -> TvNav.leaveMenu?.invoke() ?: run { TvNav.drawer = TvDrawer.NONE }
+                    state.screen != Screen.HOME -> {
+                        TvNav.holdMenu = true
+                        state.screen = Screen.HOME
+                        TvNav.openMenu()
+                    }
+                    else -> leaveApp()
+                }
+                state.selectedMatch != null -> state.closeMatch()
+                state.selectedMovie != null -> state.closeMovie()
+                state.selectedSeries != null -> state.closeSeries()
+                // Inställningar: från kategorisidan tillbaka till inställningarna.
+                state.screen == Screen.SETTINGS && state.managingCategories != null -> state.managingCategories = null
+                // Fotboll: från en liga tillbaka till översikten.
+                state.screen == Screen.FOOTBALL && state.footballLeague != null -> state.footballLeague = null
+                // Samlingar: från en samling (eller Disney) tillbaka till galleriet.
+                state.screen == Screen.MOVIES && CollectionKeys.isInside(state.movieGroup) ->
+                    state.openCollection(CollectionKeys.GALLERY)
+                // Som på andra tv-appar: Tillbaka i innehållet tar fram menyn, med
+                // markeringen på fliken man är i. Den lilla bilden spelar vidare.
+                else -> TvNav.openMenu()
+            }
+        }
+    }
+
+    /** Det finns en sida att backa ur innan menyn: en film, serie, match, samling eller kategorisidan. */
+    private fun hasSubPage(): Boolean =
+        state.selectedMatch != null || state.selectedMovie != null || state.selectedSeries != null ||
+            (state.screen == Screen.SETTINGS && state.managingCategories != null) ||
+            (state.screen == Screen.FOOTBALL && state.footballLeague != null) ||
+            (state.screen == Screen.MOVIES && CollectionKeys.isInside(state.movieGroup))
+
+    /**
+     * Ingenting kvar att stänga: lämna appen som vanligt. Påslagen igen
+     * efteråt — appen kan ligga kvar i bakgrunden, och då ska Tillbaka
+     * fungera som förut när man kommer tillbaka.
+     */
+    private fun leaveApp() {
+        backCallback.isEnabled = false
+        onBackPressedDispatcher.onBackPressed()
+        backCallback.isEnabled = true
+    }
+
+    /**
+     * Markeringen tappades, till exempel när det man stod på stängdes, och ingen
+     * pil har något att utgå från. Första trycket lägger den på något vettigt
+     * — i spelaren bilden, annars det man senast stod på eller menyn — i
+     * stället för på något som råkar ligga närmast en kant.
+     */
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        // Två försök som inte hjälpte: då får tv:n sköta trycket som vanligt,
+        // så att fjärrkontrollen aldrig kan fastna här.
+        if (ready && crashReport == null && !anyFocus && !state.loading && focusRescues < 2 &&
+            event.action == android.view.KeyEvent.ACTION_DOWN && event.keyCode in NAVIGATION_KEYS
+        ) {
+            focusRescues++
+            val playing = state.nowPlaying
+            when {
+                playing != null && !state.miniPlayer -> state.focusPlayer()
+                else -> TvNav.restoreFocus()
+            }
+            return true
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     private fun handleRemote(event: KeyEvent): Boolean {
@@ -188,6 +262,14 @@ class MainActivity : ComponentActivity() {
                 return true
             }
             return false
+        }
+
+        // ≡ öppnar panelen för ljud och undertext, och stänger den igen.
+        if (event.key == Key.Menu && !channelsOpen) {
+            state.trackPanelOpen = !state.trackPanelOpen
+            if (!state.trackPanelOpen) state.focusPlayer()
+            state.touchPlayer(force = true)
+            return true
         }
 
         // Kanallistan och panelen för ljud och undertext styrs med pilarna som resten av appen.
@@ -217,6 +299,13 @@ class MainActivity : ComponentActivity() {
                 channelsOpen = true
                 return true
             }
+            // Pil höger i direktsänt: knapparna fram (paus, ljud och undertext, minimera,
+            // stäng), med markeringen på Spela/Paus. Utan play- och menyknappar på
+            // fjärrkontrollen är det vägen dit.
+            Key.DirectionRight -> if (live) {
+                state.focusPlayerControls()
+                return true
+            }
             // Pil upp eller ner i en film: knapparna fram, med markeringen på Spela/Paus.
             // (Ljudet sköts med tv:ns egen fjärrkontroll.) I direktsänt byter de kanal.
             Key.DirectionUp, Key.DirectionDown -> if (!live) {
@@ -225,11 +314,6 @@ class MainActivity : ComponentActivity() {
             }
             Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> {
                 state.togglePause()
-                state.touchPlayer(force = true)
-                return true
-            }
-            Key.Menu -> {
-                state.trackPanelOpen = true
                 state.touchPlayer(force = true)
                 return true
             }
@@ -284,3 +368,14 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 }
+
+/** Pilarna och OK: knapparna som behöver något markerat att utgå från. */
+private val NAVIGATION_KEYS = setOf(
+    android.view.KeyEvent.KEYCODE_DPAD_UP,
+    android.view.KeyEvent.KEYCODE_DPAD_DOWN,
+    android.view.KeyEvent.KEYCODE_DPAD_LEFT,
+    android.view.KeyEvent.KEYCODE_DPAD_RIGHT,
+    android.view.KeyEvent.KEYCODE_DPAD_CENTER,
+    android.view.KeyEvent.KEYCODE_ENTER,
+    android.view.KeyEvent.KEYCODE_NUMPAD_ENTER,
+)

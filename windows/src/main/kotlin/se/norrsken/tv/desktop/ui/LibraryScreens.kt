@@ -429,6 +429,15 @@ internal fun MovieDetail(state: AppState, movie: Movie) {
     val info = (infoState as? MovieInfoState.Loaded)?.info
     val scroll = rememberScrollState()
     var choosingDisney by remember(movie.key) { mutableStateOf(false) }
+    // Tv: markeringen börjar på Spela (och hamnar där igen om den tappas), så att OK spelar filmen.
+    val playFocus = remember { FocusRequester() }
+    if (tvLayout) {
+        LaunchedEffect(movie.key) {
+            repeat(2) { withFrameNanos { } }
+            runCatching { playFocus.requestFocus() }
+        }
+    }
+    TvFocusFallback { runCatching { playFocus.requestFocus() }.isSuccess }
 
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxWidth().height(460.dp)) {
@@ -516,7 +525,12 @@ internal fun MovieDetail(state: AppState, movie: Movie) {
                         val resumable = state.history.any {
                             it.kind == WatchKind.MOVIE && it.sourceId == movie.sourceId && it.itemId == movie.streamId.toString() && it.resumable
                         }
-                        PrimaryButton(if (resumable) "Fortsätt" else "Spela", onClick = { state.playMovie(movie) }, icon = Glyphs.Play)
+                        PrimaryButton(
+                            if (resumable) "Fortsätt" else "Spela",
+                            onClick = { state.playMovie(movie) },
+                            icon = Glyphs.Play,
+                            modifier = Modifier.focusRequester(playFocus),
+                        )
                         trailerUrl(info?.trailer)?.let { url ->
                             SecondaryButton("Trailer", onClick = { openInBrowser(url) }, icon = Glyphs.Movies)
                         }
@@ -590,16 +604,24 @@ private fun MovieFacts(info: XtreamVodInfo?, swedishPlot: String?) {
         )
         return
     }
-    if (plot != null) {
-        Text(
-            plot,
-            style = MaterialTheme.typography.bodyLarge,
-            color = palette.textSecondary,
-            modifier = Modifier.widthIn(max = 780.dp),
-        )
+    // Tv: en ruta markeringen kan stanna på, så att sidan rullar fram texten.
+    TvFocusBox {
+        Column(
+            Modifier.padding(if (tvLayout) 10.dp else 0.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (plot != null) {
+                Text(
+                    plot,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = palette.textSecondary,
+                    modifier = Modifier.widthIn(max = 780.dp),
+                )
+            }
+            if (director != null) Credit("Regi", director)
+            if (cast != null) Credit("Skådespelare", cast)
+        }
     }
-    if (director != null) Credit("Regi", director)
-    if (cast != null) Credit("Skådespelare", cast)
 }
 
 @Composable
@@ -790,6 +812,15 @@ internal fun SeriesDetail(state: AppState, series: Series) {
     val palette = LocalPalette.current
     // Samma serie i flera versioner: väljs i huvudet, avsnitten följer valet.
     val all = state.versionsOf(series)
+    // Tv: markeringen börjar på Fortsätt (eller Min lista), och hamnar där igen om den tappas.
+    val primaryFocus = remember { FocusRequester() }
+    if (tvLayout) {
+        LaunchedEffect(series.key) {
+            repeat(2) { withFrameNanos { } }
+            runCatching { primaryFocus.requestFocus() }
+        }
+    }
+    TvFocusFallback { runCatching { primaryFocus.requestFocus() }.isSuccess }
     Column(Modifier.fillMaxSize()) {
         // Huvudet: bakgrundsbild tonad mot svart, omslag och fakta.
         Box(Modifier.fillMaxWidth().height(if (all.size > 1) 350.dp else 300.dp)) {
@@ -866,11 +897,13 @@ internal fun SeriesDetail(state: AppState, series: Series) {
                         )
                     }
                     Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        latestEpisode(state.history, series)?.let { resume ->
+                        val resume = latestEpisode(state.history, series)
+                        if (resume != null) {
                             PrimaryButton(
                                 if (resume.upNext) "Spela S${resume.season} E${resume.episode}" else "Fortsätt S${resume.season} E${resume.episode}",
                                 onClick = { state.playFromHistory(resume) },
                                 icon = Glyphs.Play,
+                                modifier = Modifier.focusRequester(primaryFocus),
                             )
                         }
                         trailerUrl(series.trailer)?.let { url ->
@@ -881,6 +914,7 @@ internal fun SeriesDetail(state: AppState, series: Series) {
                             if (saved) "I min lista" else "Min lista",
                             onClick = { state.toggleMyList(series) },
                             icon = if (saved) Glyphs.Check else Glyphs.Add,
+                            modifier = if (resume == null) Modifier.focusRequester(primaryFocus) else Modifier,
                         )
                     }
                 }
@@ -911,7 +945,9 @@ internal fun SeriesDetail(state: AppState, series: Series) {
 @Composable
 private fun EpisodeList(state: AppState, series: Series, episodes: List<XtreamEpisode>) {
     val seasons = remember(episodes) { episodes.map { it.season }.distinct().sorted() }
-    var season by remember(series.key) { mutableStateOf(seasons.first()) }
+    // Säsongen man håller på med visas först, annars den första.
+    val started = latestEpisode(state.history, series)?.season?.takeIf { it in seasons }
+    var season by remember(series.key) { mutableStateOf(started ?: seasons.first()) }
     val shown = remember(episodes, season) { episodes.filter { it.season == season }.sortedBy { it.episode } }
     val listState = rememberLazyListState()
 

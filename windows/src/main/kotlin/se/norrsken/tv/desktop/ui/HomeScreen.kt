@@ -226,9 +226,18 @@ fun HomeScreen(state: AppState) {
     if (tvLayout) {
         LaunchedEffect(Unit) {
             withFrameNanos { }
+            // Tillbaka i menyn bytte till startsidan: markeringen stannar i menyn,
+            // så att ett Tillbaka till stänger appen.
+            if (TvNav.holdMenu && TvNav.drawer == TvDrawer.MENU) return@LaunchedEffect
             val restored = openedKey != null && runCatching { restore.requestFocus() }.isSuccess
             if (!restored) runCatching { firstFocus.requestFocus() }
         }
+    }
+    // Tv: tappas markeringen (till exempel när den lilla bilden stängs) hamnar den
+    // på kortet man senast öppnade, annars på Spela.
+    TvFocusFallback {
+        (openedKey != null && runCatching { restore.requestFocus() }.isSuccess) ||
+            runCatching { firstFocus.requestFocus() }.isSuccess
     }
     val heroHeight = if (tvLayout) 340.dp else 320.dp
 

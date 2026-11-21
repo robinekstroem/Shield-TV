@@ -15,6 +15,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.hoverable
@@ -69,6 +70,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
@@ -558,6 +560,14 @@ private fun TvGroupPanel(
             if (TvNav.categories <= 0 && TvNav.drawer == TvDrawer.CATEGORIES) TvNav.drawer = TvDrawer.NONE
         }
     }
+    // Tappas markeringen i innehållet (det man stod på stängdes) hittar den
+    // tillbaka dit man senast stod, samma väg som från kategorierna.
+    if (onEnterContent != null) {
+        TvFocusFallback {
+            onEnterContent()
+            true
+        }
+    }
     if (LocalTvDocked.current) {
         var open by remember { mutableStateOf(false) }
         val width by animateDpAsState(
@@ -918,6 +928,58 @@ internal fun TvScrolling(lead: Float, trail: Float, snap: Boolean = false, conte
         }
     }
     CompositionLocalProvider(LocalBringIntoViewSpec provides spec, content = content)
+}
+
+/**
+ * Tv: markeringen stannar i en panel eller lista i stället för att hoppa ut
+ * till det som ligger bakom den. Kanterna som anges är stängda. På datorn
+ * ingenting.
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+internal fun Modifier.tvEdges(
+    blockUp: Boolean = false,
+    blockDown: Boolean = false,
+    blockLeft: Boolean = false,
+    blockRight: Boolean = false,
+): Modifier =
+    if (!tvLayout || !(blockUp || blockDown || blockLeft || blockRight)) {
+        this
+    } else {
+        focusProperties {
+            if (blockUp) up = FocusRequester.Cancel
+            if (blockDown) down = FocusRequester.Cancel
+            if (blockLeft) left = FocusRequester.Cancel
+            if (blockRight) right = FocusRequester.Cancel
+        }
+    }
+
+/**
+ * Tv: en ruta som markeringen kan stanna på, så att en sida går att bläddra
+ * med pilarna också där inget går att välja, som en lång text. På datorn
+ * bara innehållet.
+ */
+@Composable
+internal fun TvFocusBox(modifier: Modifier = Modifier, shape: Shape = RoundedCornerShape(12.dp), content: @Composable BoxScope.() -> Unit) {
+    if (!tvLayout) {
+        Box(modifier, content = content)
+        return
+    }
+    val palette = LocalPalette.current
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    Box(
+        modifier
+            .clip(shape)
+            .then(
+                if (focused) {
+                    Modifier.background(palette.focus.copy(alpha = 0.08f)).focusRing(palette, 2.dp, shape, 0.8f)
+                } else {
+                    Modifier
+                },
+            )
+            .focusable(interactionSource = interaction),
+        content = content,
+    )
 }
 
 /** Liten etikett: LIVE-märket, betyg. */

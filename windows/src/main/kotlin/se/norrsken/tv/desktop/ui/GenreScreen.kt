@@ -56,6 +56,12 @@ fun GenreScreen(state: AppState) {
         SeriesDetail(state, openSeries)
         return
     }
+    // Tv: tillbaka från en film eller serie hamnar markeringen på omslaget man öppnade.
+    if (tvLayout) {
+        LaunchedEffect(Unit) {
+            if (entry.last != null) entry.enter { gridState.layoutInfo.visibleItemsInfo.map { it.key } }
+        }
+    }
 
     val library = state.library
     if (library.movies.isEmpty() && library.series.isEmpty()) {

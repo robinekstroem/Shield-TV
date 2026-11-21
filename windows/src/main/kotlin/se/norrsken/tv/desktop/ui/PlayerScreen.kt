@@ -9,6 +9,8 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.ui.draw.shadow
@@ -64,6 +66,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -118,6 +121,17 @@ fun PlayerScreen(state: AppState, collapse: Float = 0f, highlighted: Boolean = f
     val hoverSource = remember { MutableInteractionSource() }
     val hovered by hoverSource.collectIsHoveredAsState()
 
+    // Tv: spelarens knappar och vart pilarna går mellan dem.
+    val keys = remember { PlayerKeys() }
+    // Tv: felrutans första knapp tar markeringen, så att OK försöker igen.
+    val problemFocus = remember { FocusRequester() }
+    if (tvLayout && problem != null && !mini) {
+        LaunchedEffect(problem.title, problem.message) {
+            repeat(2) { withFrameNanos { } }
+            runCatching { problemFocus.requestFocus() }
+        }
+    }
+
     Box(
         Modifier
             .fillMaxSize()
@@ -139,7 +153,10 @@ fun PlayerScreen(state: AppState, collapse: Float = 0f, highlighted: Boolean = f
                     controlsVisible -> PointerIcon.Default
                     else -> hiddenCursor
                 },
-            ),
+            )
+            // Tv: markeringen står på något i spelaren (knapparna, felrutan, panelerna),
+            // inte på själva bilden. Då styr pilarna och OK det man står på.
+            .onFocusChanged { if (tvLayout) state.playerControlsFocused = it.hasFocus },
     ) {
         if (player != null) {
             VideoSurface(
@@ -174,6 +191,8 @@ fun PlayerScreen(state: AppState, collapse: Float = 0f, highlighted: Boolean = f
                 problem = problem,
                 onRetry = if (problem.canRetry) ({ state.retryPlayback() }) else null,
                 onClose = { state.closePlayer() },
+                focus = problemFocus,
+                keys = keys,
                 modifier = Modifier.align(Alignment.Center),
             )
             waiting -> Spinner(Modifier.align(Alignment.Center), size = if (mini) 28.dp else 48.dp)
@@ -192,13 +211,9 @@ fun PlayerScreen(state: AppState, collapse: Float = 0f, highlighted: Boolean = f
             // Kontrollerna tonar bort redan i början av krympningen.
             modifier = Modifier.fillMaxSize().graphicsLayer { alpha = (1f - collapse * 3f).coerceIn(0f, 1f) },
         ) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .onFocusChanged { if (tvLayout) state.playerControlsFocused = it.hasFocus },
-            ) {
-                TopBar(state, playing, status, now, Modifier.align(Alignment.TopCenter))
-                BottomBar(state, playing, status, Modifier.align(Alignment.BottomCenter))
+            Box(Modifier.fillMaxSize()) {
+                TopBar(state, playing, status, now, keys, Modifier.align(Alignment.TopCenter))
+                BottomBar(state, playing, status, keys, Modifier.align(Alignment.BottomCenter))
             }
         }
 
@@ -228,7 +243,7 @@ fun PlayerScreen(state: AppState, collapse: Float = 0f, highlighted: Boolean = f
 }
 
 @Composable
-private fun TopBar(state: AppState, playing: NowPlaying, status: VideoPlayer.Status, now: Long, modifier: Modifier) {
+private fun TopBar(state: AppState, playing: NowPlaying, status: VideoPlayer.Status, now: Long, keys: PlayerKeys, modifier: Modifier) {
     val palette = LocalPalette.current
     Row(
         modifier
@@ -237,7 +252,12 @@ private fun TopBar(state: AppState, playing: NowPlaying, status: VideoPlayer.Sta
             .padding(start = 14.dp, end = 24.dp, top = 12.dp, bottom = 36.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconAction(Glyphs.ChevronDown, "Minimera och fortsätt bläddra", onClick = { state.minimizePlayer() })
+        IconAction(
+            Glyphs.ChevronDown,
+            "Minimera och fortsätt bläddra",
+            onClick = { state.minimizePlayer() },
+            modifier = Modifier.playerKey(keys.minimize, toDown = keys.play, toRight = keys.close),
+        )
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -286,22 +306,59 @@ private fun TopBar(state: AppState, playing: NowPlaying, status: VideoPlayer.Sta
             color = palette.textSecondary,
         )
         Spacer(Modifier.width(12.dp))
-        IconAction(Glyphs.Close, "Stäng spelaren", onClick = { state.closePlayer() })
+        IconAction(
+            Glyphs.Close,
+            "Stäng spelaren",
+            onClick = { state.closePlayer() },
+            modifier = Modifier.playerKey(keys.close, toDown = keys.tracks, toLeft = keys.minimize),
+        )
+    }
+}
+
+/**
+ * Tv: spelarens knappar och vart pilarna går mellan dem. Under bilden står
+ * skärmen man kom från kvar, och utan de här vägarna kunde markeringen hoppa
+ * ner till något där bakom. Nu stannar den alltid bland knapparna.
+ */
+private class PlayerKeys {
+    val minimize = FocusRequester()
+    val close = FocusRequester()
+    val first = FocusRequester()
+    val play = FocusRequester()
+    val third = FocusRequester()
+    val tracks = FocusRequester()
+}
+
+/** En av spelarens knappar ([self]), med grannarna åt varje håll. Saknas en granne stannar markeringen. */
+@OptIn(ExperimentalComposeUiApi::class)
+private fun Modifier.playerKey(
+    self: FocusRequester,
+    toUp: FocusRequester? = null,
+    toDown: FocusRequester? = null,
+    toLeft: FocusRequester? = null,
+    toRight: FocusRequester? = null,
+): Modifier {
+    val linked = focusRequester(self)
+    if (!tvLayout) return linked
+    return linked.focusProperties {
+        up = toUp ?: FocusRequester.Cancel
+        down = toDown ?: FocusRequester.Cancel
+        left = toLeft ?: FocusRequester.Cancel
+        right = toRight ?: FocusRequester.Cancel
     }
 }
 
 @Composable
-private fun BottomBar(state: AppState, playing: NowPlaying, status: VideoPlayer.Status, modifier: Modifier) {
+private fun BottomBar(state: AppState, playing: NowPlaying, status: VideoPlayer.Status, keys: PlayerKeys, modifier: Modifier) {
     val palette = LocalPalette.current
     val player = state.videoPlayer
     val paused = status.phase == Phase.PAUSED
     // Tv: pil upp eller ner tar fram knapparna med markeringen på Spela/Paus.
-    val playButton = remember { FocusRequester() }
     if (tvLayout) {
         LaunchedEffect(state.controlsFocusTick) {
             if (state.takeControlsFocus()) {
                 repeat(2) { withFrameNanos { } }
-                runCatching { playButton.requestFocus() }
+                runCatching { keys.play.requestFocus() }
             }
         }
     }
@@ -319,14 +376,18 @@ private fun BottomBar(state: AppState, playing: NowPlaying, status: VideoPlayer.
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             val playPause = if (paused) Glyphs.Play else Glyphs.Pause
             val playPauseLabel = if (paused) "Spela" else "Paus"
+            // Tv: vart pilarna går mellan knapparna (se PlayerKeys).
+            val first = Modifier.playerKey(keys.first, toUp = keys.minimize, toRight = keys.play)
+            val middle = Modifier.playerKey(keys.play, toUp = keys.minimize, toLeft = keys.first, toRight = keys.third)
+            val third = Modifier.playerKey(keys.third, toUp = keys.minimize, toLeft = keys.play, toRight = keys.tracks)
             if (playing.live) {
-                IconAction(Glyphs.SkipPrevious, "Föregående kanal", onClick = { state.switchChannel(-1) })
-                IconAction(playPause, playPauseLabel, onClick = { state.togglePause() }, size = 52.dp, iconSize = 30.dp, emphasized = true, modifier = Modifier.focusRequester(playButton))
-                IconAction(Glyphs.SkipNext, "Nästa kanal", onClick = { state.switchChannel(1) })
+                IconAction(Glyphs.SkipPrevious, "Föregående kanal", onClick = { state.switchChannel(-1) }, modifier = first)
+                IconAction(playPause, playPauseLabel, onClick = { state.togglePause() }, size = 52.dp, iconSize = 30.dp, emphasized = true, modifier = middle)
+                IconAction(Glyphs.SkipNext, "Nästa kanal", onClick = { state.switchChannel(1) }, modifier = third)
             } else {
-                IconAction(Glyphs.Replay10, "Bakåt 10 sekunder", onClick = { state.seekBy(-10_000) })
-                IconAction(playPause, playPauseLabel, onClick = { state.togglePause() }, size = 52.dp, iconSize = 30.dp, emphasized = true, modifier = Modifier.focusRequester(playButton))
-                IconAction(Glyphs.Forward10, "Framåt 10 sekunder", onClick = { state.seekBy(10_000) })
+                IconAction(Glyphs.Replay10, "Bakåt 10 sekunder", onClick = { state.seekBy(-10_000) }, modifier = first)
+                IconAction(playPause, playPauseLabel, onClick = { state.togglePause() }, size = 52.dp, iconSize = 30.dp, emphasized = true, modifier = middle)
+                IconAction(Glyphs.Forward10, "Framåt 10 sekunder", onClick = { state.seekBy(10_000) }, modifier = third)
                 if (status.lengthMs > 0) {
                     Spacer(Modifier.width(10.dp))
                     Text(
@@ -344,6 +405,7 @@ private fun BottomBar(state: AppState, playing: NowPlaying, status: VideoPlayer.
                 "Ljud och undertext",
                 onClick = { state.trackPanelOpen = !state.trackPanelOpen },
                 emphasized = state.trackPanelOpen,
+                modifier = Modifier.playerKey(keys.tracks, toUp = keys.close, toLeft = keys.third),
             )
             // Tv: ljudet sköts med tv:ns egen fjärrkontroll, och bilden är alltid i helskärm.
             if (!tvLayout) {
@@ -408,6 +470,8 @@ private fun TracksPanel(state: AppState, status: VideoPlayer.Status, modifier: M
             onSelect = { state.selectAudio(it) },
             modifier = Modifier.weight(1f),
             focus = if (audio.isNotEmpty()) entry else null,
+            closedLeft = true,
+            closedRight = false,
         )
         TrackList(
             title = "Undertext",
@@ -417,6 +481,8 @@ private fun TracksPanel(state: AppState, status: VideoPlayer.Status, modifier: M
             onSelect = { state.selectSubtitle(it) },
             modifier = Modifier.weight(1f),
             focus = if (audio.isEmpty()) entry else null,
+            closedLeft = audio.isEmpty(),
+            closedRight = true,
         )
     }
 }
@@ -431,6 +497,9 @@ private fun TrackList(
     modifier: Modifier,
     /** Läggs på spåret som är valt (eller det första), så att markeringen kan hamna där. */
     focus: FocusRequester? = null,
+    /** Tv: panelens kanter. Markeringen stannar i panelen i stället för att gå till bilden bakom. */
+    closedLeft: Boolean = false,
+    closedRight: Boolean = false,
 ) {
     val palette = LocalPalette.current
     val focusIndex = tracks.indexOfFirst { it.id == selected }.takeIf { it >= 0 } ?: 0
@@ -444,7 +513,13 @@ private fun TrackList(
         Column(Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState())) {
             tracks.forEachIndexed { index, track ->
                 val isSelected = track.id == selected
-                val target = if (focus != null && index == focusIndex) Modifier.focusRequester(focus) else Modifier
+                val target = (if (focus != null && index == focusIndex) Modifier.focusRequester(focus) else Modifier)
+                    .tvEdges(
+                        blockUp = index == 0,
+                        blockDown = index == tracks.lastIndex,
+                        blockLeft = closedLeft,
+                        blockRight = closedRight,
+                    )
                 Pressable(onClick = { onSelect(track) }, selected = isSelected, modifier = target.fillMaxWidth()) {
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 9.dp),
@@ -576,9 +651,30 @@ private fun problemFor(state: AppState, playing: NowPlaying, status: VideoPlayer
 }
 
 @Composable
-private fun ProblemPanel(problem: Problem, onRetry: (() -> Unit)?, onClose: () -> Unit, modifier: Modifier) {
+@OptIn(ExperimentalComposeUiApi::class)
+private fun ProblemPanel(
+    problem: Problem,
+    onRetry: (() -> Unit)?,
+    onClose: () -> Unit,
+    /** Tv: första knappen, som tar markeringen när rutan visas. */
+    focus: FocusRequester,
+    keys: PlayerKeys,
+    modifier: Modifier,
+) {
     val palette = LocalPalette.current
     val shape = RoundedCornerShape(16.dp)
+    // Tv: pil upp och ner går till spelarens knappar, och markeringen stannar
+    // vid radens ändar i stället för att hoppa till listan bakom bilden.
+    fun button(first: Boolean, last: Boolean): Modifier {
+        val target = if (first) Modifier.focusRequester(focus) else Modifier
+        if (!tvLayout) return target
+        return target.focusProperties {
+            up = keys.minimize
+            down = keys.play
+            if (first) left = FocusRequester.Cancel
+            if (last) right = FocusRequester.Cancel
+        }
+    }
     Column(
         modifier
             .padding(24.dp)
@@ -593,11 +689,22 @@ private fun ProblemPanel(problem: Problem, onRetry: (() -> Unit)?, onClose: () -
         Text(problem.message, style = MaterialTheme.typography.bodyLarge, color = palette.textSecondary)
         Spacer(Modifier.width(4.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (onRetry != null) PrimaryButton("Försök igen", onRetry, icon = Glyphs.Refresh)
-            if (problem.showVlcLink) {
-                PrimaryButton("Öppna videolan.org", onClick = { openInBrowser("https://www.videolan.org/vlc/") })
+            if (onRetry != null) {
+                PrimaryButton("Försök igen", onRetry, icon = Glyphs.Refresh, modifier = button(first = true, last = false))
             }
-            SecondaryButton("Stäng", onClose, icon = Glyphs.Close)
+            if (problem.showVlcLink) {
+                PrimaryButton(
+                    "Öppna videolan.org",
+                    onClick = { openInBrowser("https://www.videolan.org/vlc/") },
+                    modifier = button(first = onRetry == null, last = false),
+                )
+            }
+            SecondaryButton(
+                "Stäng",
+                onClose,
+                icon = Glyphs.Close,
+                modifier = button(first = onRetry == null && !problem.showVlcLink, last = true),
+            )
         }
     }
 }
@@ -629,6 +736,13 @@ fun PlayerHost(state: AppState, collapse: () -> Float) {
     if (tvLayout) {
         LaunchedEffect(state.nowPlaying, state.miniPlayer, state.trackPanelOpen, state.playerFocusTick) {
             if (!state.miniPlayer && !state.trackPanelOpen) {
+                withFrameNanos { }
+                runCatching { requester.requestFocus() }
+            }
+        }
+        // Den lilla bilden i hörnet ska få markeringen (pil höger eller ner förbi innehållets kant).
+        LaunchedEffect(state.miniFocusTick) {
+            if (state.miniFocusTick > 0 && state.miniPlayer) {
                 withFrameNanos { }
                 runCatching { requester.requestFocus() }
             }
@@ -666,6 +780,8 @@ fun PlayerHost(state: AppState, collapse: () -> Float) {
                         false
                     }
                 }
+                // Tv: Tillbaka stänger den lilla bilden när den är markerad (se MainActivity).
+                .onFocusChanged { state.playerBoxFocused = it.isFocused }
                 .focusable(interactionSource = focusSource),
         ) {
             PlayerScreen(state, progress, highlighted = focused)
@@ -708,18 +824,47 @@ private fun DockedOverlay(
     val progress = miniProgress(state, playing, status, now)
     Box(modifier) {
         AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)), contentAlignment = Alignment.Center) {
-                Box(
-                    Modifier.size(46.dp).clip(RoundedCornerShape(23.dp)).background(Color.Black.copy(alpha = 0.55f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Glyphs.OpenInFull, contentDescription = "Förstora", tint = Color.White, modifier = Modifier.size(20.dp))
+            if (tvLayout) {
+                // Tv: vad fjärrkontrollen gör med den markerade bilden.
+                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f))) {
+                    Row(
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 14.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Color.Black.copy(alpha = 0.72f))
+                            .padding(horizontal = 14.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        KeyHint("OK", "förstora")
+                        Text("·", style = MaterialTheme.typography.labelLarge, color = Color.White.copy(alpha = 0.6f))
+                        KeyHint("Tillbaka", "stäng")
+                    }
+                }
+            } else {
+                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)), contentAlignment = Alignment.Center) {
+                    Box(
+                        Modifier.size(46.dp).clip(RoundedCornerShape(23.dp)).background(Color.Black.copy(alpha = 0.55f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Glyphs.OpenInFull, contentDescription = "Förstora", tint = Color.White, modifier = Modifier.size(20.dp))
+                    }
                 }
             }
         }
         if (progress != null) {
             ProgressLine(progress, Modifier.align(Alignment.BottomStart))
         }
+    }
+}
+
+/** "OK förstora": knappen i fetstil, vad den gör efter. */
+@Composable
+private fun KeyHint(key: String, action: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+        Text(key, style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold), color = Color.White, maxLines = 1)
+        Text(action, style = MaterialTheme.typography.labelLarge, color = Color.White.copy(alpha = 0.85f), maxLines = 1)
     }
 }
 

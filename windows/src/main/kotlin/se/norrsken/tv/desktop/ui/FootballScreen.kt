@@ -8,12 +8,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.focusable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -57,7 +53,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -124,6 +119,14 @@ fun FootballScreen(state: AppState) {
                 runCatching { focus.restore.requestFocus() }
             }
         }
+    }
+    // Tv: tappas markeringen hamnar den på matchen man senast öppnade, annars i ligorna.
+    TvFocusFallback {
+        (focus.openedKey != null && runCatching { focus.restore.requestFocus() }.isSuccess) ||
+            run {
+                TvNav.openCategories()
+                true
+            }
     }
     val league = state.footballLeague
     if (tvLayout) {
@@ -1103,6 +1106,7 @@ private fun MatchPage(state: AppState, match: FootballMatch) {
             runCatching { first.requestFocus() }
         }
     }
+    TvFocusFallback { runCatching { first.requestFocus() }.isSuccess }
     val page = Modifier.widthIn(max = PAGE_MAX).fillMaxWidth()
     Box(Modifier.fillMaxSize()) {
         // Lagens färger som ett sken uppifrån, hemmalaget till vänster.
@@ -1768,34 +1772,6 @@ private fun StatsSection(stats: List<MatchStat>, homeColor: Color, awayColor: Co
 }
 
 // --- Små delar ------------------------------------------------------------------------
-
-/**
- * Tv: en ruta som markeringen kan stanna på, så att sidan går att bläddra
- * med pilarna också där inget går att välja. På datorn bara innehållet.
- */
-@Composable
-private fun TvFocusBox(modifier: Modifier = Modifier, shape: Shape = RoundedCornerShape(12.dp), content: @Composable BoxScope.() -> Unit) {
-    if (!tvLayout) {
-        Box(modifier, content = content)
-        return
-    }
-    val palette = LocalPalette.current
-    val interaction = remember { MutableInteractionSource() }
-    val focused by interaction.collectIsFocusedAsState()
-    Box(
-        modifier
-            .clip(shape)
-            .then(
-                if (focused) {
-                    Modifier.background(palette.focus.copy(alpha = 0.08f)).focusRing(palette, 2.dp, shape, 0.8f)
-                } else {
-                    Modifier
-                },
-            )
-            .focusable(interactionSource = interaction),
-        content = content,
-    )
-}
 
 @Composable
 private fun TeamLogo(team: FootballTeam, size: Dp) {

@@ -58,6 +58,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -161,9 +162,46 @@ internal object TvNav {
     /** Medan kategorierna syns: tillbaka till innehållet, som pil höger. Tillbaka-knappen på Shield. */
     var leaveCategories: (() -> Unit)? = null
 
+    /** Medan menyn syns: in i skärmen man är i igen, som pil höger. Tillbaka-knappen på Shield. */
+    var leaveMenu: (() -> Unit)? = null
+
+    /**
+     * Tillbaka i menyn bytte till startsidan: menyn behåller markeringen i
+     * stället för att startsidan tar den. Släpps när man lämnar menyn.
+     */
+    var holdMenu = false
+
+    /**
+     * Var markeringen ska hamna om den tappats, till exempel när det man stod
+     * på stängdes: där skärmen själv säger (det man senast stod på). Sätts med
+     * [TvFocusFallback]; null betyder att skärmen inte vet, och då tar menyn den.
+     */
+    var restoreContent: (() -> Boolean)? = null
+
     /** Pil vänster vid innehållets kant: kategorierna om skärmen har några, annars menyn. */
     fun openLeft() {
         if (categories > 0) openCategories() else openMenu()
+    }
+
+    /** Markeringen tillbaka in i innehållet, eller till menyn om skärmen inte vet var. */
+    fun restoreFocus() {
+        val restored = restoreContent?.let { action -> runCatching { action() }.getOrDefault(false) } ?: false
+        if (!restored) openMenu()
+    }
+}
+
+/**
+ * Tv: var markeringen ska hamna om den tappas medan det här visas (se
+ * [TvNav.restoreContent]). Sant från [action] om den hittade något.
+ */
+@Composable
+internal fun TvFocusFallback(action: () -> Boolean) {
+    if (!tvLayout) return
+    val current by rememberUpdatedState(action)
+    DisposableEffect(Unit) {
+        val registered: () -> Boolean = { current() }
+        TvNav.restoreContent = registered
+        onDispose { if (TvNav.restoreContent === registered) TvNav.restoreContent = null }
     }
 }
 
@@ -220,14 +258,24 @@ fun AppRoot(state: AppState) {
                     .fillMaxHeight()
                     .then(
                         if (drawers) {
-                            // Pil vänster: går det inte längre åt vänster i innehållet
-                            // kommer kategorierna fram (eller menyn, om skärmen inte har några).
                             Modifier.onKeyEvent { event ->
-                                if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft) {
-                                    if (!focusManager.moveFocus(FocusDirection.Left)) TvNav.openLeft()
-                                    true
-                                } else {
-                                    false
+                                if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                                when (event.key) {
+                                    // Pil vänster: går det inte längre åt vänster i innehållet
+                                    // kommer kategorierna fram (eller menyn, om skärmen inte har några).
+                                    Key.DirectionLeft -> {
+                                        if (!focusManager.moveFocus(FocusDirection.Left)) TvNav.openLeft()
+                                        true
+                                    }
+                                    // Den lilla bilden står nere i högra hörnet: går det inte längre
+                                    // åt höger eller nedåt i innehållet hamnar markeringen på den.
+                                    Key.DirectionRight, Key.DirectionDown -> {
+                                        if (state.nowPlaying == null || !state.miniPlayer) return@onKeyEvent false
+                                        val direction = if (event.key == Key.DirectionRight) FocusDirection.Right else FocusDirection.Down
+                                        if (!focusManager.moveFocus(direction)) state.focusMiniPlayer()
+                                        true
+                                    }
+                                    else -> false
                                 }
                             }
                         } else {
@@ -311,6 +359,7 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
     // Byter flik. På tv:n går markeringen sedan vidare in: till kategorierna
     // om skärmen har några, annars till innehållet.
     fun go(screen: Screen) {
+        TvNav.holdMenu = false
         state.screen = screen
         if (!tv) return
         scope.launch {
@@ -319,8 +368,19 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
             if (TvNav.categories > 0) {
                 TvNav.openCategories()
             } else if (focused) {
-                focusManager.moveFocus(FocusDirection.Right)
+                // Dit skärmen själv säger (Spela på startsidan, det man senast stod
+                // på), annars det som ligger närmast till höger om menyn.
+                val restored = TvNav.restoreContent?.let { action -> runCatching { action() }.getOrDefault(false) } ?: false
+                if (!restored) focusManager.moveFocus(FocusDirection.Right)
             }
+        }
+    }
+    // Tillbaka-knappen i menyn: in i skärmen man är i igen.
+    if (tv) {
+        DisposableEffect(Unit) {
+            val leave: () -> Unit = { go(state.screen) }
+            TvNav.leaveMenu = leave
+            onDispose { if (TvNav.leaveMenu === leave) TvNav.leaveMenu = null }
         }
     }
     // Den valda fliken tar emot markeringen; pil höger väljer fliken man står på.
@@ -361,7 +421,10 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
             .then(if (tv) Modifier.drawBehind { menuGlow(palette.hairline) } else Modifier)
             .onFocusChanged {
                 // Markeringen gick vidare: menyn glider undan.
-                if (tv && focused && !it.hasFocus && TvNav.drawer == TvDrawer.MENU) TvNav.drawer = TvDrawer.NONE
+                if (tv && focused && !it.hasFocus && TvNav.drawer == TvDrawer.MENU) {
+                    TvNav.drawer = TvDrawer.NONE
+                    TvNav.holdMenu = false
+                }
                 focused = it.hasFocus
             }
             .focusGroup()

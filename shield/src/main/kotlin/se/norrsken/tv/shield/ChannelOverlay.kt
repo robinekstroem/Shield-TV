@@ -43,6 +43,7 @@ import se.norrsken.tv.desktop.data.LiveChannel
 import se.norrsken.tv.desktop.data.Programme
 import se.norrsken.tv.desktop.ui.LocalPalette
 import se.norrsken.tv.desktop.ui.RemoteImage
+import se.norrsken.tv.desktop.ui.tvEdges
 
 /**
  * Kanallistan ovanpå bilden, som på en tv-box: OK eller vänster medan man
@@ -102,7 +103,15 @@ fun ChannelOverlay(state: AppState, onClose: () -> Unit) {
                         current = index == currentIndex,
                         now = state.guide.current(channel, clock),
                         clock = clock,
-                        modifier = if (index == currentIndex) Modifier.focusRequester(requester) else Modifier,
+                        // Markeringen stannar i listan: åt sidorna och förbi ändarna finns
+                        // bara bilden och spelarens knappar, som inte ska nås härifrån.
+                        modifier = (if (index == currentIndex) Modifier.focusRequester(requester) else Modifier)
+                            .tvEdges(
+                                blockUp = index == 0,
+                                blockDown = index == channels.lastIndex,
+                                blockLeft = true,
+                                blockRight = true,
+                            ),
                         onClick = {
                             if (index != currentIndex) state.playChannel(channel, channels)
                             onClose()

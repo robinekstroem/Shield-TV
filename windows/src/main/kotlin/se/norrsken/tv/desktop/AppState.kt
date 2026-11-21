@@ -208,6 +208,12 @@ class AppState {
     var liveQuery by mutableStateOf("")
     var movieGroup by mutableStateOf<String?>(null)
 
+    /**
+     * Inställningar: kategorisidan för live-tv, filmer eller serier, om den är
+     * öppen. Här och inte i skärmen, så att Tillbaka på tv:n kan stänga den.
+     */
+    var managingCategories by mutableStateOf<Char?>(null)
+
     // --- Disney under Filmer ----------------------------------------------------------
 
     /** Vilka filmer och serier som hör till Disneys samlingar. */
@@ -506,6 +512,18 @@ class AppState {
     /** Ger bilden markeringen igen, så att fjärrkontrollen styr spelaren direkt. */
     fun focusPlayer() {
         playerFocusTick++
+    }
+
+    /** Tv: markeringen står på själva bilden (den stora eller den lilla i hörnet). */
+    var playerBoxFocused by mutableStateOf(false)
+
+    /** Ökar när den lilla bilden i hörnet ska få markeringen. */
+    var miniFocusTick by mutableStateOf(0)
+        private set
+
+    /** Tv: markeringen till den lilla bilden i hörnet, där OK förstorar och Tillbaka stänger. */
+    fun focusMiniPlayer() {
+        if (nowPlaying != null && miniPlayer) miniFocusTick++
     }
 
     // --- Tablå -------------------------------------------------------------------
@@ -2060,6 +2078,8 @@ class AppState {
         fullscreen = false
         miniPlayer = false
         trackPanelOpen = false
+        playerBoxFocused = false
+        playerControlsFocused = false
         resetSeriesExtras()
         WindowsIntegration.keepAwake(false)
         saveSettings()

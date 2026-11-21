@@ -37,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
@@ -115,6 +116,9 @@ fun GuideScreen(state: AppState) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     var selected by remember { mutableStateOf<GuideSelection?>(null) }
+    // Tv: var markeringen landar från kategorierna — programmet som sänds nu på
+    // kanalen man senast stod på, eller på den första som syns.
+    val entry = remember { TvEntry() }
 
     fun pixels(ms: Long): Int = with(density) { widthOf(ms).toPx() }.roundToInt()
     fun scrollToNow() {
@@ -138,6 +142,9 @@ fun GuideScreen(state: AppState) {
             counts = library.liveCounts,
             selected = group,
             onSelect = { state.liveGroup = it },
+            onEnterContent = {
+                scope.launch { entry.enter { listState.layoutInfo.visibleItemsInfo.map { it.key } } }
+            },
         )
         Column(Modifier.weight(1f).fillMaxHeight()) {
             ScreenHeader(
@@ -197,9 +204,13 @@ fun GuideScreen(state: AppState) {
                             windowEnd = windowEnd,
                             scroll = scroll,
                             now = clock,
-                            selected = selected,
+                            // Tv: markeringen visar redan vilket program det är; raderna ritas
+                            // då inte om för varje steg, bara rutan överst.
+                            selected = if (tvLayout) null else selected,
                             onSelect = { programme -> selected = GuideSelection(channel, programme) },
                             onPlay = { state.playChannel(channel, rows) },
+                            entryMark = entry.mark(channel.key),
+                            onFocused = { entry.last = channel.key },
                         )
                     }
                 }
@@ -227,7 +238,11 @@ private fun GuideInfo(selection: GuideSelection?, now: Long, onPlay: (LiveChanne
     ) {
         if (selection == null) {
             Text(
-                "Klicka på ett program för att läsa mer om det. Klicka på en kanal till vänster för att titta.",
+                if (tvLayout) {
+                    "Gå runt i tablån med pilarna för att läsa om programmen. OK på det som sänds nu, eller på kanalen till vänster, börjar titta."
+                } else {
+                    "Klicka på ett program för att läsa mer om det. Klicka på en kanal till vänster för att titta."
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = palette.textTertiary,
                 modifier = Modifier.align(Alignment.CenterStart),
@@ -314,10 +329,15 @@ private fun GuideRow(
     selected: GuideSelection?,
     onSelect: (Programme) -> Unit,
     onPlay: () -> Unit,
+    /** Tv: hit kan markeringen gå in från kategorierna (se TvEntry). */
+    entryMark: Modifier,
+    onFocused: () -> Unit,
 ) {
     val palette = LocalPalette.current
+    // Tv: programmet som sänds nu tar emot markeringen från kategorierna; utan ett sådant kanalen.
+    val onAir = programmes.firstOrNull { it.isOn(now) && it.stop > windowStart && it.start < windowEnd }
     Row(Modifier.fillMaxWidth().height(RowHeight).padding(vertical = 2.dp)) {
-        ChannelCell(channel, onPlay)
+        ChannelCell(channel, onPlay, focus = (if (onAir == null) entryMark else Modifier).onFocusChanged { if (it.isFocused) onFocused() })
         Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(scroll)) {
             Box(Modifier.width(widthOf(windowEnd - windowStart)).fillMaxHeight()) {
                 if (programmes.isEmpty()) {
@@ -343,7 +363,14 @@ private fun GuideRow(
                             onAir = programme.isOn(now),
                             past = programme.stop <= now,
                             modifier = Modifier.offset(x = widthOf(from - windowStart)).width(widthOf(to - from)).fillMaxHeight(),
-                            onClick = { onSelect(programme) },
+                            // Tv: rutan överst följer markeringen; OK på det som sänds nu börjar titta.
+                            focus = (if (programme === onAir) entryMark else Modifier).onFocusChanged {
+                                if (it.isFocused) {
+                                    onFocused()
+                                    if (tvLayout) onSelect(programme)
+                                }
+                            },
+                            onClick = { if (tvLayout && programme.isOn(now)) onPlay() else onSelect(programme) },
                         )
                     }
                 }
@@ -354,9 +381,9 @@ private fun GuideRow(
 }
 
 @Composable
-private fun ChannelCell(channel: LiveChannel, onPlay: () -> Unit) {
+private fun ChannelCell(channel: LiveChannel, onPlay: () -> Unit, focus: Modifier = Modifier) {
     val palette = LocalPalette.current
-    Pressable(onClick = onPlay, modifier = Modifier.width(LabelWidth).fillMaxHeight().padding(end = 6.dp)) { hovered ->
+    Pressable(onClick = onPlay, modifier = focus.width(LabelWidth).fillMaxHeight().padding(end = 6.dp)) { hovered ->
         Row(Modifier.fillMaxSize().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier.size(width = 50.dp, height = 30.dp).clip(RoundedCornerShape(5.dp)).background(palette.surfaceRaised),
@@ -394,6 +421,8 @@ private fun ProgrammeBlock(
     onAir: Boolean,
     past: Boolean,
     modifier: Modifier,
+    /** Läggs på själva rutan (markering och vart den kan gå in). */
+    focus: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val palette = LocalPalette.current
@@ -403,7 +432,7 @@ private fun ProgrammeBlock(
             onClick = onClick,
             selected = selected,
             shape = shape,
-            modifier = Modifier
+            modifier = focus
                 .fillMaxSize()
                 .background(if (onAir) palette.surfaceRaised else palette.surface, shape)
                 .then(if (selected) Modifier.border(1.dp, palette.focus, shape) else Modifier),

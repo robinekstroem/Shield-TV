@@ -17,6 +17,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -45,6 +50,16 @@ internal fun CategoryManager(state: AppState, kind: Char, onKind: (Char) -> Unit
     }
     val hidden = state.hiddenGroups
     val shown = groups.count { LibraryFilter.groupKey(kind, it) !in hidden }
+    // Tv: markeringen börjar på den valda sortens knapp, och hamnar där igen om den tappas.
+    val start = remember { FocusRequester() }
+    if (tvLayout) {
+        LaunchedEffect(Unit) {
+            repeat(2) { withFrameNanos { } }
+            runCatching { start.requestFocus() }
+        }
+    }
+    TvFocusFallback { runCatching { start.requestFocus() }.isSuccess }
+    fun startHere(chip: Char): Modifier = if (chip == kind) Modifier.focusRequester(start) else Modifier
 
     Column(
         Modifier.fillMaxSize().padding(horizontal = 36.dp, vertical = 28.dp),
@@ -62,9 +77,9 @@ internal fun CategoryManager(state: AppState, kind: Char, onKind: (Char) -> Unit
             PrimaryButton("Klar", onClick = onClose, icon = Glyphs.Check)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Chip("Live-tv", selected = kind == LibraryFilter.LIVE, onClick = { onKind(LibraryFilter.LIVE) })
-            Chip("Filmer", selected = kind == LibraryFilter.MOVIE, onClick = { onKind(LibraryFilter.MOVIE) })
-            Chip("Serier", selected = kind == LibraryFilter.SERIES, onClick = { onKind(LibraryFilter.SERIES) })
+            Chip("Live-tv", selected = kind == LibraryFilter.LIVE, onClick = { onKind(LibraryFilter.LIVE) }, modifier = startHere(LibraryFilter.LIVE))
+            Chip("Filmer", selected = kind == LibraryFilter.MOVIE, onClick = { onKind(LibraryFilter.MOVIE) }, modifier = startHere(LibraryFilter.MOVIE))
+            Chip("Serier", selected = kind == LibraryFilter.SERIES, onClick = { onKind(LibraryFilter.SERIES) }, modifier = startHere(LibraryFilter.SERIES))
             Spacer(Modifier.width(18.dp))
             SecondaryButton("Dölj andra språk", onClick = { state.hideForeignGroups(kind, groups) })
             SecondaryButton("Visa alla", onClick = { state.showAllGroups(kind) })
