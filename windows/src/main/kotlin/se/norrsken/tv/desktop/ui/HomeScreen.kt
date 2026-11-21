@@ -382,11 +382,21 @@ private fun HeroInfo(
                 .background(palette.surfaceRaised),
             contentAlignment = Alignment.Center,
         ) {
-            Artwork(
+            if (item is ChannelItem) {
+                // Kanalens logga, lika stor och skarp som i listorna.
+                val box = height - 38.dp
+                ChannelLogo(
+                    item.channel.logo,
+                    item.channel.name,
+                    width = box * (16f / 9f) - 48.dp,
+                    height = box - 48.dp,
+                    initialsStyle = MaterialTheme.typography.headlineMedium,
+                )
+            } else Artwork(
                 candidates = state.largePosters(runCatching { posterOf(state, catalog, item) }.getOrNull().orEmpty()),
-                modifier = Modifier.fillMaxSize().then(if (channel) Modifier.padding(24.dp) else Modifier),
+                modifier = Modifier.fillMaxSize(),
                 maxSide = 600,
-                contentScale = if (channel) ContentScale.Fit else ContentScale.Crop,
+                contentScale = ContentScale.Crop,
                 placeholder = {
                     Text(
                         hero.title,
@@ -651,11 +661,11 @@ private fun HomeRowView(
             contentPadding = PaddingValues(start = 34.dp, end = 34.dp, top = 14.dp, bottom = 18.dp),
             horizontalArrangement = Arrangement.spacedBy(if (tvLayout) 16.dp else 12.dp),
         ) {
-            itemsIndexed(row.items, key = { _, item -> item.key }) { index, item ->
+            itemsIndexed(row.items, key = { _, item -> item.key }) { _, item ->
                 val focus = if (item.key == restoreKey) Modifier.focusRequester(restore) else Modifier
                 val cardWidth = if (tvLayout) 164.dp else 150.dp
                 when (item) {
-                    is MovieItem -> RankedOrPlain(if (row.ranked) index + 1 else null, cardWidth) {
+                    is MovieItem -> Box(Modifier.width(cardWidth)) {
                         PosterCard(
                             title = state.titleOf(item.movie),
                             images = state.posterCandidates(item.movie),
@@ -669,7 +679,7 @@ private fun HomeRowView(
                             badge = state.badgeFor(item.movie),
                         )
                     }
-                    is SeriesItem -> RankedOrPlain(if (row.ranked) index + 1 else null, cardWidth) {
+                    is SeriesItem -> Box(Modifier.width(cardWidth)) {
                         PosterCard(
                             title = state.titleOf(item.series),
                             images = state.posterCandidates(item.series),
@@ -713,16 +723,6 @@ private fun HomeRowView(
                 }
             }
         }
-    }
-}
-
-/** Ett omslag i en rad: med en stor placeringssiffra i topplistor, annars som det är. */
-@Composable
-private fun RankedOrPlain(rank: Int?, cardWidth: Dp, content: @Composable () -> Unit) {
-    if (rank != null) {
-        RankedPoster(rank = rank, cardWidth = cardWidth, content = content)
-    } else {
-        Box(Modifier.width(cardWidth)) { content() }
     }
 }
 
@@ -824,14 +824,12 @@ private fun ChannelCard(
                     .then(if (hovered) Modifier.cardShine(shine, palette, ring, shape) else Modifier),
                 contentAlignment = Alignment.Center,
             ) {
-                RemoteImage(
-                    url = channel.logo,
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 20.dp),
-                    maxSide = 320,
-                    contentScale = ContentScale.Fit,
-                    placeholder = {
-                        Text(initials(channel.name), style = MaterialTheme.typography.headlineSmall, color = palette.textTertiary)
-                    },
+                ChannelLogo(
+                    channel.logo,
+                    channel.name,
+                    width = if (tvLayout) 180.dp else 160.dp,
+                    height = if (tvLayout) 88.dp else 80.dp,
+                    initialsStyle = MaterialTheme.typography.headlineSmall,
                 )
                 if (now != null) {
                     val span = (now.stop - now.start).coerceAtLeast(1L)

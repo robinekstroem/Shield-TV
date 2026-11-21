@@ -265,8 +265,9 @@ object Images {
             while (backgroundPaused || appHidden) delay(2_000)
             val next = synchronized(lock) { backgroundQueue.removeFirstOrNull()?.also { it.started = true } } ?: continue
             finish(next)
-            // Leverantörernas bildservrar är ofta små: ett lugnt tempo.
-            delay(BACKGROUND_PACE_MS)
+            // Leverantörernas bildservrar är ofta små: ett lugnt tempo. TMDB:s är byggda
+            // för hela världens appar, och där går det fort.
+            if (!next.url.contains(TMDB_IMAGES, ignoreCase = true)) delay(BACKGROUND_PACE_MS)
         }
     }
 
@@ -587,29 +588,47 @@ object Images {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw IOException("Bilden gick inte att läsa")
+        val rawLongest = maxOf(bounds.outWidth, bounds.outHeight)
         // Avkoda direkt i ungefär rätt storlek: ett omslag på 2000 pixlar tar annars 16 MB.
+        // Jpeg krymps då snyggt redan i avkodningen. Png (kanalloggor) bara när bilden är
+        // stor: där tar avkodningen var n:te pixel, och kanterna blir taggiga.
         var sample = 1
-        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxSide) sample *= 2
+        if (bounds.outMimeType == "image/jpeg" || rawLongest > LARGE_SIDE) {
+            while (rawLongest / (sample * 2) >= maxSide) sample *= 2
+        }
         val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
             ?: throw IOException("Bilden gick inte att läsa")
-        val longest = maxOf(decoded.width, decoded.height)
-        val bitmap: Bitmap = if (longest > maxSide) {
+        // Krymps i halva steg med utjämning: ett stort steg rakt ned blir pixligt.
+        var bitmap: Bitmap = decoded
+        while (maxOf(bitmap.width, bitmap.height) >= maxSide * 2) {
+            val half = Bitmap.createScaledBitmap(bitmap, (bitmap.width / 2).coerceAtLeast(1), (bitmap.height / 2).coerceAtLeast(1), true)
+            if (bitmap !== decoded) bitmap.recycle()
+            bitmap = half
+        }
+        val longest = maxOf(bitmap.width, bitmap.height)
+        if (longest > maxSide) {
             val scale = maxSide.toFloat() / longest
-            Bitmap.createScaledBitmap(
-                decoded,
-                (decoded.width * scale).roundToInt().coerceAtLeast(1),
-                (decoded.height * scale).roundToInt().coerceAtLeast(1),
+            val scaled = Bitmap.createScaledBitmap(
+                bitmap,
+                (bitmap.width * scale).roundToInt().coerceAtLeast(1),
+                (bitmap.height * scale).roundToInt().coerceAtLeast(1),
                 true,
             )
-        } else {
-            decoded
+            if (bitmap !== decoded && scaled !== bitmap) bitmap.recycle()
+            bitmap = scaled
         }
+        if (bitmap !== decoded) decoded.recycle()
+        // Ritas tusentals gånger, ändras aldrig: tv:ns grafikkrets får den en gång för alla.
+        bitmap.prepareToDraw()
         return bitmap.asImageBitmap()
     }
 
     private const val FOREGROUND_WORKERS = 6
-    private const val BACKGROUND_WORKERS = 2
+    private const val BACKGROUND_WORKERS = 4
     private const val BACKGROUND_PACE_MS = 200L
+    private const val TMDB_IMAGES = "image.tmdb.org"
+    /** Större än så avkodas även png i mindre storlek direkt, för minnets skull. */
+    private const val LARGE_SIDE = 2048
     // Shield har gott om minne, men mindre än en dator.
     private const val MAX_MEMORY = 128L * 1024 * 1024
     private const val MAX_DOWNLOAD = 12 * 1024 * 1024
@@ -655,7 +674,7 @@ fun RemoteImage(
     }
     val alpha by animateFloatAsState(
         targetValue = if (image != null) 1f else 0f,
-        animationSpec = tween(if (initial != null) 0 else 220),
+        animationSpec = tween(if (initial != null) 0 else 140),
         label = "bild",
     )
     Box(modifier, contentAlignment = Alignment.Center) {

@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
 import android.content.Intent
-import android.graphics.BlurMaskFilter
 import android.net.Uri
 import android.view.SurfaceView
 import androidx.compose.foundation.ScrollState
@@ -27,15 +26,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -74,41 +68,13 @@ fun Scrollbar(state: ScrollState, modifier: Modifier = Modifier) = Unit
 fun HorizontalBar(state: ScrollState, modifier: Modifier = Modifier) = Unit
 
 /**
- * Glöd bakom ett element, i elementets form: en suddad kopia av formen i
- * glödens färg. Androids egen suddning, som Shields grafikkort ritar.
+ * Ingen glöd på tv:n. Suddningen bakom varje markerat omslag, knapp och rad
+ * räknades om för varje bildruta och gjorde bläddrandet tungt, och skenet
+ * gjorde kanterna otydliga på tv:n. Markeringen syns i stället med fyllning,
+ * ram och storlek. På datorn finns glöden kvar.
  */
-fun Modifier.glow(color: Color, shape: Shape, radius: Dp = 18.dp): Modifier =
-    if (color.alpha <= 0.01f) {
-        this
-    } else {
-        drawBehind {
-            val outline = shape.createOutline(size, layoutDirection, this)
-            val blur = (radius.toPx() * 0.6f).coerceAtLeast(1f)
-            // Före apply: inne i blocket betyder "color" penselns egen färg.
-            val argb = color.toArgb()
-            drawIntoCanvas { canvas ->
-                val paint = android.graphics.Paint().apply {
-                    isAntiAlias = true
-                    this.color = argb
-                    maskFilter = BlurMaskFilter(blur, BlurMaskFilter.Blur.NORMAL)
-                }
-                val native = canvas.nativeCanvas
-                when (outline) {
-                    is Outline.Rounded -> {
-                        val box = outline.roundRect
-                        native.drawRoundRect(
-                            box.left, box.top, box.right, box.bottom,
-                            box.topLeftCornerRadius.x, box.topLeftCornerRadius.y, paint,
-                        )
-                    }
-                    else -> {
-                        val bounds = outline.bounds
-                        native.drawRect(bounds.left, bounds.top, bounds.right, bounds.bottom, paint)
-                    }
-                }
-            }
-        }
-    }
+@Suppress("UNUSED_PARAMETER")
+fun Modifier.glow(color: Color, shape: Shape, radius: Dp = 18.dp): Modifier = this
 
 /** Öppnar en adress, om det finns något på Shield som kan öppna den. */
 internal fun openInBrowser(url: String) {

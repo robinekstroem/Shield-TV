@@ -2625,8 +2625,9 @@ class AppState {
                     MovieFacts(info?.genre.orEmpty(), releaseYear(info?.releaseDate))
                 done++
                 // Skärmen uppdateras sällan och i stora klumpar — var tjugonde
-                // sekund — så att listorna inte räknas om medan man bläddrar.
-                if (fresh.size >= PUBLISH_BATCH || (fresh.isNotEmpty() && System.currentTimeMillis() - lastPublish >= PUBLISH_EVERY_MS)) {
+                // sekund — och inte mitt i bläddrandet, så att listorna inte
+                // räknas om medan man trycker.
+                if (timeToPublish(fresh.size, lastPublish)) {
                     batches++
                     lastPublish = System.currentTimeMillis()
                     publishFacts(HashMap(fresh), save = batches % 3 == 0)
@@ -2645,6 +2646,29 @@ class AppState {
      * omgång räknar om listor och sparar filer, och det ska aldrig ta kraft
      * från bilden. De fortsätter när spelaren stängs eller krymps till hörnet.
      */
+    /**
+     * Senaste trycket på fjärrkontrollen (Shield sätter den). Det som hittas i
+     * bakgrunden visas inte medan man bläddrar: att listorna räknas om mitt i
+     * ett tryck känns som att appen hackar.
+     */
+    @Volatile
+    var lastInputAt = 0L
+        private set
+
+    fun noteInput() {
+        lastInputAt = System.currentTimeMillis()
+    }
+
+    /** Dags att visa det som hittats: en stor klump, eller en stund sedan sist — men inte mitt i bläddrandet. */
+    private fun timeToPublish(waiting: Int, lastPublish: Long): Boolean {
+        if (waiting == 0) return false
+        val now = System.currentTimeMillis()
+        val due = waiting >= PUBLISH_BATCH || now - lastPublish >= PUBLISH_EVERY_MS
+        if (!due) return false
+        // Väntar det väldigt mycket visas det ändå, så att inget dröjer för länge.
+        return now - lastInputAt >= INPUT_QUIET_MS || waiting >= PUBLISH_BATCH * 4
+    }
+
     private suspend fun restWhileWatching() {
         while (watching) delay(WATCH_REST_MS)
     }
@@ -2828,8 +2852,9 @@ class AppState {
                                 facts
                             }
                             done++
-                            // Sällan och i stora klumpar, så att listorna inte räknas om medan man bläddrar.
-                            if (fresh.size >= PUBLISH_BATCH || System.currentTimeMillis() - lastPublish >= PUBLISH_EVERY_MS) {
+                            // Sällan och i stora klumpar, och inte mitt i bläddrandet, så att
+                            // listorna inte räknas om medan man trycker.
+                            if (timeToPublish(fresh.size, lastPublish)) {
                                 lastPublish = System.currentTimeMillis()
                                 // Sparas varje gång: det som hittats finns kvar även om appen stängs mitt i.
                                 publishTmdb(HashMap(fresh), save = true)
@@ -2989,6 +3014,8 @@ private const val WATCH_REST_MS = 3_000L
 /** Nya TMDB-svar och infosidor visas i klumpar: så här många, eller så här ofta. */
 private const val PUBLISH_BATCH = 500
 private const val PUBLISH_EVERY_MS = 20_000L
+/** Så länge efter senaste trycket räknas man som att man bläddrar. */
+private const val INPUT_QUIET_MS = 4_000L
 /** Leverantörens betyg saknar röster; det väger som om så här många röstat. */
 private const val PROVIDER_VOTES = 30
 /** Uppslag hos TMDB samtidigt. TMDB tål runt 50 i sekunden; sex ger ett par dussin. */

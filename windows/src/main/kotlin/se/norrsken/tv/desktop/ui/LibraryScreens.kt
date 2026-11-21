@@ -1052,7 +1052,6 @@ internal fun PosterCard(
     images: List<String>,
     meta: String?,
     onClick: () -> Unit,
-    rank: Int? = null,
     modifier: Modifier = Modifier,
     /** Tv: tonas ner medan ett annat omslag är markerat. */
     dimmed: Boolean = false,
@@ -1064,8 +1063,6 @@ internal fun PosterCard(
     badge: String? = null,
     /** Titeln under omslaget. Tv:ns filmer och serier visar den stort ovanför i stället. */
     showTitle: Boolean = true,
-    /** Numret i en samlings ordning, i en rund bricka uppe till vänster. */
-    order: Int? = null,
 ) {
     val palette = LocalPalette.current
     var focused by remember { mutableStateOf(false) }
@@ -1127,42 +1124,6 @@ internal fun PosterCard(
                     ) {
                         // "Ny" och "Nytt avsnitt" i accentfärgen, "4K" i vitt.
                         Text(badge, style = MaterialTheme.typography.labelSmall, color = if (badge.startsWith("Ny")) palette.focus else Color.White)
-                    }
-                }
-                // Numret i en samling.
-                if (order != null) {
-                    Box(
-                        Modifier
-                            .align(Alignment.TopStart)
-                            .padding(7.dp)
-                            .size(if (tvLayout) 34.dp else 26.dp)
-                            .clip(RoundedCornerShape(50))
-                            .background(Color.Black.copy(alpha = 0.72f))
-                            .border(1.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(50)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            "$order",
-                            style = if (tvLayout) MaterialTheme.typography.labelLarge else MaterialTheme.typography.labelMedium,
-                            color = Color.White,
-                        )
-                    }
-                }
-                // Placeringen i en topplista. De tre första i accentfärgen.
-                if (rank != null) {
-                    Box(
-                        Modifier
-                            .align(Alignment.TopStart)
-                            .padding(6.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color.Black.copy(alpha = 0.72f))
-                            .padding(horizontal = 7.dp, vertical = 2.dp),
-                    ) {
-                        Text(
-                            "#$rank",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (rank <= 3) palette.focus else Color.White,
-                        )
                     }
                 }
             }

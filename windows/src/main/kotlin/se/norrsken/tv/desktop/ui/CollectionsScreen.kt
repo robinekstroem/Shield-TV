@@ -326,7 +326,6 @@ internal fun CollectionPage(
                                     onActive = { if (!tvLayout) hoveredKey = key },
                                     badge = state.badgeFor(film),
                                     showTitle = !tvLayout,
-                                    order = slot.number,
                                 )
                             } else {
                                 MissingPoster(slot, accent, modifier = track, onActive = { if (!tvLayout) hoveredKey = key })

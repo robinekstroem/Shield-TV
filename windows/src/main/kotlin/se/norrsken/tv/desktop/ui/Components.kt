@@ -806,13 +806,10 @@ private fun TvGroupRow(
             .then(if (focus != null) Modifier.focusRequester(focus) else Modifier)
             .onFocusChanged { if (it.isFocused) onFocused() },
     ) { active ->
-        // Markerad: raden fylls i temats färg, som knapparna, med texten i kontrast.
+        // Markerad: raden fylls med samma färg som menyns markerade rad, utan sken.
+        val ink = menuInk(palette)
         if (active) {
-            Box(
-                Modifier
-                    .matchParentSize()
-                    .background(Brush.horizontalGradient(listOf(palette.focus, palette.focus.copy(alpha = 0.72f)))),
-            )
+            Box(Modifier.matchParentSize().background(menuFill(palette)))
         } else if (selected) {
             // Kategorin man är i: ett streck i märkets färger.
             Box(
@@ -837,7 +834,7 @@ private fun TvGroupRow(
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = if (selected || active) FontWeight.SemiBold else FontWeight.Medium,
                 color = when {
-                    active -> palette.onFocus
+                    active -> ink
                     selected -> palette.textPrimary
                     else -> palette.textSecondary
                 },
@@ -849,13 +846,13 @@ private fun TvGroupRow(
             Box(
                 Modifier
                     .clip(RoundedCornerShape(8.dp))
-                    .background(if (active) palette.onFocus.copy(alpha = 0.16f) else palette.surfaceRaised)
+                    .background(if (active) ink.copy(alpha = 0.18f) else palette.surfaceRaised)
                     .padding(horizontal = 7.dp, vertical = 2.dp),
             ) {
                 Text(
                     count.grouped(),
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (active) palette.onFocus else palette.textTertiary,
+                    color = if (active) ink else palette.textTertiary,
                     maxLines = 1,
                     softWrap = false,
                 )

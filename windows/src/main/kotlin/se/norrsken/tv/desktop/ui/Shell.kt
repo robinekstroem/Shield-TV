@@ -3,7 +3,6 @@ package se.norrsken.tv.desktop.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
@@ -16,7 +15,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
@@ -73,11 +71,10 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -249,8 +246,10 @@ fun AppRoot(state: AppState) {
     Box(Modifier.fillMaxSize().background(palette.background)) {
         // Temats dekor rör sig bara när spelaren inte täcker allt.
         val decorated = state.nowPlaying == null || state.miniPlayer
-        CustomBackdrop(state.backgrounds, running = decorated, modifier = Modifier.fillMaxSize())
-        ThemeBackdrop(palette.decoration, running = decorated, modifier = Modifier.fillMaxSize())
+        // Egna lager: det som rör sig i bakgrunden ritas om för sig, inte hela skärmen
+        // med listor och text varje gång snön faller en bit.
+        CustomBackdrop(state.backgrounds, running = decorated, modifier = Modifier.fillMaxSize().graphicsLayer())
+        ThemeBackdrop(palette.decoration, running = decorated, modifier = Modifier.fillMaxSize().graphicsLayer())
         Row(Modifier.fillMaxSize()) {
             if (!drawers) Sidebar(state, docked, tv = false)
             Box(
@@ -322,7 +321,7 @@ fun AppRoot(state: AppState) {
                 }
             }
         }
-        ThemeOverlay(palette.decoration, running = decorated, modifier = Modifier.fillMaxSize())
+        ThemeOverlay(palette.decoration, running = decorated, modifier = Modifier.fillMaxSize().graphicsLayer())
         // Spelaren ligger ovanpå allt. Skärmen under står kvar — med sin
         // scrollposition — så man kommer tillbaka dit man var.
         if (state.nowPlaying != null) {
@@ -513,12 +512,12 @@ private fun MenuBrand(state: AppState, tv: Boolean) {
     val palette = LocalPalette.current
     Column(Modifier.padding(start = if (tv) 8.dp else 10.dp, top = 8.dp, bottom = if (tv) 24.dp else 26.dp - NAV_AIR)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Image(
-                rememberVectorPainter(Glyphs.AppMark),
+            // En platt symbol i en färg: inga färgövergångar, inget sken.
+            Icon(
+                Glyphs.AppSymbol,
                 contentDescription = null,
-                modifier = Modifier
-                    .size(if (tv) 50.dp else 40.dp)
-                    .glow(Brand.blue.copy(alpha = 0.32f), RoundedCornerShape(16.dp), 26.dp),
+                tint = menuFill(palette),
+                modifier = Modifier.size(if (tv) 44.dp else 36.dp),
             )
             Spacer(Modifier.width(if (tv) 14.dp else 12.dp))
             Column {
@@ -612,45 +611,42 @@ private fun DrawScope.menuGlow(edge: Color) {
 }
 
 /**
- * Färgerna för en rad i menyn: plattan bakom symbolen, och hela raden när
- * den är markerad. Fasta, som appikoner, så att varje del känns igen i alla teman.
+ * Symbolernas färger i menyn: varje del sin egen, fast i alla teman, så att
+ * man känner igen den. Bara symbolen och strecket vid fliken man är i är
+ * färgade — inga plattor, inget sken.
  */
-private class MenuAccent(val from: Color, val to: Color) {
-    val tile: Brush = Brush.linearGradient(listOf(from, to))
-}
-
 private object MenuAccents {
-    val home = MenuAccent(Color(0xFF14C7AE), Color(0xFF3D7BFF))
-    val live = MenuAccent(Color(0xFFFF4D6A), Color(0xFFC13DF0))
-    val guide = MenuAccent(Color(0xFFFF9A3C), Color(0xFFF0463C))
-    val football = MenuAccent(Color(0xFF2BC46B), Color(0xFF0F9488))
-    val movies = MenuAccent(Color(0xFF3D7BFF), Color(0xFF7B4DFF))
-    val series = MenuAccent(Color(0xFF8B4DFF), Color(0xFFE0459F))
-    val genres = MenuAccent(Color(0xFFFF5C8A), Color(0xFFFF8F4D))
-    val history = MenuAccent(Color(0xFF2CB5F0), Color(0xFF3D6BFF))
-    val settings = MenuAccent(Color(0xFF7D8AA3), Color(0xFF4A5670))
+    val home = Color(0xFF2EE6C5)
+    val live = Color(0xFFFF5A72)
+    val guide = Color(0xFFFFA24A)
+    val football = Color(0xFF3DD47A)
+    val movies = Color(0xFF5B8CFF)
+    val series = Color(0xFFA27CFF)
+    val genres = Color(0xFFFF6FA8)
+    val history = Color(0xFF4CC3F5)
+    val settings = Color(0xFF9AA6BC)
 }
 
-/** Symbolen på en färgad platta. Markerad blir plattan vit och symbolen färgad. */
-@Composable
-private fun IconTile(icon: ImageVector, accent: MenuAccent, inverted: Boolean, size: Dp) {
-    Box(
-        Modifier
-            .size(size)
-            .clip(RoundedCornerShape(size * 0.3f))
-            .background(if (inverted) SolidColor(Color.White) else accent.tile),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(icon, contentDescription = null, tint = if (inverted) accent.from else Color.White, modifier = Modifier.size(size * 0.56f))
-    }
+/** Temats markering är vit eller nästan vit (som Grafit): då har den ingen färg att fylla med. */
+private fun Color.isPale(): Boolean {
+    val most = maxOf(red, green, blue)
+    val least = minOf(red, green, blue)
+    val saturation = if (most <= 0f) 0f else (most - least) / most
+    return luminance() > 0.6f && saturation < 0.25f
 }
+
+/** Den markerade raden i menyn: temats färg, eller märkets blå när temats markering är vit. */
+internal fun menuFill(palette: Palette): Color = if (palette.focus.isPale()) Brand.blue else palette.focus
+
+/** Texten på den markerade raden. */
+internal fun menuInk(palette: Palette): Color = if (palette.focus.isPale()) Color.White else palette.onFocus
 
 /**
- * En rad i menyn: symbolen på en platta i radens egen färg, och namnet.
- * Markerad fylls hela raden med färgen och lyser; fliken man är i har ett
- * streck i kanten. Ingenting skalas — skalad text blir suddig på tv:n. På
- * datorn står också en rad förklaring och antalet; på tv:n bara namnet, och
- * LIVE när något pågår.
+ * En rad i menyn: symbolen i radens egen färg, och namnet. Markerad fylls
+ * raden med temats färg och texten blir vit; fliken man är i har ett streck
+ * i kanten. Inget sken och inget som skalas — det gör texten suddig på tv:n.
+ * På datorn står också en rad förklaring och antalet; på tv:n bara namnet,
+ * och LIVE när något pågår.
  */
 @Composable
 private fun NavItem(
@@ -662,7 +658,7 @@ private fun NavItem(
     /** Utan undertext, när minispelaren tar plats i sidofältet. */
     compact: Boolean,
     tv: Boolean,
-    accent: MenuAccent,
+    accent: Color,
     /** Siffran räknar det som pågår just nu: röd, som LIVE. */
     live: Boolean = false,
     modifier: Modifier = Modifier,
@@ -672,35 +668,20 @@ private fun NavItem(
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
     val focused by interaction.collectIsFocusedAsState()
-    val shape = RoundedCornerShape(if (tv) 16.dp else 12.dp)
-    // Markerad: färgen tonar in över hela raden.
-    val lit by animateFloatAsState(if (focused) 1f else 0f, tween(MENU_MS), label = "menyljus")
-    // Fliken man är i, eller musen över: en svag ton av samma färg.
-    val tint by animateFloatAsState(
-        when {
-            focused -> 0f
-            hovered -> 0.12f
-            selected -> 0.16f
-            else -> 0f
-        },
-        tween(MENU_MS),
-        label = "menyton",
-    )
+    val shape = RoundedCornerShape(if (tv) 14.dp else 10.dp)
+    val fill = menuFill(palette)
+    val ink = menuInk(palette)
+    // Markerad: färgen tonar in. Musen över: en svag ton av samma färg.
+    val lit by animateFloatAsState(if (focused) 1f else 0f, tween(MENU_MS), label = "menyrad")
+    val hint by animateFloatAsState(if (hovered && !focused) 0.12f else 0f, tween(MENU_MS), label = "menyhovring")
     val counted = count != null && count > 0
     Box(
         modifier
             .fillMaxWidth()
-            .then(if (focused) Modifier.glow(accent.from.copy(alpha = 0.5f), shape, 22.dp) else Modifier)
             .clip(shape)
             .drawBehind {
-                if (tint > 0.001f) {
-                    drawRect(Brush.horizontalGradient(listOf(accent.from.copy(alpha = tint), accent.to.copy(alpha = tint * 0.25f))))
-                }
-                if (lit > 0.001f) {
-                    drawRect(Brush.horizontalGradient(listOf(accent.from, accent.to)), alpha = lit)
-                    // Lite mörkare, så att den vita texten står ut mot de ljusa färgerna.
-                    drawRect(Color.Black, alpha = 0.18f * lit)
-                }
+                if (hint > 0.001f) drawRect(fill, alpha = hint)
+                if (lit > 0.001f) drawRect(fill, alpha = lit)
             }
             .hoverable(interaction)
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
@@ -714,23 +695,31 @@ private fun NavItem(
                     .padding(start = 3.dp)
                     .size(width = 3.dp, height = if (tv) 26.dp else 20.dp)
                     .clip(CircleShape)
-                    .background(Brush.verticalGradient(listOf(accent.from, accent.to))),
+                    .background(accent),
             )
         }
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(start = if (tv) 12.dp else 10.dp, end = if (tv) 14.dp else 12.dp, top = if (tv) 8.dp else 6.dp, bottom = if (tv) 8.dp else 6.dp),
+                .padding(horizontal = if (tv) 16.dp else 12.dp, vertical = if (tv) 13.dp else 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconTile(icon, accent, inverted = focused, size = if (tv) 40.dp else 30.dp)
-            Spacer(Modifier.width(if (tv) 14.dp else 12.dp))
+            Icon(icon, contentDescription = null, tint = if (focused) ink else accent, modifier = Modifier.size(if (tv) 26.dp else 22.dp))
+            Spacer(Modifier.width(if (tv) 16.dp else 14.dp))
             Column(Modifier.weight(1f)) {
                 Text(
                     label,
                     style = if (tv) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleSmall,
-                    fontWeight = if (selected || focused) FontWeight.Bold else FontWeight.SemiBold,
-                    color = if (focused) Color.White else palette.textPrimary,
+                    fontWeight = when {
+                        selected || focused -> FontWeight.Bold
+                        tv -> FontWeight.SemiBold
+                        else -> FontWeight.Medium
+                    },
+                    color = when {
+                        focused -> ink
+                        selected -> palette.textPrimary
+                        else -> palette.textSecondary
+                    },
                     maxLines = 1,
                     softWrap = false,
                 )
@@ -739,7 +728,7 @@ private fun NavItem(
                         Text(
                             subtitle,
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (focused) Color.White.copy(alpha = 0.8f) else palette.textTertiary,
+                            color = if (focused) ink.copy(alpha = 0.78f) else palette.textTertiary,
                             maxLines = 1,
                             softWrap = false,
                         )
@@ -751,7 +740,7 @@ private fun NavItem(
                 !tv && counted -> Text(
                     (count ?: 0).grouped(),
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (focused) Color.White.copy(alpha = 0.8f) else palette.textTertiary,
+                    color = if (focused) ink.copy(alpha = 0.78f) else palette.textTertiary,
                     maxLines = 1,
                     softWrap = false,
                 )

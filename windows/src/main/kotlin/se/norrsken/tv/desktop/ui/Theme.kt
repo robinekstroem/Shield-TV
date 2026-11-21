@@ -372,7 +372,9 @@ class CardShine {
 /** Null i teman utan ljussvep. Svepet går en gång när [active] blir sant; kanten vandrar så länge. */
 @Composable
 fun rememberCardShine(active: Boolean): CardShine? {
-    if (!LocalPalette.current.shine) return null
+    // Tv: kanten som vandrar ritar om omslaget hela tiden det är markerat, och
+    // gör bläddrandet tyngre. Där räcker den stilla ramen.
+    if (!LocalPalette.current.shine || tvLayout) return null
     val shine = remember { CardShine() }
     LaunchedEffect(active) {
         shine.sweep.snapTo(0f)

@@ -46,16 +46,12 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import se.norrsken.tv.desktop.AppState
 import se.norrsken.tv.desktop.NextUp
 import se.norrsken.tv.desktop.player.VideoPlayer
@@ -168,36 +164,6 @@ internal fun TitleLogo(
             )
         } else {
             Text(title, style = style, maxLines = maxLines, overflow = TextOverflow.Ellipsis)
-        }
-    }
-}
-
-// --- Topplistan -----------------------------------------------------------------------
-
-/**
- * Ett kort i en topplista: placeringen som en stor siffra bakom omslaget,
- * som "Topp 10" på streamingtjänsterna. [cardWidth]: omslagets bredd.
- */
-@Composable
-internal fun RankedPoster(rank: Int, cardWidth: Dp, content: @Composable () -> Unit) {
-    val palette = LocalPalette.current
-    // Siffran slutar i höjd med omslagets nederkant (kortet har 6 dp luft runt omslaget).
-    val numberTop = (cardWidth - 12.dp) * 1.5f - 92.dp
-    Box(Modifier.width(cardWidth + RANK_SPACE)) {
-        Text(
-            rank.toString(),
-            style = TextStyle(
-                fontSize = 118.sp,
-                fontWeight = FontWeight.Black,
-                letterSpacing = (-8).sp,
-                drawStyle = Stroke(width = 5f, join = StrokeJoin.Round),
-            ),
-            color = if (rank <= 3) palette.focus else palette.textTertiary,
-            maxLines = 1,
-            modifier = Modifier.align(Alignment.TopStart).padding(top = numberTop.coerceAtLeast(0.dp)),
-        )
-        Box(Modifier.align(Alignment.TopEnd).width(cardWidth)) {
-            content()
         }
     }
 }
@@ -365,4 +331,3 @@ private const val BACKDROP_FADE_MS = 700
 private const val KEN_BURNS_MS = 22_000
 private const val LOGO_SIDE = 600
 private const val NEXT_UP_COUNTDOWN_MS = 10_000
-private val RANK_SPACE = 58.dp

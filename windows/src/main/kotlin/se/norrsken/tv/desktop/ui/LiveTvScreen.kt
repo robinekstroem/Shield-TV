@@ -37,7 +37,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -190,29 +189,8 @@ private fun ChannelRow(
                 color = palette.textTertiary,
                 maxLines = 1,
             )
-            // Loggor är ofta breda och på vit eller genomskinlig botten, så
-            // de får en egen platta och skalas in — aldrig beskärs.
-            Box(
-                Modifier
-                    .size(width = 72.dp, height = 42.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(palette.surfaceRaised),
-                contentAlignment = Alignment.Center,
-            ) {
-                RemoteImage(
-                    url = channel.logo,
-                    modifier = Modifier.fillMaxSize().padding(5.dp),
-                    maxSide = 160,
-                    contentScale = ContentScale.Fit,
-                    placeholder = {
-                        Text(
-                            initials(channel.name),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = palette.textTertiary,
-                        )
-                    },
-                )
-            }
+            // Loggorna lika stora och utan platta bakom (se ChannelLogo).
+            ChannelLogo(channel.logo, channel.name, width = 72.dp, height = 40.dp)
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(channel.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -287,23 +265,13 @@ private fun ChannelInfo(state: AppState, channel: LiveChannel, modifier: Modifie
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(width = 132.dp, height = 76.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(palette.surfaceRaised),
-                contentAlignment = Alignment.Center,
-            ) {
-                RemoteImage(
-                    url = channel.logo,
-                    modifier = Modifier.fillMaxSize().padding(10.dp),
-                    maxSide = 320,
-                    contentScale = ContentScale.Fit,
-                    placeholder = {
-                        Text(initials(channel.name), style = MaterialTheme.typography.headlineSmall, color = palette.textTertiary)
-                    },
-                )
-            }
+            ChannelLogo(
+                channel.logo,
+                channel.name,
+                width = 132.dp,
+                height = 72.dp,
+                initialsStyle = MaterialTheme.typography.headlineSmall,
+            )
             Spacer(Modifier.width(18.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(channel.name, style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)

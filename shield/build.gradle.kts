@@ -69,6 +69,10 @@ android {
             1
         }
         versionName = "1.0." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
+        // Shield har ARM-processor: FFmpeg-ljudets maskinkod behövs bara för den.
+        ndk {
+            abiFilters += setOf("armeabi-v7a", "arm64-v8a")
+        }
     }
 
     signingConfigs {
@@ -135,8 +139,15 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.core.ktx)
-    implementation(libs.media3.exoplayer)
-    implementation(libs.media3.exoplayer.hls)
+    // Media3 i exakt samma version som FFmpeg-avkodaren nedan. Jellyfins
+    // färdigbyggda avkodare finns för 1.9.0, och de två måste passa ihop: en
+    // annan Media3 kan krascha avkodaren. Telefonappens versionskatalog rörs inte.
+    val media3 = "1.9.0"
+    implementation("androidx.media3:media3-exoplayer:$media3")
+    implementation("androidx.media3:media3-exoplayer-hls:$media3")
+    // Ljud som varken Shield eller tv:n klarar själva — DTS, Dolby TrueHD och
+    // annat som är vanligt i 4K-filmer — avkodas med FFmpeg i stället för att utebli.
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:$media3+1")
     implementation(libs.coroutines.android)
     // @Inject i koden som delas med telefonappen.
     implementation("javax.inject:javax.inject:1")

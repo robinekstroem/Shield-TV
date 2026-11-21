@@ -235,6 +235,8 @@ class MainActivity : ComponentActivity() {
      * stället för på något som råkar ligga närmast en kant.
      */
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        // Det som hittas i bakgrunden väntar medan man trycker (se AppState.noteInput).
+        if (ready && event.action == android.view.KeyEvent.ACTION_DOWN) state.noteInput()
         // Två försök som inte hjälpte: då får tv:n sköta trycket som vanligt,
         // så att fjärrkontrollen aldrig kan fastna här.
         if (ready && crashReport == null && !anyFocus && !state.loading && focusRescues < 2 &&

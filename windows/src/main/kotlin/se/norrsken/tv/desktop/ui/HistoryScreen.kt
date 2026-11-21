@@ -191,24 +191,28 @@ private fun HistoryRowContent(entry: WatchEntry, onPlay: () -> Unit, onRemove: (
             Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Kanaler: loggan inpassad. Film och avsnitt: bilden beskuren, med förloppet under.
-            Box(
+            // Kanaler: loggan, som i Live TV. Film och avsnitt: bilden beskuren, med förloppet under.
+            if (live) {
+                Box(Modifier.size(width = 128.dp, height = 72.dp), contentAlignment = Alignment.Center) {
+                    ChannelLogo(entry.image, entry.title, width = 104.dp, height = 56.dp)
+                }
+            } else Box(
                 Modifier
-                    .size(width = if (live) 96.dp else 128.dp, height = 72.dp)
+                    .size(width = 128.dp, height = 72.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(palette.surfaceRaised),
                 contentAlignment = Alignment.Center,
             ) {
                 RemoteImage(
                     url = entry.image,
-                    modifier = Modifier.fillMaxSize().padding(if (live) 8.dp else 0.dp),
+                    modifier = Modifier.fillMaxSize(),
                     maxSide = 320,
-                    contentScale = if (live) ContentScale.Fit else ContentScale.Crop,
+                    contentScale = ContentScale.Crop,
                     placeholder = {
                         Text(initials(entry.title), style = MaterialTheme.typography.labelMedium, color = palette.textTertiary)
                     },
                 )
-                if (!live && entry.durationMs > 0) {
+                if (entry.durationMs > 0) {
                     Box(
                         Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp).background(Color.Black.copy(alpha = 0.55f)),
                     ) {

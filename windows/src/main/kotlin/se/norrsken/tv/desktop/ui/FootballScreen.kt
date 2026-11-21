@@ -40,14 +40,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalFocusManager
+import kotlinx.coroutines.launch
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -130,12 +134,14 @@ fun FootballScreen(state: AppState) {
     }
     val league = state.footballLeague
     if (tvLayout) {
-        // Byts ligan (med fliken, en ledarruta eller Tillbaka) går markeringen till
-        // ligans flik. Inte när man bara kommer tillbaka från en match.
+        // Byts ligan (med en ledarruta eller Tillbaka) går markeringen till
+        // ligans flik. Inte när man bara kommer tillbaka från en match, och inte
+        // när ligan valdes i själva listan: då är man redan där, eller på väg in.
         LaunchedEffect(league) {
-            val changed = focus.started && focus.shownLeague != league
+            val changed = focus.started && focus.shownLeague != league && !focus.fromList
             focus.shownLeague = league
             focus.started = true
+            focus.fromList = false
             if (changed) {
                 withFrameNanos { }
                 // Tv: ligorna ligger i kategorilistan, som tar emot markeringen
@@ -145,6 +151,8 @@ fun FootballScreen(state: AppState) {
         }
     }
     val palette = LocalPalette.current
+    val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
     Row(Modifier.fillMaxSize()) {
         // Tv: ligorna är kategorierna, som i Filmer — de glider fram med pil
         // vänster, och ligan byts medan man bläddrar bland dem.
@@ -156,14 +164,32 @@ fun FootballScreen(state: AppState) {
                 groups = League.entries.map { it.title },
                 counts = counts,
                 selected = league?.title,
-                onSelect = { title -> state.footballLeague = League.entries.firstOrNull { it.title == title } },
+                onSelect = { title ->
+                    val next = League.entries.firstOrNull { it.title == title }
+                    if (next != state.footballLeague) focus.fromList = true
+                    state.footballLeague = next
+                },
                 title = "LIGOR",
+                // Pil höger eller OK i ligalistan: in på sidan, till matchen man senast
+                // öppnade om den syns, annars det första på sidan. Översikten likadant
+                // som ligorna, som har annat innehåll och annars inte gick att nå.
+                onEnterContent = {
+                    scope.launch {
+                        // Byttes ligan nyss: vänta in den nya sidan.
+                        repeat(2) { withFrameNanos { } }
+                        val restored = focus.openedKey != null && runCatching { focus.restore.requestFocus() }.isSuccess
+                        if (!restored) runCatching { focus.content.requestFocus() }
+                        withFrameNanos { }
+                        // Fanns inget att stå på: åt höger, som förut.
+                        if (TvNav.drawer == TvDrawer.CATEGORIES) focusManager.moveFocus(FocusDirection.Right)
+                    }
+                },
             )
         }
         Column(Modifier.weight(1f).fillMaxHeight()) {
             FootballHeader(state)
             if (!tvLayout) LeagueChips(state, league, focus)
-            Box(Modifier.weight(1f).fillMaxWidth()) {
+            Box(Modifier.weight(1f).fillMaxWidth().focusRequester(focus.content)) {
                 when {
                     state.footballMatches.isEmpty() && state.footballError == null -> Spinner(Modifier.align(Alignment.Center))
                     state.footballMatches.isEmpty() -> Text(
@@ -191,6 +217,10 @@ private class FootballFocus {
     /** Ligan som visades senast, så att ett byte märks. */
     var shownLeague: League? = null
     var started = false
+    /** Sidan under rubriken: pil höger från ligalistan går in hit. */
+    val content = FocusRequester()
+    /** Ligan valdes nyss i ligalistan (inte med en ledarruta eller Tillbaka). */
+    var fromList = false
 }
 
 private fun Modifier.restoreFocus(focus: FootballFocus, key: String): Modifier =

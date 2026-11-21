@@ -3,6 +3,7 @@ package se.norrsken.tv.desktop.ui
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -47,6 +48,34 @@ object Glyphs {
     val Star = glyph("M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z")
     val StarOutline = glyph("M22 9.24l-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03L22 9.24zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28L12 15.4z")
     val Home = glyph("M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z")
+
+    /**
+     * Appens märke i menyn: samma tv med antenner och play-knapp, men platt
+     * och i en färg (den färg den tonas i), utan färgövergångar och sken.
+     * Play-knappen är ett hål i rutan.
+     */
+    val AppSymbol: ImageVector = ImageVector.Builder(
+        name = "TvSymbol",
+        defaultWidth = 48.dp,
+        defaultHeight = 48.dp,
+        viewportWidth = 48f,
+        viewportHeight = 48f,
+    )
+        .addPath(
+            pathData = addPathNodes("M24,12.5 L15.5,4.5 M24,12.5 L32.5,4.5"),
+            stroke = SolidColor(Color.White),
+            strokeLineWidth = 3.4f,
+            strokeLineCap = StrokeCap.Round,
+        )
+        .addPath(
+            pathData = addPathNodes(
+                "M11,12 H37 A8,8 0 0 1 45,20 V34 A8,8 0 0 1 37,42 H11 A8,8 0 0 1 3,34 V20 A8,8 0 0 1 11,12 Z " +
+                    "M20,19.5 V34.5 L32.5,27 Z",
+            ),
+            pathFillType = PathFillType.EvenOdd,
+            fill = SolidColor(Color.White),
+        )
+        .build()
 
     /**
      * Appens märke: en tv med antenner och en play-knapp, i norrskenets

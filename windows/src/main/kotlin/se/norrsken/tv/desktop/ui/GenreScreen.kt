@@ -181,7 +181,6 @@ fun GenreScreen(state: AppState) {
                 )
             } else {
                 // Numreras bara när listan faktiskt är rangordnad efter betyg.
-                val ranked = sort == SortOrder.RATING || sort == SortOrder.POPULAR
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     TvScrolling(lead = 0.05f, trail = 0.08f, snap = true) {
                         LazyVerticalGrid(
@@ -196,26 +195,24 @@ fun GenreScreen(state: AppState) {
                             verticalArrangement = Arrangement.spacedBy(if (tvLayout) 16.dp else 12.dp),
                         ) {
                             if (showSeries) {
-                                itemsIndexed(series, key = { _, item -> item.key }) { position, item ->
+                                itemsIndexed(series, key = { _, item -> item.key }) { _, item ->
                                     PosterCard(
                                         title = state.titleOf(item),
                                         images = state.posterCandidates(item),
                                         meta = seriesMeta(state, item),
                                         onClick = { state.showSeries(item) },
-                                        rank = if (ranked) position + 1 else null,
                                         modifier = entry.mark(item.key),
                                         onFocusChange = { has -> if (has) entry.last = item.key },
                                         badge = state.badgeFor(item),
                                     )
                                 }
                             } else {
-                                itemsIndexed(movies, key = { _, item -> item.key }) { position, item ->
+                                itemsIndexed(movies, key = { _, item -> item.key }) { _, item ->
                                     PosterCard(
                                         title = state.titleOf(item),
                                         images = state.posterCandidates(item),
                                         meta = movieMeta(state, item),
                                         onClick = { state.showMovie(item) },
-                                        rank = if (ranked) position + 1 else null,
                                         modifier = entry.mark(item.key),
                                         onFocusChange = { has -> if (has) entry.last = item.key },
                                         badge = state.badgeFor(item),

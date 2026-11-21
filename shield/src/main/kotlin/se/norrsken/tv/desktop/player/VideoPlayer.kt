@@ -44,8 +44,10 @@ import kotlin.math.abs
 /**
  * Shield-versionen av spelaren: Media3 (ExoPlayer) med Shields
  * hårdvaruavkodare — 4K, HDR och ljud som Dolby och DTS skickas vidare till
- * förstärkaren när den klarar det. Samma namn och samma gränssnitt som
- * Windows-spelaren, så att den delade spelarskärmen fungerar oförändrad.
+ * tv:n eller förstärkaren när den klarar det. Klarar den inte ljudet avkodas
+ * det med FFmpeg, i stället för att filmen spelas utan ljud. Samma namn och
+ * samma gränssnitt som Windows-spelaren, så att den delade spelarskärmen
+ * fungerar oförändrad.
  *
  * Bildfrekvensen: tv:n ställs på en frekvens som går jämnt upp med det som
  * spelas (se [WindowsIntegration]). Strömmar som inte talar om sin
@@ -158,8 +160,13 @@ class VideoPlayer(@Suppress("UNUSED_PARAMETER") engine: PlayerEngine) {
 
     private fun player(): ExoPlayer = exo ?: ExoPlayer.Builder(
         AppDirs.context,
-        // Klarar inte Shields första avkodare en ström provas nästa, i stället för en svart bild.
-        DefaultRenderersFactory(AppDirs.context).setEnableDecoderFallback(true),
+        DefaultRenderersFactory(AppDirs.context)
+            // Klarar inte Shields första avkodare en ström provas nästa, i stället för en svart bild.
+            .setEnableDecoderFallback(true)
+            // Ljud som varken Shield eller tv:n klarar — DTS och Dolby TrueHD i många
+            // 4K-filmer — avkodas med FFmpeg. Det tv:n eller förstärkaren tar emot
+            // skickas fortfarande vidare orört, med Atmos och allt.
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON),
     )
         .setLooper(Looper.getMainLooper())
         .setLoadControl(
@@ -391,7 +398,8 @@ class VideoPlayer(@Suppress("UNUSED_PARAMETER") engine: PlayerEngine) {
                             8 -> "  ·  7.1"
                             else -> ""
                         }
-                        audio += Track(id, name + channels, language)
+                        val codec = codecName(format.sampleMimeType)?.let { "  ·  $it" }.orEmpty()
+                        audio += Track(id, name + channels + codec, language)
                         if (group.isTrackSelected(index)) audioTrack = id
                     }
                     C.TRACK_TYPE_TEXT -> {
@@ -523,6 +531,20 @@ class VideoPlayer(@Suppress("UNUSED_PARAMETER") engine: PlayerEngine) {
             return snapFrameRate((1_000_000.0 * used / sum).toFloat())
         }
     }
+}
+
+/** Ljudformatets namn, som det står på skivomslag. Null: inget särskilt att säga. */
+@OptIn(UnstableApi::class)
+private fun codecName(mime: String?): String? = when (mime) {
+    MimeTypes.AUDIO_AC3 -> "Dolby Digital"
+    MimeTypes.AUDIO_E_AC3 -> "Dolby Digital Plus"
+    MimeTypes.AUDIO_E_AC3_JOC -> "Dolby Atmos"
+    MimeTypes.AUDIO_TRUEHD -> "Dolby TrueHD"
+    MimeTypes.AUDIO_DTS -> "DTS"
+    MimeTypes.AUDIO_DTS_HD -> "DTS-HD"
+    MimeTypes.AUDIO_DTS_EXPRESS -> "DTS Express"
+    MimeTypes.AUDIO_DTS_X -> "DTS:X"
+    else -> null
 }
 
 /** Bildfrekvenserna film och tv använder. 24000/1001 är "23,976". */

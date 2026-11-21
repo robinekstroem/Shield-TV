@@ -35,14 +35,13 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import se.norrsken.tv.desktop.AppState
 import se.norrsken.tv.desktop.data.LiveChannel
 import se.norrsken.tv.desktop.data.Programme
+import se.norrsken.tv.desktop.ui.ChannelLogo
 import se.norrsken.tv.desktop.ui.LocalPalette
-import se.norrsken.tv.desktop.ui.RemoteImage
 import se.norrsken.tv.desktop.ui.tvEdges
 
 /**
@@ -161,14 +160,13 @@ private fun ChannelRow(
             maxLines = 1,
             modifier = Modifier.width(34.dp),
         )
-        RemoteImage(
+        ChannelLogo(
             channel.logo,
-            modifier = Modifier.size(width = 56.dp, height = 36.dp),
-            maxSide = 160,
-            contentScale = ContentScale.Fit,
-        ) {
-            Text(channel.name.take(2).uppercase(), style = MaterialTheme.typography.labelLarge, color = palette.textTertiary)
-        }
+            channel.name,
+            width = 60.dp,
+            height = 36.dp,
+            initialsStyle = MaterialTheme.typography.labelLarge,
+        )
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
                 channel.name,

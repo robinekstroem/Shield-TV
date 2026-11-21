@@ -93,7 +93,8 @@ fun Artwork(
 }
 
 private const val PLACEHOLDER_DELAY_MS = 900L
-private const val FADE_MS = 220
+/** Tv: kortare, så att omslagen känns snabba när man bläddrar. */
+private val FADE_MS = if (tvLayout) 140 else 220
 
 /**
  * Omslagen sparas i förväg, de senast tillagda filmerna först, medan inget

@@ -7,3 +7,7 @@
 -dontwarn org.checkerframework.**
 -dontwarn com.google.errorprone.annotations.**
 -dontwarn com.google.j2objc.annotations.**
+
+# FFmpeg-ljudet: Media3 hittar avkodaren via reflektion, och den anropas från
+# maskinkoden. Inget i den får tas bort eller döpas om.
+-keep class androidx.media3.decoder.ffmpeg.** { *; }

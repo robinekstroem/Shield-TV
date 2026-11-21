@@ -38,7 +38,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -385,20 +384,13 @@ private fun ChannelCell(channel: LiveChannel, onPlay: () -> Unit, focus: Modifie
     val palette = LocalPalette.current
     Pressable(onClick = onPlay, modifier = focus.width(LabelWidth).fillMaxHeight().padding(end = 6.dp)) { hovered ->
         Row(Modifier.fillMaxSize().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.size(width = 50.dp, height = 30.dp).clip(RoundedCornerShape(5.dp)).background(palette.surfaceRaised),
-                contentAlignment = Alignment.Center,
-            ) {
-                RemoteImage(
-                    url = channel.logo,
-                    modifier = Modifier.fillMaxSize().padding(3.dp),
-                    maxSide = 120,
-                    contentScale = ContentScale.Fit,
-                    placeholder = {
-                        Text(initials(channel.name), style = MaterialTheme.typography.labelSmall, color = palette.textTertiary)
-                    },
-                )
-            }
+            ChannelLogo(
+                channel.logo,
+                channel.name,
+                width = 52.dp,
+                height = 30.dp,
+                initialsStyle = MaterialTheme.typography.labelSmall,
+            )
             Spacer(Modifier.width(10.dp))
             Text(
                 channel.name,
