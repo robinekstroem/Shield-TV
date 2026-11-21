@@ -167,6 +167,8 @@ private class Tile {
     var col = 0
     /** Omslaget, eller -1 medan platsen väntar på ett. */
     var poster = -1
+    /** När platsen kom in i bild. */
+    var createdAt = 0L
     /** När omslaget börjar vändas fram. */
     var igniteAt = 0L
     /** Åt vilket håll det vänds fram: -1 till vänster om mitten, 1 till höger. */
@@ -709,6 +711,7 @@ private class IntroScene {
                 if (find(r, col) != null) continue
                 val tile = if (spare.isEmpty()) Tile() else spare.removeAt(spare.size - 1)
                 tile.reset(r, col)
+                tile.createdAt = t
                 project(tileLeft(tile, u) + tileW / 2f, r * pitchY)
                 val dx = projX - width / 2f
                 val dy = projY - height / 2f
@@ -735,7 +738,7 @@ private class IntroScene {
             val poster = take(shared = true)
             if (poster < 0) break
             tile.poster = poster
-            if (tile.igniteAt < t) tile.igniteAt = t
+            if (tile.createdAt < t && tile.igniteAt < t) tile.igniteAt = t
         }
     }
 
