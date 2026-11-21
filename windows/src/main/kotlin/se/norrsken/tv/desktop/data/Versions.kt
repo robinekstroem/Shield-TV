@@ -179,13 +179,15 @@ class VersionIndex private constructor(
 
             val movieEntries = library.movies.map { movie ->
                 val p = parse(movie.name)
-                val tmdbId = tmdb[TmdbStore.keyOf("movie", p.title, p.cleanerYear)]?.takeIf { it.found }?.id
+                // En särskild utgåva är sin egen titel, även om TMDB hittar samma film för den.
+                val tmdbId = if (p.part) null else tmdb[TmdbStore.keyOf("movie", p.title, p.cleanerYear)]?.takeIf { it.found }?.id
                 Entry(movie, movie.key, movie.sourceId, movie.group, p, p.year, tmdbId, movie.poster != null, movie.addedUtc)
             }
             val seriesEntries = library.series.map { series ->
                 val p = parse(series.name)
                 val seriesYear = series.year?.toIntOrNull()
-                val tmdbId = tmdb[TmdbStore.keyOf("tv", p.title, p.cleanerYear ?: seriesYear)]?.takeIf { it.found }?.id
+                // Leverantörer som delar upp serien per säsong: säsongerna blir inte versioner av varandra.
+                val tmdbId = if (p.part) null else tmdb[TmdbStore.keyOf("tv", p.title, p.cleanerYear ?: seriesYear)]?.takeIf { it.found }?.id
                 Entry(series, series.key, series.sourceId, series.group, p, seriesYear ?: p.year, tmdbId, series.cover != null, series.addedUtc)
             }
 
@@ -244,6 +246,7 @@ class VersionIndex private constructor(
                 cleanerYear = cleanerYear,
                 year = bracketYear(name) ?: cleanerYear,
                 tags = VersionTags.parse(name),
+                part = TitleCleaner.isPart(title),
             )
         }
 
@@ -332,6 +335,8 @@ class VersionIndex private constructor(
         val cleanerYear: Int?,
         val year: Int?,
         val tags: VersionTags.Tags,
+        /** En säsong eller en särskild utgåva: "Bron S02", "Avatar Extended Edition". */
+        val part: Boolean,
     )
 
     private class Entry<T>(

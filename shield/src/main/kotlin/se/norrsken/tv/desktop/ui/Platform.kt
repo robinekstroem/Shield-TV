@@ -42,6 +42,8 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import se.norrsken.tv.desktop.data.AppDirs
@@ -209,10 +211,24 @@ internal fun RemoteInputPanel(state: AppState) {
 @Composable
 internal fun DisplayOptions() {
     val palette = LocalPalette.current
+    // Vad som faktiskt ritas: fönstrets bildpunkter, och vad tv:n får.
+    val metrics = LocalContext.current.resources.displayMetrics
+    val mode = LocalView.current.display?.mode
+    val window = "${metrics.widthPixels} × ${metrics.heightPixels}"
+    val output = mode?.let { "${it.physicalWidth} × ${it.physicalHeight}" }
     Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("Upplösning för menyerna", style = MaterialTheme.typography.titleMedium, color = palette.textPrimary)
+        Text("Storlek på menyerna", style = MaterialTheme.typography.titleMedium, color = palette.textPrimary)
         Text(
-            "Högre upplösning får plats med mer på skärmen, som på en datorskärm. Texten följer med och går att läsa från soffan.",
+            "Ändrar hur stort allt är och hur mycket som får plats, inte skärpan.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = palette.textSecondary,
+        )
+        Text(
+            if (output != null && output != window) {
+                "Menyerna ritas i $window bildpunkter, som Android TV gör för alla appar, och skalas upp till tv:ns $output. Filmer och serier spelas i full upplösning."
+            } else {
+                "Menyerna ritas i $window bildpunkter, tv:ns fulla upplösning."
+            },
             style = MaterialTheme.typography.bodyMedium,
             color = palette.textSecondary,
         )

@@ -283,9 +283,11 @@ fun paletteFor(theme: AppTheme): Palette = when (theme) {
 }
 
 // Skrivbordsstorlekar: läsavstånd en halv meter, inte tre meter som på tv:n.
-// I glödtemat lyser rubrikerna svagt, som neon bakom glas.
+// I glödtemat lyser rubrikerna svagt, som neon bakom glas — men inte på tv:n:
+// där gör skenet texten suddig, och tunn text blir otydlig när tv:n skalar
+// upp bilden. Där är texten ett snäpp tyngre i stället.
 private fun typographyFor(palette: Palette): Typography {
-    val neon = if (palette.glow.alpha > 0f) {
+    val neon = if (palette.glow.alpha > 0f && !tvLayout) {
         Shadow(color = palette.glowOf(0.45f), offset = Offset.Zero, blurRadius = 14f)
     } else {
         null
@@ -295,14 +297,14 @@ private fun typographyFor(palette: Palette): Typography {
         headlineMedium = TextStyle(fontFamily = palette.headingFont, fontWeight = palette.headingWeight, fontStyle = palette.headingStyle, fontSize = 22.sp, lineHeight = 28.sp, letterSpacing = (-0.2).sp, shadow = neon),
         headlineSmall = TextStyle(fontFamily = palette.headingFont, fontWeight = palette.headingWeight, fontStyle = palette.headingStyle, fontSize = 19.sp, lineHeight = 25.sp, shadow = neon),
         titleLarge = TextStyle(fontFamily = palette.headingFont, fontWeight = palette.headingWeight, fontStyle = palette.headingStyle, fontSize = 17.sp, lineHeight = 23.sp, shadow = neon),
-        titleMedium = TextStyle(fontWeight = FontWeight.Medium, fontSize = 15.sp, lineHeight = 20.sp),
-        titleSmall = TextStyle(fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 19.sp),
-        bodyLarge = TextStyle(fontWeight = FontWeight.Normal, fontSize = 14.sp, lineHeight = 21.sp),
-        bodyMedium = TextStyle(fontWeight = FontWeight.Normal, fontSize = 13.sp, lineHeight = 19.sp),
-        bodySmall = TextStyle(fontWeight = FontWeight.Normal, fontSize = 12.sp, lineHeight = 17.sp),
-        labelLarge = TextStyle(fontWeight = FontWeight.Medium, fontSize = 13.sp, lineHeight = 18.sp),
-        labelMedium = TextStyle(fontWeight = FontWeight.Medium, fontSize = 12.sp, lineHeight = 16.sp, letterSpacing = 0.2.sp),
-        labelSmall = TextStyle(fontWeight = FontWeight.Medium, fontSize = 11.sp, lineHeight = 14.sp, letterSpacing = 0.4.sp),
+        titleMedium = TextStyle(fontWeight = if (tvLayout) FontWeight.SemiBold else FontWeight.Medium, fontSize = 15.sp, lineHeight = 20.sp),
+        titleSmall = TextStyle(fontWeight = if (tvLayout) FontWeight.SemiBold else FontWeight.Medium, fontSize = 14.sp, lineHeight = 19.sp),
+        bodyLarge = TextStyle(fontWeight = if (tvLayout) FontWeight.Medium else FontWeight.Normal, fontSize = 14.sp, lineHeight = 21.sp),
+        bodyMedium = TextStyle(fontWeight = if (tvLayout) FontWeight.Medium else FontWeight.Normal, fontSize = 13.sp, lineHeight = 19.sp),
+        bodySmall = TextStyle(fontWeight = if (tvLayout) FontWeight.Medium else FontWeight.Normal, fontSize = 12.sp, lineHeight = 17.sp),
+        labelLarge = TextStyle(fontWeight = if (tvLayout) FontWeight.SemiBold else FontWeight.Medium, fontSize = 13.sp, lineHeight = 18.sp),
+        labelMedium = TextStyle(fontWeight = if (tvLayout) FontWeight.SemiBold else FontWeight.Medium, fontSize = 12.sp, lineHeight = 16.sp, letterSpacing = 0.2.sp),
+        labelSmall = TextStyle(fontWeight = if (tvLayout) FontWeight.SemiBold else FontWeight.Medium, fontSize = 11.sp, lineHeight = 14.sp, letterSpacing = 0.4.sp),
     )
 }
 

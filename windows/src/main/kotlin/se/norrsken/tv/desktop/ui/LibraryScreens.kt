@@ -476,7 +476,7 @@ internal fun MovieDetail(state: AppState, movie: Movie) {
                         .background(palette.surfaceRaised),
                 ) {
                     Artwork(
-                        candidates = state.posterCandidates(movie) + listOfNotNull(info?.cover),
+                        candidates = state.largePosters(state.posterCandidates(movie)) + listOfNotNull(info?.cover),
                         modifier = Modifier.fillMaxSize(),
                         maxSide = 600,
                         placeholder = { PosterPlaceholder(state.titleOf(movie)) },
@@ -854,7 +854,7 @@ internal fun SeriesDetail(state: AppState, series: Series) {
                         .background(palette.surfaceRaised),
                 ) {
                     Artwork(
-                        candidates = state.posterCandidates(series),
+                        candidates = state.largePosters(state.posterCandidates(series)),
                         modifier = Modifier.fillMaxSize(),
                         maxSide = 480,
                         placeholder = { PosterPlaceholder(state.titleOf(series)) },

@@ -99,6 +99,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -280,7 +281,9 @@ fun Chip(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifie
     val shape = RoundedCornerShape(16.dp)
     Pressable(
         onClick = onClick,
-        modifier = modifier.border(1.dp, if (selected) palette.focus else palette.hairline, shape),
+        modifier = modifier
+            .then(if (selected) Modifier.background(palette.focus, shape) else Modifier)
+            .border(1.dp, if (selected) palette.focus else palette.hairline, shape),
         selected = selected,
         shape = shape,
     ) {
@@ -288,7 +291,8 @@ fun Chip(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifie
             text,
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
             style = MaterialTheme.typography.labelLarge,
-            color = if (selected) palette.textPrimary else palette.textSecondary,
+            fontWeight = if (selected) FontWeight.SemiBold else null,
+            color = if (selected) palette.onFocus else palette.textSecondary,
             maxLines = 1,
         )
     }
@@ -795,16 +799,35 @@ private fun TvGroupRow(
     Pressable(
         onClick = onClick,
         selected = selected,
+        glowing = false,
         modifier = Modifier
             .padding(top = if (gapAbove) 10.dp else 0.dp)
             .fillMaxWidth()
             .then(if (focus != null) Modifier.focusRequester(focus) else Modifier)
             .onFocusChanged { if (it.isFocused) onFocused() },
-    ) {
+    ) { active ->
+        // Markerad: raden fylls i temats färg, som knapparna, med texten i kontrast.
+        if (active) {
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .background(Brush.horizontalGradient(listOf(palette.focus, palette.focus.copy(alpha = 0.72f)))),
+            )
+        } else if (selected) {
+            // Kategorin man är i: ett streck i märkets färger.
+            Box(
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 4.dp)
+                    .size(width = 3.dp, height = 20.dp)
+                    .clip(CircleShape)
+                    .background(Brand.stripe),
+            )
+        }
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(start = if (indent) 30.dp else 14.dp, end = 14.dp, top = 10.dp, bottom = 10.dp)
+                .padding(start = if (indent) 30.dp else 14.dp, end = 12.dp, top = 10.dp, bottom = 10.dp)
                 .graphicsLayer { alpha = shown() },
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -812,18 +835,31 @@ private fun TvGroupRow(
                 name,
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodyLarge,
-                color = if (selected) palette.textPrimary else palette.textSecondary,
+                fontWeight = if (selected || active) FontWeight.SemiBold else FontWeight.Medium,
+                color = when {
+                    active -> palette.onFocus
+                    selected -> palette.textPrimary
+                    else -> palette.textSecondary
+                },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.width(8.dp))
-            Text(
-                count.grouped(),
-                style = MaterialTheme.typography.labelSmall,
-                color = palette.textTertiary,
-                maxLines = 1,
-                softWrap = false,
-            )
+            // Antalet i en liten bricka.
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (active) palette.onFocus.copy(alpha = 0.16f) else palette.surfaceRaised)
+                    .padding(horizontal = 7.dp, vertical = 2.dp),
+            ) {
+                Text(
+                    count.grouped(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (active) palette.onFocus else palette.textTertiary,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
         }
     }
 }

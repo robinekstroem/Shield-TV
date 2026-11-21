@@ -383,7 +383,7 @@ private fun HeroInfo(
             contentAlignment = Alignment.Center,
         ) {
             Artwork(
-                candidates = runCatching { posterOf(state, catalog, item) }.getOrNull().orEmpty(),
+                candidates = state.largePosters(runCatching { posterOf(state, catalog, item) }.getOrNull().orEmpty()),
                 modifier = Modifier.fillMaxSize().then(if (channel) Modifier.padding(24.dp) else Modifier),
                 maxSide = 600,
                 contentScale = if (channel) ContentScale.Fit else ContentScale.Crop,

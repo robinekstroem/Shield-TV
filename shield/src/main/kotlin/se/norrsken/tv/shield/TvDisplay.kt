@@ -7,10 +7,10 @@ import androidx.compose.runtime.setValue
 import se.norrsken.tv.desktop.data.AppDirs
 
 /**
- * Menyernas upplösning på tv:n: hur bred skärmen är i layoutens enheter.
- * Högre upplösning får plats med mer och gör varje sak mindre, precis som på
- * en datorskärm. Texten skalas för sig, så att den går att läsa från soffan
- * även vid 1920 × 1080.
+ * Hur stort allt är på tv:n: hur bred skärmen är i layoutens enheter. Bredare
+ * får plats med mer och gör varje sak mindre, som en datorskärm. Det ändrar
+ * inte skärpan — allt ritas i fönstrets fulla upplösning. Texten skalas för
+ * sig, så att den går att läsa från soffan även i det minsta läget.
  */
 enum class TvResolution(
     val widthDp: Int,
@@ -18,9 +18,9 @@ enum class TvResolution(
     /** Textens storlek i bildpunkter per sp, räknat på en 1080p-skärm. */
     val textPx: Float,
 ) {
-    SMALL(1280, "1280 × 720", 1.725f),
-    MEDIUM(1600, "1600 × 900", 1.5f),
-    LARGE(1920, "1920 × 1080", 1.3f),
+    SMALL(1280, "Stor", 1.725f),
+    MEDIUM(1600, "Mellan", 1.5f),
+    LARGE(1920, "Liten", 1.3f),
 }
 
 object TvDisplay {

@@ -1431,29 +1431,45 @@ class AppState {
     }
 
     /**
-     * Omslagen att prova, i ordning: den visade versionens, de andra
-     * versionernas, TMDB:s. Saknas eller fungerar inte ett, tas nästa.
+     * Omslagen att prova, i ordning: TMDB:s när träffen är säker, den
+     * visade versionens, de andra versionernas, och sist TMDB:s ändå.
+     * TMDB:s omslag är skarpa och lika för alla titlar; leverantörernas är
+     * ofta små, beskurna eller borta. Saknas eller fungerar inte ett, tas nästa.
      */
     fun posterCandidates(movie: Movie): List<String> {
         val list = ArrayList<String>(4)
+        val tmdb = tmdbFor(movie)?.takeIf { it.poster != null }
+        if (tmdb != null && tmdb.sure) list += tmdb.poster!!
         movie.poster?.let { list += it }
         for (version in versions.versionsOf(movie)) version.poster?.let { list += it }
-        tmdbFor(movie)?.poster?.let { list += it }
+        tmdb?.poster?.let { list += it }
         return list.distinct()
     }
 
     fun posterCandidates(series: Series): List<String> {
         val list = ArrayList<String>(4)
+        val tmdb = tmdbFor(series)?.takeIf { it.poster != null }
+        if (tmdb != null && tmdb.sure) list += tmdb.poster!!
         series.cover?.let { list += it }
         for (version in versions.versionsOf(series)) version.cover?.let { list += it }
-        tmdbFor(series)?.poster?.let { list += it }
+        tmdb?.poster?.let { list += it }
         return list.distinct()
     }
 
     /**
+     * För en stor yta — filmens egen sida, startsidans stora omslag: TMDB:s
+     * omslag i större storlek först, så att det inte förstoras och blir mjukt.
+     */
+    fun largePosters(candidates: List<String>): List<String> {
+        val large = candidates.firstOrNull()?.let { TmdbClient.largePoster(it) } ?: return candidates
+        return listOf(large) + candidates
+    }
+
+    /**
      * Omslagen som sparas i bakgrunden: ett per film och serie, de senast
-     * tillagda först, så att nya filmer får sina omslag först. Saknar en
-     * titel eget omslag tas TMDB:s. Högst [limit].
+     * tillagda först, så att nya filmer får sina omslag först. Samma omslag
+     * som visas: TMDB:s när träffen är säker, annars titelns eget, sist
+     * TMDB:s ändå. Högst [limit].
      *
      * Körs utanför UI-tråden, så TMDB slås upp direkt i en kopia av
      * faktan, inte via [tmdbFor] och dess cache.
@@ -1463,10 +1479,10 @@ class AppState {
         val lib = library
         val facts = tmdbFacts
         fun usable(url: String?): String? = url?.trim()?.takeIf { it.startsWith("http", ignoreCase = true) }
-        fun tmdbPoster(kind: String, name: String, fallbackYear: Int?): String? {
+        fun tmdbOf(kind: String, name: String, fallbackYear: Int?): TmdbFacts? {
             if (facts.isEmpty()) return null
             val (title, year) = TitleCleaner.searchTitle(name)
-            return facts[TmdbStore.keyOf(kind, title, year ?: fallbackYear)]?.takeIf { it.found }?.poster
+            return facts[TmdbStore.keyOf(kind, title, year ?: fallbackYear)]?.takeIf { it.found }
         }
         val movies = index.collapseMovies(lib.movies.sortedByDescending { it.addedUtc }, preferDefault = true)
         val series = index.collapseSeries(lib.series.sortedByDescending { it.addedUtc }, preferDefault = true)
@@ -1477,16 +1493,20 @@ class AppState {
         while (result.size < limit && (m < movies.size || s < series.size)) {
             if (m < movies.size) {
                 val movie = movies[m++]
-                val cover = usable(movie.poster)
+                val tmdb = tmdbOf("movie", movie.name, null)
+                val cover = usable(tmdb?.takeIf { it.sure }?.poster)
+                    ?: usable(movie.poster)
                     ?: index.versionsOf(movie).firstNotNullOfOrNull { usable(it.poster) }
-                    ?: usable(tmdbPoster("movie", movie.name, null))
+                    ?: usable(tmdb?.poster)
                 if (cover != null) result += cover
             }
             if (s < series.size && result.size < limit) {
                 val item = series[s++]
-                val cover = usable(item.cover)
+                val tmdb = tmdbOf("tv", item.name, item.year?.toIntOrNull())
+                val cover = usable(tmdb?.takeIf { it.sure }?.poster)
+                    ?: usable(item.cover)
                     ?: index.versionsOf(item).firstNotNullOfOrNull { usable(it.cover) }
-                    ?: usable(tmdbPoster("tv", item.name, item.year?.toIntOrNull()))
+                    ?: usable(tmdb?.poster)
                 if (cover != null) result += cover
             }
         }
@@ -2755,17 +2775,23 @@ class AppState {
                 return@launch
             }
             val known = tmdbFacts
-            val missing = wanted.filter { TmdbStore.keyOf(it.first, it.second, it.third) !in known }
-            var done = wanted.size - missing.size
+            // Nya titlar först. Sedan de som hittades med en äldre sökning: de kontrolleras en gång
+            // till, och ger den nya sökningen ingenting behålls det gamla svaret, så inget går förlorat.
+            val (missing, outdated) = withContext(Dispatchers.Default) {
+                val keyed = wanted.map { it to TmdbStore.keyOf(it.first, it.second, it.third) }
+                val unseen = keyed.filter { (_, key) -> key !in known }.map { it.first }
+                val older = keyed.filter { (_, key) -> known[key]?.let { f -> f.found && f.matcher < TmdbClient.MATCHER } == true }.map { it.first }
+                unseen to older
+            }
+            var done = wanted.size - missing.size - outdated.size
             tmdbProgress = done to wanted.size
             val fresh = HashMap<String, TmdbFacts>()
             var failures = 0
-            var batches = 0
             var stopped = false
             var lastPublish = System.currentTimeMillis()
             // Flera uppslag samtidigt. Kön, räknarna och resultaten hanteras på
             // UI-tråden, så inget behöver låsas; bara själva anropet går på nätet.
-            val queue = missing.iterator()
+            val queue = (missing + outdated).iterator()
             coroutineScope {
                 repeat(TMDB_WORKERS) {
                     launch {
@@ -2794,13 +2820,19 @@ class AppState {
                                 continue
                             }
                             failures = 0
-                            fresh[TmdbStore.keyOf(kind, title, year)] = facts
+                            val factsKey = TmdbStore.keyOf(kind, title, year)
+                            val before = known[factsKey]
+                            fresh[factsKey] = if (!facts.found && before != null && before.found) {
+                                before.copy(matcher = TmdbClient.MATCHER, sure = false)
+                            } else {
+                                facts
+                            }
                             done++
                             // Sällan och i stora klumpar, så att listorna inte räknas om medan man bläddrar.
                             if (fresh.size >= PUBLISH_BATCH || System.currentTimeMillis() - lastPublish >= PUBLISH_EVERY_MS) {
-                                batches++
                                 lastPublish = System.currentTimeMillis()
-                                publishTmdb(HashMap(fresh), save = batches % 3 == 0)
+                                // Sparas varje gång: det som hittats finns kvar även om appen stängs mitt i.
+                                publishTmdb(HashMap(fresh), save = true)
                                 fresh.clear()
                                 tmdbProgress = done to wanted.size
                             }
