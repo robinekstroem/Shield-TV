@@ -124,30 +124,26 @@ jobs:
           name: tv-windows
           path: dist/Tv.msi
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 1
 
-      # En enda release, "windows-senaste", som byts ut vid varje bygge.
-      # Markerad som förhandsversion: den blir aldrig "Latest", så APK:ns
-      # releaser och direktlänkar påverkas inte.
-      - name: Publicera Tv.msi
+      # En enda release, "windows-senaste", som byts ut vid varje bygge. Den
+      # läggs som utkast: utkast syns bara för den som äger projektet.
+      - name: Lägg Tv.msi som dolt utkast
         if: github.ref == 'refs/heads/main'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           version="1.0.${GITHUB_RUN_NUMBER}"
-          link="https://github.com/${GITHUB_REPOSITORY}/releases/download/windows-senaste/Tv.msi"
-          gh release delete windows-senaste --yes --cleanup-tag >/dev/null 2>&1 || true
+          for id in $(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq '.[] | select(.tag_name == "windows-senaste") | .id'); do
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${id}" >/dev/null
+          done
           gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/windows-senaste" >/dev/null 2>&1 || true
-          notes=$(printf 'Version %s, byggd från %s.\n\nLadda ner **Tv.msi** och dubbelklicka. Allt som behövs följer med, även Java och VLC.\n\nEn ny version installeras ovanpå den gamla. Källor och bibliotek ligger kvar.\n\nDirektlänk: %s\n' "$version" "${GITHUB_SHA::7}" "$link")
+          notes=$(printf 'Version %s, byggd från %s.\n\nLadda ner **Tv.msi** och dubbelklicka. Allt som behövs följer med, även Java och VLC.\n\nEn ny version installeras ovanpå den gamla. Källor och bibliotek ligger kvar.\n' "$version" "${GITHUB_SHA::7}")
           gh release create windows-senaste dist/Tv.msi \
+            --draft \
             --title "Tv för Windows ${version}" \
             --notes "$notes" \
-            --target "$GITHUB_SHA" \
-            --prerelease \
-            --latest=false
-          {
-            echo "## Tv för Windows ${version}"
-            echo
-            echo "Installationsfil: ${link}"
-          } >> "$GITHUB_STEP_SUMMARY"
+            --target "$GITHUB_SHA"
+          echo "## Tv för Windows ${version} (dolt utkast under Releases)" >> "$GITHUB_STEP_SUMMARY"

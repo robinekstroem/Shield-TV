@@ -1,7 +1,8 @@
 name: Build Shield
 
-# Shield-appen (Android TV). Bygger en APK och lägger den under Releases som
-# "Tv för Shield", med en fast direktlänk som Downloader på Shield kan hämta.
+# Shield-appen (Android TV). Bygger en APK och lägger den som ett dolt utkast
+# under Releases, "Tv för Shield". Utkast syns bara för den som äger
+# projektet, så ingen annan kan ladda ner appen därifrån.
 #
 # Körs när Shield-koden, Windows-koden (som Shield bygger på) eller koden som
 # delas med telefonappen ändras. Går också att starta för hand: Actions →
@@ -77,41 +78,40 @@ jobs:
           echo "Bygget misslyckades. Se sammanfattningen för körningen."
           exit 1
 
-      # Fast filnamn, så att direktlänken är densamma för varje ny version.
       - name: Döp om till Tv-Shield.apk
         run: |
           mkdir -p dist
           cp shield/build/outputs/apk/release/*.apk dist/Tv-Shield.apk
           ls -la dist
 
+      # Bara en reserv om utkastet nedan skulle fallera. Byggfiler kan hämtas
+      # av alla som är inloggade på GitHub, så den sparas bara ett dygn.
       - uses: actions/upload-artifact@v6
         with:
           name: tv-shield
           path: dist/Tv-Shield.apk
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 1
 
-      # En enda release, "shield-senaste", som byts ut vid varje bygge.
-      # Förhandsversion: den blir aldrig "Latest", så telefonappens releaser
-      # och direktlänkar påverkas inte.
-      - name: Publicera Tv-Shield.apk
+      # En enda release, "shield-senaste", som byts ut vid varje bygge. Den
+      # läggs som utkast: utkast syns bara för den som äger projektet, så
+      # ingen annan kan ladda ner appen därifrån.
+      - name: Lägg Tv-Shield.apk som dolt utkast
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           version="1.0.${GITHUB_RUN_NUMBER}"
-          link="https://github.com/${GITHUB_REPOSITORY}/releases/download/shield-senaste/Tv-Shield.apk"
-          gh release delete shield-senaste --yes --cleanup-tag >/dev/null 2>&1 || true
+          # Förra utkastet bort, och en gammal publicerad release med samma tagg.
+          for id in $(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq '.[] | select(.tag_name == "shield-senaste") | .id'); do
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${id}" >/dev/null
+          done
           gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/shield-senaste" >/dev/null 2>&1 || true
-          notes=$(printf 'Version %s, byggd från %s.\n\nPå Shield: öppna Downloader och skriv in direktlänken.\nEn ny version installeras ovanpå den gamla. Källor och bibliotek ligger kvar.\n\nDirektlänk: %s\n' "$version" "${GITHUB_SHA::7}" "$link")
+          notes=$(printf 'Version %s, byggd från %s.\nEn ny version installeras ovanpå den gamla. Källor och bibliotek ligger kvar.\n' "$version" "${GITHUB_SHA::7}")
           gh release create shield-senaste dist/Tv-Shield.apk \
+            --draft \
             --title "Tv för Shield ${version}" \
             --notes "$notes" \
-            --target "$GITHUB_SHA" \
-            --prerelease \
-            --latest=false
-          {
-            echo "## Tv för Shield ${version}"
-            echo
-            echo "Direktlänk för Downloader: ${link}"
-          } >> "$GITHUB_STEP_SUMMARY"
+            --target "$GITHUB_SHA"
+          echo "## Tv för Shield ${version} (dolt utkast under Releases)" >> "$GITHUB_STEP_SUMMARY"
