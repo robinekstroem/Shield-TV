@@ -50,14 +50,15 @@ import se.norrsken.tv.desktop.ui.TvTheme
  * - Play/paus: paus. I minispelaren: tillbaka till helskärm.
  * - ≡: ljud och undertext, och stänger panelen igen.
  *
- * Den lilla bilden nere i högra hörnet (knappen Minimera i spelaren): pil
- * höger eller ner förbi innehållets kant markerar den. Då förstorar OK den
- * och Tillbaka stänger den.
+ * Den lilla bilden nere i högra hörnet: Tillbaka i helskärm krymper bilden
+ * dit, och man är där man var. Play förstorar den igen. Pil höger eller ner
+ * förbi innehållets kant markerar den; då förstorar OK den och Tillbaka
+ * stänger den. I Fotboll kan en match som pågår visas där utan ljud.
  *
  * Tillbaka, ett steg i taget: listan eller panelen i spelaren, knapparna,
- * bilden stängs (den lilla bilden när den är markerad), kategorierna, film-,
- * serie- och matchsidan, och sist menyn. I menyn leder Tillbaka till
- * startsidan, och från startsidan stängs appen.
+ * bilden krymper till hörnet (den lilla bilden stängs när den är markerad),
+ * kategorierna, film-, serie- och matchsidan, och sist menyn. I menyn leder
+ * Tillbaka till startsidan; där stängs först den lilla bilden, sedan appen.
  */
 class MainActivity : ComponentActivity() {
     private lateinit var state: AppState
@@ -162,10 +163,10 @@ class MainActivity : ComponentActivity() {
                 playing != null && !state.miniPlayer && state.dismissPlayerPrompt() -> Unit
                 // Knapparna i spelaren: tillbaka till bilden först.
                 playing != null && !state.miniPlayer && state.leavePlayerControls() -> Unit
-                // Som på andra tv-appar: Tillbaka stänger bilden, och man är där man var.
-                // Den lilla bilden i hörnet finns kvar som knapp bland spelarens knappar.
+                // Tillbaka i helskärm: bilden glider ner i hörnet och spelar vidare, och
+                // markeringen är tillbaka där man var. Play förstorar den igen.
                 playing != null && !state.miniPlayer -> {
-                    state.closePlayer()
+                    state.minimizePlayer()
                     TvNav.restoreFocus()
                 }
                 // Den lilla bilden är markerad (som direkt efter att den krympt): stäng den.
@@ -184,6 +185,8 @@ class MainActivity : ComponentActivity() {
                         state.screen = Screen.HOME
                         TvNav.openMenu()
                     }
+                    // Den lilla bilden spelar: den stängs först, appen vid nästa tryck.
+                    playing != null && state.miniPlayer -> state.closePlayer()
                     else -> leaveApp()
                 }
                 state.selectedMatch != null -> state.closeMatch()

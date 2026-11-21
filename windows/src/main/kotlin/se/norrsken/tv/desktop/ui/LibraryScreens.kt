@@ -1,5 +1,7 @@
 package se.norrsken.tv.desktop.ui
 
+import se.norrsken.tv.desktop.data.PersonalKeys
+
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.BlendMode
@@ -69,6 +71,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -145,7 +150,9 @@ fun MoviesScreen(state: AppState) {
     // Sorteringen av tiotusentals filmer görs i bakgrunden; listan står kvar under tiden.
     val sort = state.movieSort
     val character = state.disneyCharacter
-    val computed = rememberInBackground(library, group, query, sort, state.tmdbFacts, state.versions, state.disney, character) {
+    // Fortsätt titta och Min lista följer historiken och listan; andra kategorier gör det inte.
+    val personal = if (PersonalKeys.isPersonal(group)) state.history to state.myList else null
+    val computed = rememberInBackground(library, group, query, sort, state.tmdbFacts, state.versions, state.disney, character, personal) {
         Computed(listOf(group, query, sort, character), state.filteredMovies())
     }
     // Tv: medan man bläddrar bland omslagen byts listan inte ut under en.
@@ -225,7 +232,7 @@ fun MoviesScreen(state: AppState) {
                 state.disneyCharacter = null
                 state.collectionPart = null
             },
-            pinned = collectionsPinned(state),
+            pinned = personalPinned(state, LibraryFilter.MOVIE) + collectionsPinned(state),
             onEnterContent = enterGrid,
         )
         val franchise = CollectionKeys.franchiseOf(group)
@@ -257,7 +264,7 @@ fun MoviesScreen(state: AppState) {
                 val title = when {
                     disneyShelf != null -> disneyShelf.title
                     disneyView -> "Disney"
-                    else -> group ?: "Alla filmer"
+                    else -> PersonalKeys.titleOf(group) ?: group ?: "Alla filmer"
                 }
                 val subtitle = if (disneyView) {
                     disneySubtitle(state, disneyShelf, movies, movies.size + disneySeries.size)
@@ -440,40 +447,32 @@ internal fun MovieDetail(state: AppState, movie: Movie) {
     TvFocusFallback { runCatching { playFocus.requestFocus() }.isSuccess }
 
     Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxWidth().height(460.dp)) {
-            KenBurns(running = state.nowPlaying == null || state.miniPlayer, modifier = Modifier.fillMaxSize()) {
-                Artwork(
-                    candidates = listOfNotNull(info?.backdrop, state.tmdbFor(movie)?.backdrop, info?.cover) + state.posterCandidates(movie),
-                    modifier = Modifier.fillMaxSize(),
-                    maxSide = 1600,
-                    contentScale = ContentScale.Crop,
-                    alignment = Alignment.TopCenter,
-                )
-            }
-            Box(
-                Modifier.fillMaxSize().background(
-                    Brush.verticalGradient(
-                        0f to palette.background.copy(alpha = 0.5f),
-                        0.65f to palette.background.copy(alpha = 0.88f),
-                        1f to palette.background,
-                    ),
-                ),
-            )
-        }
+        // Bilden över hela skärmen, i full storlek: TMDB:s först, den är skarpast.
+        DetailBackdrop(
+            candidates = listOfNotNull(
+                fullSize(state.tmdbFor(movie)?.backdrop),
+                fullSize(info?.backdrop),
+                info?.cover,
+            ) + state.posterCandidates(movie),
+            running = state.nowPlaying == null || state.miniPlayer,
+            modifier = Modifier.fillMaxSize(),
+        )
 
         Column(
             Modifier
                 .fillMaxSize()
                 .verticalScroll(scroll)
-                .padding(start = 36.dp, end = 36.dp, top = 88.dp, bottom = 36.dp),
+                .padding(start = 48.dp, end = 48.dp, top = 104.dp, bottom = 40.dp),
         ) {
             Row(verticalAlignment = Alignment.Top) {
                 Box(
                     Modifier
-                        .width(220.dp)
+                        .width(240.dp)
                         .aspectRatio(2f / 3f)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(palette.surfaceRaised),
+                        .shadow(22.dp, RoundedCornerShape(14.dp))
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(palette.surfaceRaised)
+                        .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(14.dp)),
                 ) {
                     Artwork(
                         candidates = state.largePosters(state.posterCandidates(movie)) + listOfNotNull(info?.cover),
@@ -482,27 +481,26 @@ internal fun MovieDetail(state: AppState, movie: Movie) {
                         placeholder = { PosterPlaceholder(state.titleOf(movie)) },
                     )
                 }
-                Spacer(Modifier.width(32.dp))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Spacer(Modifier.width(44.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     TitleLogo(
                         state = state,
                         kind = "movie",
                         tmdbId = state.tmdbIdOf(movie),
                         title = state.titleOf(movie),
-                        style = MaterialTheme.typography.displaySmall,
-                        maxHeight = 120.dp,
-                        maxWidth = 520.dp,
+                        style = detailTitleStyle(),
+                        maxHeight = 136.dp,
+                        maxWidth = 600.dp,
                         maxLines = 3,
                     )
-                    val facts = listOfNotNull(
-                        yearOf(info?.releaseDate),
-                        info?.genre?.takeIf { it.isNotBlank() },
-                        formatRuntime(info?.durationSeconds),
-                        formatRating(info?.rating ?: movie.rating),
+                    DetailFacts(
+                        parts = listOfNotNull(
+                            yearOf(info?.releaseDate),
+                            info?.genre?.takeIf { it.isNotBlank() },
+                            formatRuntime(info?.durationSeconds),
+                        ),
+                        rating = info?.rating ?: movie.rating,
                     )
-                    if (facts.isNotEmpty()) {
-                        Text(facts.joinToString("  ·  "), style = MaterialTheme.typography.bodyLarge, color = palette.textSecondary)
-                    }
                     // Samma film i flera versioner: välj här, Spela spelar den valda.
                     val all = state.versionsOf(movie)
                     if (all.size > 1) {
@@ -613,8 +611,8 @@ private fun MovieFacts(info: XtreamVodInfo?, swedishPlot: String?) {
             if (plot != null) {
                 Text(
                     plot,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = palette.textSecondary,
+                    style = detailPlotStyle(),
+                    color = palette.textPrimary.copy(alpha = 0.88f),
                     modifier = Modifier.widthIn(max = 780.dp),
                 )
             }
@@ -627,22 +625,116 @@ private fun MovieFacts(info: XtreamVodInfo?, swedishPlot: String?) {
 @Composable
 private fun Credit(label: String, value: String) {
     val palette = LocalPalette.current
-    Row(Modifier.widthIn(max = 780.dp)) {
+    Row(Modifier.widthIn(max = 780.dp), verticalAlignment = Alignment.Top) {
         Text(
-            label,
-            style = MaterialTheme.typography.bodyMedium,
+            label.uppercase(),
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp),
             color = palette.textTertiary,
-            modifier = Modifier.width(120.dp),
+            modifier = Modifier.width(140.dp).padding(top = 2.dp),
         )
         Text(
             value,
             style = MaterialTheme.typography.bodyMedium,
-            color = palette.textSecondary,
+            color = palette.textPrimary.copy(alpha = 0.8f),
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
         )
     }
 }
+
+/**
+ * Bakgrunden på film- och seriesidan: bilden i full storlek över hela
+ * bredden, skarp och ljus till höger, mörkare till vänster där texten står
+ * och nedåt mot det som kommer under, som på streamingtjänsterna.
+ */
+@Composable
+private fun DetailBackdrop(candidates: List<String>, running: Boolean, modifier: Modifier) {
+    val palette = LocalPalette.current
+    Box(modifier) {
+        KenBurns(running = running, modifier = Modifier.fillMaxSize()) {
+            Artwork(
+                candidates = candidates,
+                modifier = Modifier.fillMaxSize(),
+                maxSide = BACKDROP_SIDE,
+                contentScale = ContentScale.Crop,
+                alignment = Alignment.TopCenter,
+            )
+        }
+        // Mörkt där texten står, bilden fri till höger.
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.horizontalGradient(
+                    0f to palette.background.copy(alpha = 0.94f),
+                    0.34f to palette.background.copy(alpha = 0.76f),
+                    0.64f to palette.background.copy(alpha = 0.24f),
+                    1f to palette.background.copy(alpha = 0.04f),
+                ),
+            ),
+        )
+        // Upptill lite mörkare för Tillbaka, nedtill ut i sidans bakgrund.
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.verticalGradient(
+                    0f to Color.Black.copy(alpha = 0.38f),
+                    0.16f to Color.Transparent,
+                    0.55f to Color.Transparent,
+                    0.86f to palette.background.copy(alpha = 0.8f),
+                    1f to palette.background,
+                ),
+            ),
+        )
+    }
+}
+
+/** Titeln när loggan saknas: stor och fet, med en svag skugga mot bilden. */
+@Composable
+private fun detailTitleStyle(): TextStyle =
+    MaterialTheme.typography.displaySmall.copy(
+        fontWeight = FontWeight.Bold,
+        shadow = Shadow(Color.Black.copy(alpha = 0.45f), Offset(0f, 2f), 12f),
+    )
+
+/** Handlingen: luftig och lätt att läsa från soffan. */
+@Composable
+private fun detailPlotStyle(): TextStyle {
+    val base = MaterialTheme.typography.bodyLarge
+    return base.copy(lineHeight = base.fontSize * 1.55f)
+}
+
+/** Betyget med en guldstjärna, sedan år, genre och längd, med prickar emellan. */
+@Composable
+private fun DetailFacts(parts: List<String>, rating: Double?) {
+    val palette = LocalPalette.current
+    val score = rating?.takeIf { it > 0.0 }
+    if (score == null && parts.isEmpty()) return
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (score != null) {
+            Icon(Glyphs.Star, contentDescription = "Betyg", tint = STAR_GOLD, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(
+                String.format(swedishLocale, "%.1f", score),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = palette.textPrimary,
+                maxLines = 1,
+            )
+        }
+        parts.forEachIndexed { index, part ->
+            if (index > 0 || score != null) {
+                Box(Modifier.padding(horizontal = 12.dp).size(4.dp).clip(RoundedCornerShape(2.dp)).background(palette.textTertiary))
+            }
+            Text(
+                part,
+                style = MaterialTheme.typography.titleSmall,
+                color = palette.textPrimary.copy(alpha = 0.82f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+        }
+    }
+}
+
+private val STAR_GOLD = Color(0xFFF5C518)
 
 // --- Serier ----------------------------------------------------------------------
 
@@ -670,7 +762,8 @@ fun SeriesScreen(state: AppState) {
     val group = state.seriesGroup
     val query = state.seriesQuery
     val sort = state.seriesSort
-    val computed = rememberInBackground(library, group, query, sort, state.tmdbFacts, state.versions) {
+    val personal = if (PersonalKeys.isPersonal(group)) state.history to state.myList else null
+    val computed = rememberInBackground(library, group, query, sort, state.tmdbFacts, state.versions, personal) {
         Computed(listOf(group, query, sort), state.filteredSeries())
     }
     // Tv: medan man bläddrar bland omslagen byts listan inte ut under en.
@@ -707,6 +800,7 @@ fun SeriesScreen(state: AppState) {
             counts = library.seriesCounts,
             selected = group,
             onSelect = { state.seriesGroup = it },
+            pinned = personalPinned(state, LibraryFilter.SERIES),
             onEnterContent = { scope.launch { entry.enter { posterKeys(gridState) } } },
         )
         Box(Modifier.weight(1f).fillMaxHeight()) {
@@ -721,7 +815,7 @@ fun SeriesScreen(state: AppState) {
             Column(Modifier.fillMaxSize()) {
                 if (tvLayout) {
                     TvLibraryBar(
-                        title = group ?: "Alla serier",
+                        title = PersonalKeys.titleOf(group) ?: group ?: "Alla serier",
                         position = position ?: "${series.size.grouped()} serier",
                         sort = state.seriesSort,
                         series = true,
@@ -732,7 +826,7 @@ fun SeriesScreen(state: AppState) {
                     )
                 } else {
                     ScreenHeader(
-                        title = group ?: "Alla serier",
+                        title = PersonalKeys.titleOf(group) ?: group ?: "Alla serier",
                         subtitle = "${series.size.grouped()} serier",
                         query = query,
                         onQuery = { state.seriesQuery = it },
@@ -823,35 +917,26 @@ internal fun SeriesDetail(state: AppState, series: Series) {
     TvFocusFallback { runCatching { primaryFocus.requestFocus() }.isSuccess }
     Column(Modifier.fillMaxSize()) {
         // Huvudet: bakgrundsbild tonad mot svart, omslag och fakta.
-        Box(Modifier.fillMaxWidth().height(if (all.size > 1) 350.dp else 300.dp)) {
-            KenBurns(running = state.nowPlaying == null || state.miniPlayer, modifier = Modifier.fillMaxSize()) {
-                Artwork(
-                    candidates = listOfNotNull(series.backdrop, state.tmdbFor(series)?.backdrop) + state.posterCandidates(series),
-                    modifier = Modifier.fillMaxSize(),
-                    maxSide = 1600,
-                    contentScale = ContentScale.Crop,
-                    alignment = Alignment.TopCenter,
-                )
-            }
-            Box(
-                Modifier.fillMaxSize().background(
-                    Brush.verticalGradient(
-                        0f to palette.background.copy(alpha = 0.55f),
-                        0.6f to palette.background.copy(alpha = 0.85f),
-                        1f to palette.background,
-                    ),
-                ),
+        Box(Modifier.fillMaxWidth().height(if (all.size > 1) 400.dp else 350.dp)) {
+            // Bilden i full storlek, skarp och ljus till höger, mörkare där texten står.
+            DetailBackdrop(
+                candidates = listOfNotNull(fullSize(state.tmdbFor(series)?.backdrop), fullSize(series.backdrop)) +
+                    state.posterCandidates(series),
+                running = state.nowPlaying == null || state.miniPlayer,
+                modifier = Modifier.fillMaxSize(),
             )
             Row(
-                Modifier.fillMaxSize().padding(start = 28.dp, end = 28.dp, top = 20.dp, bottom = 16.dp),
+                Modifier.fillMaxSize().padding(start = 40.dp, end = 40.dp, top = 24.dp, bottom = 18.dp),
                 verticalAlignment = Alignment.Bottom,
             ) {
                 Box(
                     Modifier
-                        .width(150.dp)
+                        .width(168.dp)
                         .aspectRatio(2f / 3f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(palette.surfaceRaised),
+                        .shadow(18.dp, RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(palette.surfaceRaised)
+                        .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(12.dp)),
                 ) {
                     Artwork(
                         candidates = state.largePosters(state.posterCandidates(series)),
@@ -860,30 +945,30 @@ internal fun SeriesDetail(state: AppState, series: Series) {
                         placeholder = { PosterPlaceholder(state.titleOf(series)) },
                     )
                 }
-                Spacer(Modifier.width(24.dp))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Spacer(Modifier.width(32.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     TitleLogo(
                         state = state,
                         kind = "tv",
                         tmdbId = state.tmdbIdOf(series),
                         title = state.titleOf(series),
-                        style = MaterialTheme.typography.displaySmall,
-                        maxHeight = 104.dp,
-                        maxWidth = 480.dp,
+                        style = detailTitleStyle(),
+                        maxHeight = 112.dp,
+                        maxWidth = 540.dp,
                         maxLines = 2,
                     )
-                    val facts = listOfNotNull(series.year, series.genre?.takeIf { it.isNotBlank() }, formatRating(series.rating))
-                    if (facts.isNotEmpty()) {
-                        Text(facts.joinToString("  ·  "), style = MaterialTheme.typography.bodyMedium, color = palette.textSecondary)
-                    }
+                    DetailFacts(
+                        parts = listOfNotNull(series.year, series.genre?.takeIf { it.isNotBlank() }),
+                        rating = series.rating,
+                    )
                     // Handlingen på svenska från TMDB när den finns, annars leverantörens text.
                     val shownPlot = state.tmdbFor(series)?.overview?.takeIf { it.isNotBlank() }
                         ?: series.plot?.takeIf { it.isNotBlank() }
                     shownPlot?.let { plot ->
                         Text(
                             plot,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = palette.textSecondary,
+                            style = detailPlotStyle(),
+                            color = palette.textPrimary.copy(alpha = 0.88f),
                             maxLines = if (all.size > 1) 2 else 4,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.widthIn(max = 780.dp),
@@ -1128,11 +1213,12 @@ internal fun PosterCard(
                 }
             }
             if (showTitle) {
+                // Alla kort i en rad lika höga: två rader titel och en rad under, också när
+                // de är tomma. Ett högre grannkort räknas annars som "nedanför" av pil ner,
+                // och markeringen hoppar åt höger i stället för till raden under.
                 Spacer(Modifier.height(8.dp))
-                Text(title, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                if (meta != null) {
-                    Text(meta, style = MaterialTheme.typography.labelSmall, color = palette.textTertiary, maxLines = 1)
-                }
+                Text(title, style = MaterialTheme.typography.bodyMedium, maxLines = 2, minLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(meta.orEmpty(), style = MaterialTheme.typography.labelSmall, color = palette.textTertiary, maxLines = 1)
             }
         }
     }
@@ -1578,4 +1664,18 @@ private fun DisneyChooser(state: AppState, movie: Movie, onDone: () -> Unit) {
             },
         )
     }
+}
+
+/**
+ * Fortsätt titta och Min lista (filmer, serier) eller Favoriter och Senast
+ * sedda (kanaler) överst i kategorilistan, när de har något i sig. De var
+ * förut rader på startsidan.
+ */
+@Composable
+internal fun personalPinned(state: AppState, kind: Char): List<PinnedGroup> {
+    // Räknas i bakgrunden: första gången byggs uppslagen för hela biblioteket.
+    val groups = rememberInBackground(state.library, state.history, state.myList, state.versions, kind) {
+        runCatching { state.personalGroups(kind) }.getOrDefault(emptyList())
+    } ?: emptyList()
+    return remember(groups) { groups.map { (key, count) -> PinnedGroup(key, PersonalKeys.titleOf(key) ?: key, count) } }
 }

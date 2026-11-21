@@ -77,10 +77,11 @@ internal fun LivingBackdrop(
         if (current != null) {
             KenBurns(running = running, modifier = Modifier.fillMaxSize()) {
                 RemoteImage(
-                    url = current,
+                    // Hela skärmens bredd: TMDB:s bild i full storlek, avkodad till skärmen.
+                    // En bild på 1 280 bildpunkter förstoras annars och blir suddig.
+                    url = fullSize(current),
                     modifier = Modifier.fillMaxSize(),
-                    // TMDB:s bakgrunder är 1 280 bildpunkter breda: större gör bara minnet fullt.
-                    maxSide = 1280,
+                    maxSide = BACKDROP_SIDE,
                     contentScale = ContentScale.Crop,
                     alignment = alignment,
                 )
@@ -104,8 +105,9 @@ internal fun KenBurns(running: Boolean, modifier: Modifier, content: @Composable
             .clipToBounds()
             .graphicsLayer {
                 // Läses här och inte vid komponeringen: bara bilden ritas om, inget annat.
+                // Liten rörelse: bilden förstoras knappt, så att den förblir skarp.
                 val t = FastOutSlowInEasing.transform(progress.value)
-                val scale = 1.03f + 0.07f * t
+                val scale = 1.02f + 0.05f * t
                 scaleX = scale
                 scaleY = scale
                 translationX = -size.width * 0.025f * t
@@ -114,6 +116,24 @@ internal fun KenBurns(running: Boolean, modifier: Modifier, content: @Composable
     ) {
         content()
     }
+}
+
+/** Bakgrundsbilderna avkodas i skärmens bredd (1 920 bildpunkter på tv:n). */
+internal const val BACKDROP_SIDE = 1920
+
+/**
+ * TMDB:s bild i full storlek: "…/t/p/w1280/x.jpg" → "…/t/p/original/x.jpg".
+ * Den avkodas sedan ned till skärmens storlek, skarpt. Andra adresser som de är.
+ */
+internal fun fullSize(url: String?): String? {
+    if (url == null) return null
+    val marker = "image.tmdb.org/t/p/"
+    val at = url.indexOf(marker)
+    if (at < 0) return url
+    val start = at + marker.length
+    val slash = url.indexOf('/', start)
+    if (slash < 0) return url
+    return url.substring(0, start) + "original" + url.substring(slash)
 }
 
 // --- Titeln som logga -----------------------------------------------------------------

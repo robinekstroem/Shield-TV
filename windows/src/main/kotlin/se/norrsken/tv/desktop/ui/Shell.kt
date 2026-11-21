@@ -338,7 +338,8 @@ fun AppRoot(state: AppState) {
                 // klick går inte igenom till listan bakom.
                 Box(Modifier.fillMaxSize().background(Color.Black).pointerInput(Unit) { detectTapGestures { } })
             } else {
-                PlayerHost(state, collapse = { collapse.value })
+                // Fotbollens förhandsvisning börjar i hörnet, utan att först fylla skärmen.
+                PlayerHost(state, collapse = { if (state.footballPreview != null && state.miniPlayer) 1f else collapse.value })
             }
         }
         // Starten: tv:n slås på medan biblioteket laddas och startsidan ordnas

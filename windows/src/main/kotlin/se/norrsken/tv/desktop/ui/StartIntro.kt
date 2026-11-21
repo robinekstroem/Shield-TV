@@ -2,21 +2,22 @@ package se.norrsken.tv.desktop.ui
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -32,33 +33,38 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlin.math.PI
+import kotlin.math.pow
 import kotlin.math.sin
 
 /**
- * Starten: tv:n slås på. En ljus linje drar ut över den svarta skärmen och
- * öppnar sig som på en gammal bildrörs-tv, symbolen studsar fram med ett
- * ljussvep över sig, ringar går ut från den som en signal, och namnet glider
- * upp. Under tiden laddas biblioteket och startsidan ordnas; när den står
- * klar tonar allt bort och startsidan finns där bakom.
+ * Starten, som inledningen på en film. Svart duk inom biofält. Strålkastare
+ * tänds nedifrån och sveper långsamt över himlen medan stoft svävar i
+ * ljuset. Symbolen slår in mot kameran med ett blått, liggande linsljus
+ * genom bilden, ett ljussvep går över den, och "Tv" drar ihop sig ur två
+ * håll. När startsidan är klar öppnar sig biofälten, kameran åker genom
+ * symbolen och allt tonar bort mot startsidan bakom.
  *
  * Allt som rör sig läses i ritningen eller i lagren: inget mäts om och
  * inget sätts ihop på nytt medan det spelas, så att det går jämnt på Shield
- * också medan appen laddar som mest.
+ * också medan appen laddar som mest. Ingen oskärpa, inga extra lager utöver
+ * symbolens.
  *
  * [ready]: startsidan (eller det som visas i stället) är klar. Animationen
- * visas ändå en kort stund, så att den hinner spelas, och tonar bort efter
- * [MAX_SHOW_MS] även om inget blivit klart — då syns det som hänger.
+ * spelas ändå klart först, och tonar bort efter [MAX_SHOW_MS] även om inget
+ * blivit klart — då syns det som hänger.
  */
 @Composable
 internal fun StartIntro(ready: Boolean, onFinished: () -> Unit) {
@@ -66,20 +72,11 @@ internal fun StartIntro(ready: Boolean, onFinished: () -> Unit) {
     val accent = menuFill(palette)
     // Millisekunder sedan starten. Läses bara i ritningen och i lagren.
     val clock = remember { mutableLongStateOf(0L) }
-    val logo = remember { Animatable(0f) }
-    val words = remember { Animatable(0f) }
     val exit = remember { Animatable(0f) }
+    // Var symbolens mitt står på skärmen: linsljuset går genom den.
+    val logoY = remember { mutableFloatStateOf(-1f) }
     val finished = rememberUpdatedState(onFinished)
     LaunchedEffect(Unit) {
-        launch {
-            delay(LOGO_AT_MS)
-            // Studsar lite förbi sin storlek och tillbaka.
-            logo.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = 240f))
-        }
-        launch {
-            delay(WORDS_AT_MS)
-            words.animateTo(1f, tween(560, easing = FastOutSlowInEasing))
-        }
         val start = withFrameMillis { it }
         while (true) {
             withFrameMillis { clock.longValue = it - start }
@@ -102,182 +99,203 @@ internal fun StartIntro(ready: Boolean, onFinished: () -> Unit) {
         Modifier
             .fillMaxSize()
             .graphicsLayer {
-                // Hela bilden tonar bort mot startsidan bakom, utan ett extra lager.
-                alpha = 1f - exit.value
+                // Allt tonar bort mot startsidan bakom, utan ett extra lager.
+                alpha = (1f - exit.value * 1.15f).coerceIn(0f, 1f)
                 compositingStrategy = CompositingStrategy.ModulateAlpha
             }
-            .background(palette.background),
+            .background(INTRO_BLACK),
         contentAlignment = Alignment.Center,
     ) {
-        // Ett sken bakom symbolen som andas långsamt.
+        // Strålkastarna och stoftet i ljuset.
         Spacer(
             Modifier
                 .fillMaxSize()
-                .drawBehind { drawBreathingGlow(clock.longValue, logo.value, accent) },
+                .drawBehind {
+                    val t = clock.longValue
+                    drawSearchlights(t)
+                    drawDust(t)
+                },
         )
-        // Bildrörets svaga linjer och mörkare hörn. Står still: ritas en gång.
+        // Ett sken bakom symbolen som andas.
         Spacer(
             Modifier
                 .fillMaxSize()
-                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                .drawBehind { drawScanlines() },
+                .drawBehind { drawGlow(clock.longValue, logoY.floatValue, accent) },
         )
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(contentAlignment = Alignment.Center) {
-                // Signalringarna, större än sin plats: de får gå ut över skärmen.
-                Spacer(
-                    Modifier
-                        .requiredSize(640.dp)
-                        .drawBehind { drawRings(clock.longValue, accent) },
+            Icon(
+                Glyphs.AppSymbol,
+                contentDescription = null,
+                tint = accent,
+                modifier = Modifier
+                    .size(148.dp)
+                    .onGloballyPositioned { logoY.floatValue = it.boundsInRoot().center.y }
+                    .graphicsLayer {
+                        val t = clock.longValue
+                        val p = easeOutExpo(progress(t, LOGO_AT_MS, LOGO_MS))
+                        // Slår in mot kameran, andas sedan nästan omärkligt; vid slutet åker kameran igenom.
+                        val breath = 1f + 0.012f * sin(t / 1400f * 2f * PI.toFloat()) * p
+                        val zoom = (1.9f - 0.9f * p) * breath * (1f + 0.6f * exit.value * exit.value)
+                        scaleX = zoom
+                        scaleY = zoom
+                        alpha = (p * 1.6f).coerceIn(0f, 1f)
+                        // Eget lager, så att ljussvepet bara lägger sig på symbolen.
+                        compositingStrategy = CompositingStrategy.Offscreen
+                    }
+                    .drawWithContent {
+                        drawContent()
+                        drawSweep(clock.longValue)
+                    },
+            )
+            Spacer(Modifier.height(30.dp))
+            // "Tv": bokstäverna drar ihop sig från var sitt håll.
+            Row(
+                Modifier.graphicsLayer {
+                    val zoom = 1f + 0.25f * exit.value
+                    scaleX = zoom
+                    scaleY = zoom
+                },
+            ) {
+                val title = TextStyle(fontWeight = FontWeight.Black, fontSize = 72.sp, lineHeight = 76.sp)
+                Text(
+                    "T",
+                    style = title,
+                    color = palette.textPrimary,
+                    maxLines = 1,
+                    modifier = Modifier.graphicsLayer {
+                        val p = easeOutCubic(progress(clock.longValue, LETTERS_AT_MS, LETTERS_MS))
+                        translationX = -(1f - p) * LETTER_SPREAD.toPx()
+                        alpha = p
+                        compositingStrategy = CompositingStrategy.ModulateAlpha
+                    },
                 )
-                Icon(
-                    Glyphs.AppSymbol,
-                    contentDescription = null,
-                    tint = accent,
+                Text(
+                    "v",
+                    style = title,
+                    color = palette.textPrimary,
+                    maxLines = 1,
                     modifier = Modifier
-                        .size(136.dp)
+                        .offset(x = (-3).dp)
                         .graphicsLayer {
-                            val p = logo.value
-                            val zoom = (0.3f + 0.7f * p) * (1f + 0.16f * exit.value)
-                            scaleX = zoom
-                            scaleY = zoom
-                            alpha = (p * 1.8f).coerceIn(0f, 1f)
-                            // Eget lager, så att ljussvepet bara lägger sig på symbolen.
-                            compositingStrategy = CompositingStrategy.Offscreen
-                        }
-                        .drawWithContent {
-                            drawContent()
-                            drawSweep(clock.longValue)
+                            val p = easeOutCubic(progress(clock.longValue, LETTERS_AT_MS, LETTERS_MS))
+                            translationX = (1f - p) * LETTER_SPREAD.toPx()
+                            alpha = p
+                            compositingStrategy = CompositingStrategy.ModulateAlpha
                         },
                 )
             }
-            Spacer(Modifier.height(26.dp))
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
+            Text(
+                "FÖR ${platformName.uppercase()}",
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 7.sp),
+                color = palette.textTertiary,
+                maxLines = 1,
                 modifier = Modifier.graphicsLayer {
-                    val p = words.value
+                    val p = progress(clock.longValue, SUBTITLE_AT_MS, SUBTITLE_MS)
                     alpha = p
-                    translationY = (1f - p) * 28.dp.toPx()
+                    translationY = (1f - easeOutCubic(p)) * 10.dp.toPx()
                     compositingStrategy = CompositingStrategy.ModulateAlpha
                 },
-            ) {
-                Text(
-                    "Tv",
-                    style = TextStyle(
-                        fontWeight = FontWeight.Black,
-                        fontSize = 66.sp,
-                        lineHeight = 70.sp,
-                        letterSpacing = (-1.5).sp,
-                    ),
-                    color = palette.textPrimary,
-                    maxLines = 1,
-                )
-                Text(
-                    "FÖR ${platformName.uppercase()}",
-                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 5.sp),
-                    color = palette.textTertiary,
-                    maxLines = 1,
-                )
-            }
-            // Tar laddningen en stund: ett ljus som löper längs en tunn linje.
-            Spacer(Modifier.height(34.dp))
-            Spacer(
-                Modifier
-                    .size(width = 190.dp, height = 3.dp)
-                    .drawBehind { drawComet(clock.longValue, accent) },
             )
         }
-        // Tv:n slås på, överst: linjen och blixten när bilden öppnar sig.
+        // Linsljuset: ett blått, liggande streck genom symbolen.
         Spacer(
             Modifier
                 .fillMaxSize()
-                .drawBehind { drawPowerOn(clock.longValue) },
+                .drawBehind { drawFlare(clock.longValue, exit.value, logoY.floatValue) },
+        )
+        // Biofälten, mörka hörn, och laddningen i det nedre fältet om starten drar ut på tiden.
+        Spacer(
+            Modifier
+                .fillMaxSize()
+                .drawBehind {
+                    drawVignette()
+                    drawLetterbox(exit.value)
+                    drawLoader(clock.longValue, accent, exit.value)
+                },
         )
     }
 }
 
-/** Linjen som drar ut från mitten och öppnar sig uppåt och nedåt, som när ett bildrör tänds. */
-private fun DrawScope.drawPowerOn(t: Long) {
-    if (t >= POWER_END_MS) return
-    val grow = easeOut((t / POWER_LINE_MS.toFloat()).coerceIn(0f, 1f))
-    val open = easeInOut(((t - POWER_OPEN_AT_MS) / POWER_OPEN_MS.toFloat()).coerceIn(0f, 1f))
-    val minHeight = 2.dp.toPx()
-    val width = size.width * grow
-    val height = minHeight + (size.height - minHeight) * open
-    val fade = (1f - open) * (1f - open)
-    val left = (size.width - width) / 2
-    val top = (size.height - height) / 2
-    val halo = 46.dp.toPx()
-    // Ljuset kring linjen.
-    drawRect(
-        Brush.verticalGradient(
-            listOf(Color.Transparent, POWER_LIGHT.copy(alpha = 0.40f * fade), Color.Transparent),
-            startY = top - halo,
-            endY = top + height + halo,
-        ),
-        topLeft = Offset(left, top - halo),
-        size = Size(width, height + halo * 2),
-    )
-    drawRect(POWER_LIGHT.copy(alpha = 0.62f * fade), topLeft = Offset(left, top), size = Size(width, height))
-    // Linjens kärna: vit och skarp tills bilden öppnat sig.
-    if (open < 0.5f) {
-        drawRect(
-            Color.White.copy(alpha = 1f - open * 2f),
-            topLeft = Offset(left, size.height / 2 - minHeight / 2),
-            size = Size(width, minHeight),
-        )
+// --- Det som ritas -------------------------------------------------------------------
+
+/** Strålkastare nedanför bilden som sveper fram och tillbaka, var och en i sin takt. */
+private fun DrawScope.drawSearchlights(t: Long) {
+    val shown = easeOutCubic(progress(t, LIGHTS_AT_MS, LIGHTS_MS))
+    if (shown <= 0f) return
+    val w = size.width
+    val h = size.height
+    val length = h * 1.5f
+    val half = length * 0.075f
+    val seconds = t / 1000f
+    for (beam in 0 until BEAMS) {
+        val pivot = Offset(w * (0.14f + 0.24f * beam), h + 30.dp.toPx())
+        val period = 6.2f + beam * 1.3f
+        val sway = sin((seconds / period + beam * 0.27f) * 2f * PI.toFloat())
+        // Ytterst lutar utåt, innerst nästan rakt upp.
+        val lean = (beam - (BEAMS - 1) / 2f) * 9f
+        val angle = lean + sway * 15f
+        val path = Path().apply {
+            moveTo(pivot.x, pivot.y)
+            lineTo(pivot.x - half, pivot.y - length)
+            lineTo(pivot.x + half, pivot.y - length)
+            close()
+        }
+        rotate(angle, pivot) {
+            drawPath(
+                path,
+                Brush.verticalGradient(
+                    listOf(Color.Transparent, BEAM.copy(alpha = 0.07f * shown), BEAM.copy(alpha = 0.22f * shown)),
+                    startY = pivot.y - length,
+                    endY = pivot.y,
+                ),
+            )
+        }
     }
 }
 
-/** Ringar som går ut från symbolen, en i taget, och tonar bort: en signal som sänds. */
-private fun DrawScope.drawRings(t: Long, color: Color) {
-    if (t < RINGS_AT_MS) return
-    val inner = 86.dp.toPx()
-    val outer = size.minDimension / 2
-    for (ring in 0 until RINGS) {
-        val local = t - RINGS_AT_MS - ring * RING_GAP_MS
-        if (local < 0) continue
-        val phase = (local % RING_PERIOD_MS) / RING_PERIOD_MS.toFloat()
-        val eased = easeOut(phase)
-        val radius = inner + (outer - inner) * eased
-        val strength = (1f - phase) * (1f - phase)
-        drawCircle(
-            color.copy(alpha = 0.55f * strength),
-            radius = radius,
-            center = center,
-            style = Stroke(width = (1f + 2.5f * (1f - phase)).dp.toPx()),
-        )
+/** Stoft som svävar uppåt i ljuset och glimtar. */
+private fun DrawScope.drawDust(t: Long) {
+    val shown = progress(t, DUST_AT_MS, 1200)
+    if (shown <= 0f) return
+    val w = size.width
+    val h = size.height
+    val seconds = t / 1000f
+    val unit = 1.dp.toPx()
+    for (i in 0 until DUST) {
+        val speed = (6f + 18f * hash(i, 1)) * unit
+        val y = h - ((seconds * speed + hash(i, 2) * h) % (h + 40f * unit)) + 20f * unit
+        val x = w * hash(i, 3) + sin(seconds * (0.4f + hash(i, 4)) + i) * 14f * unit
+        val twinkle = 0.55f + 0.45f * sin(seconds * (1.2f + 2f * hash(i, 5)) + i * 1.7f)
+        val alpha = (0.06f + 0.30f * hash(i, 6)) * twinkle * shown
+        drawCircle(DUST_COLOR.copy(alpha = alpha), radius = (0.7f + 1.6f * hash(i, 7)) * unit, center = Offset(x, y))
     }
 }
 
 /** Skenet bakom symbolen: tänds med den och andas sedan långsamt. */
-private fun DrawScope.drawBreathingGlow(t: Long, logo: Float, color: Color) {
-    val shown = logo.coerceIn(0f, 1f)
+private fun DrawScope.drawGlow(t: Long, logoY: Float, color: Color) {
+    val shown = progress(t, LOGO_AT_MS, LOGO_MS)
     if (shown <= 0f) return
-    val breath = 0.78f + 0.22f * sin(t / GLOW_PERIOD_MS.toFloat() * 2f * PI.toFloat())
+    val breath = 0.8f + 0.2f * sin(t / 2600f * 2f * PI.toFloat())
+    val center = Offset(size.width / 2, if (logoY > 0f) logoY else size.height * 0.42f)
     drawRect(
         Brush.radialGradient(
-            listOf(
-                color.copy(alpha = 0.26f * shown * breath),
-                Brand.violet.copy(alpha = 0.08f * shown * breath),
-                Color.Transparent,
-            ),
-            center = Offset(size.width / 2, size.height * 0.45f),
-            radius = size.minDimension * 0.62f,
+            listOf(color.copy(alpha = 0.30f * shown * breath), Brand.violet.copy(alpha = 0.07f * shown * breath), Color.Transparent),
+            center = center,
+            radius = size.minDimension * 0.55f,
         ),
     )
 }
 
-/** Ett ljus som sveper snett över symbolen, en gång, strax efter att den kommit fram. */
+/** Ljussvepet över symbolen, en gång, strax efter att den slagit in. */
 private fun DrawScope.drawSweep(t: Long) {
     val local = t - SWEEP_AT_MS
     if (local < 0 || local > SWEEP_MS) return
     val f = local / SWEEP_MS.toFloat()
     val band = size.width * 0.55f
-    val x = -band + (size.width + band * 2) * f
+    val x = -band + (size.width + band * 2) * easeInOutCubic(f)
     drawRect(
         Brush.linearGradient(
-            listOf(Color.Transparent, Color.White.copy(alpha = 0.85f), Color.Transparent),
+            listOf(Color.Transparent, Color.White.copy(alpha = 0.9f), Color.Transparent),
             start = Offset(x - band / 2, 0f),
             end = Offset(x + band / 2, size.height),
         ),
@@ -285,72 +303,148 @@ private fun DrawScope.drawSweep(t: Long) {
     )
 }
 
-/** Laddningen: ett ljus som löper längs en tunn linje. Syns först om starten drar ut på tiden. */
-private fun DrawScope.drawComet(t: Long, color: Color) {
-    if (t < COMET_AT_MS) return
-    val fade = ((t - COMET_AT_MS) / 500f).coerceIn(0f, 1f)
-    drawRoundRect(Color.White.copy(alpha = 0.10f * fade), cornerRadius = CornerRadius(size.height / 2))
-    val phase = ((t - COMET_AT_MS) % COMET_PERIOD_MS) / COMET_PERIOD_MS.toFloat()
-    val length = size.width * 0.38f
-    val x = -length + (size.width + length) * easeInOut(phase)
-    clipRect {
+/**
+ * Det liggande linsljuset genom symbolen: blixtrar till när den slår in, och
+ * en gång till när kameran åker igenom vid slutet. Ett skarpt vitt streck
+ * med ett blått sken omkring, som tonar ut mot kanterna.
+ */
+private fun DrawScope.drawFlare(t: Long, exit: Float, logoY: Float) {
+    val x = progress(t, FLARE_AT_MS, FLARE_MS)
+    val reveal = when {
+        x <= 0f || x >= 1f -> 0f
+        x < 0.12f -> x / 0.12f
+        else -> ((1f - x) / 0.88f).pow(1.6f)
+    }
+    val strength = maxOf(reveal, sin(exit * PI.toFloat()) * 0.8f)
+    if (strength <= 0.01f) return
+    val y = if (logoY > 0f) logoY else size.height * 0.42f
+    val w = size.width
+    val halo = 40.dp.toPx()
+    // Skenet: brett och blått, tonar ut mot sidorna och uppåt och nedåt.
+    drawRect(
+        Brush.verticalGradient(
+            listOf(Color.Transparent, FLARE_BLUE.copy(alpha = 0.32f * strength), Color.Transparent),
+            startY = y - halo,
+            endY = y + halo,
+        ),
+        topLeft = Offset(0f, y - halo),
+        size = Size(w, halo * 2),
+    )
+    // Strecket: vitt i mitten, blått ut mot kanterna.
+    val core = 2.dp.toPx()
+    drawRect(
+        Brush.horizontalGradient(
+            0f to Color.Transparent,
+            0.25f to FLARE_BLUE.copy(alpha = 0.5f * strength),
+            0.5f to Color.White.copy(alpha = strength),
+            0.75f to FLARE_BLUE.copy(alpha = 0.5f * strength),
+            1f to Color.Transparent,
+        ),
+        topLeft = Offset(0f, y - core / 2),
+        size = Size(w, core),
+    )
+}
+
+/** Mörkare hörn, som i en biosalong. */
+private fun DrawScope.drawVignette() {
+    drawRect(
+        Brush.radialGradient(
+            0f to Color.Transparent,
+            0.55f to Color.Transparent,
+            1f to Color.Black.copy(alpha = 0.65f),
+            center = center,
+            radius = size.maxDimension * 0.7f,
+        ),
+    )
+}
+
+/** Biofälten upptill och nedtill (bilden i 2,39:1); de öppnar sig när det är slut. */
+private fun DrawScope.drawLetterbox(exit: Float) {
+    val bar = ((size.height - size.width / 2.39f) / 2f).coerceAtLeast(0f) * (1f - easeInCubic(exit))
+    if (bar <= 0.5f) return
+    drawRect(INTRO_BLACK, topLeft = Offset.Zero, size = Size(size.width, bar))
+    drawRect(INTRO_BLACK, topLeft = Offset(0f, size.height - bar), size = Size(size.width, bar))
+}
+
+/** Laddningen, om starten drar ut på tiden: ett ljus som löper längs en tunn linje i det nedre fältet. */
+private fun DrawScope.drawLoader(t: Long, color: Color, exit: Float) {
+    if (t < LOADER_AT_MS) return
+    val fade = progress(t, LOADER_AT_MS, 600) * (1f - exit)
+    if (fade <= 0f) return
+    val width = 200.dp.toPx()
+    val height = 2.dp.toPx()
+    val bar = ((size.height - size.width / 2.39f) / 2f).coerceAtLeast(48.dp.toPx())
+    val left = (size.width - width) / 2
+    val top = size.height - bar / 2 - height / 2
+    drawRoundRect(
+        Color.White.copy(alpha = 0.10f * fade),
+        topLeft = Offset(left, top),
+        size = Size(width, height),
+        cornerRadius = CornerRadius(height / 2),
+    )
+    val phase = ((t - LOADER_AT_MS) % LOADER_PERIOD_MS) / LOADER_PERIOD_MS.toFloat()
+    val length = width * 0.36f
+    val x = left - length + (width + length) * easeInOutCubic(phase)
+    clipRect(left, top, left + width, top + height) {
         drawRect(
             Brush.horizontalGradient(
                 listOf(Color.Transparent, color.copy(alpha = fade), Color.White.copy(alpha = fade)),
                 startX = x,
                 endX = x + length,
             ),
-            topLeft = Offset(x, 0f),
-            size = Size(length, size.height),
+            topLeft = Offset(x, top),
+            size = Size(length, height),
         )
     }
 }
 
-/** Bildrörets linjer, mycket svaga, och mörkare hörn. */
-private fun DrawScope.drawScanlines() {
-    val gap = 4.dp.toPx()
-    val line = Color.White.copy(alpha = 0.022f)
-    var y = 0f
-    while (y < size.height) {
-        drawRect(line, topLeft = Offset(0f, y), size = Size(size.width, 1f))
-        y += gap
-    }
-    drawRect(
-        Brush.radialGradient(
-            0f to Color.Transparent,
-            0.55f to Color.Transparent,
-            1f to Color.Black.copy(alpha = 0.55f),
-            center = center,
-            radius = size.maxDimension * 0.72f,
-        ),
-    )
+// --- Tid och kurvor ------------------------------------------------------------------
+
+/** 0–1 för hur långt något som börjar vid [at] och tar [duration] ms kommit vid [t]. */
+private fun progress(t: Long, at: Long, duration: Int): Float = ((t - at) / duration.toFloat()).coerceIn(0f, 1f)
+
+private fun easeOutCubic(x: Float): Float = 1f - (1f - x).pow(3)
+
+private fun easeInCubic(x: Float): Float = x * x * x
+
+private fun easeInOutCubic(x: Float): Float = if (x < 0.5f) 4f * x * x * x else 1f - (-2f * x + 2f).pow(3) / 2f
+
+private fun easeOutExpo(x: Float): Float = if (x >= 1f) 1f else 1f - 2f.pow(-10f * x)
+
+/** Ett fast slumptal 0–1 för stoftkorn [i], egenskap [k]: samma varje bild, utan att något skapas. */
+private fun hash(i: Int, k: Int): Float {
+    var x = i * 374_761_393 + k * 668_265_263
+    x = (x xor (x ushr 13)) * 1_274_126_177
+    x = x xor (x ushr 16)
+    return (x and 0xFFFFFF) / 16_777_215f
 }
 
-private fun easeOut(x: Float): Float = 1f - (1f - x) * (1f - x) * (1f - x)
+private val INTRO_BLACK = Color(0xFF020306)
+private val BEAM = Color(0xFFCFE4FF)
+private val DUST_COLOR = Color(0xFFE6F0FF)
+private val FLARE_BLUE = Color(0xFF5EA8FF)
+private val LETTER_SPREAD = 64.dp
 
-private fun easeInOut(x: Float): Float = if (x < 0.5f) 4f * x * x * x else 1f - (-2f * x + 2f).let { it * it * it } / 2f
+private const val BEAMS = 4
+private const val DUST = 64
+private const val DUST_AT_MS = 150L
+private const val LIGHTS_AT_MS = 180L
+private const val LIGHTS_MS = 900
+private const val LOGO_AT_MS = 520L
+private const val LOGO_MS = 1000
+private const val FLARE_AT_MS = 560L
+private const val FLARE_MS = 1300
+private const val LETTERS_AT_MS = 1000L
+private const val LETTERS_MS = 900
+private const val SUBTITLE_AT_MS = 1600L
+private const val SUBTITLE_MS = 600
+private const val SWEEP_AT_MS = 1550L
+private const val SWEEP_MS = 700
+private const val LOADER_AT_MS = 2900L
+private const val LOADER_PERIOD_MS = 1300L
 
-private val POWER_LIGHT = Color(0xFFD6ECFF)
-
-/** Linjen drar ut, och bilden öppnar sig strax innan den nått kanterna. */
-private const val POWER_LINE_MS = 260
-private const val POWER_OPEN_AT_MS = 200L
-private const val POWER_OPEN_MS = 320
-private const val POWER_END_MS = 540L
-private const val LOGO_AT_MS = 360L
-private const val WORDS_AT_MS = 640L
-private const val RINGS_AT_MS = 620L
-private const val RINGS = 3
-private const val RING_PERIOD_MS = 1800L
-private const val RING_GAP_MS = 600L
-private const val SWEEP_AT_MS = 980L
-private const val SWEEP_MS = 640L
-private const val GLOW_PERIOD_MS = 2600L
-private const val COMET_AT_MS = 1500L
-private const val COMET_PERIOD_MS = 1300L
-
-/** Så länge animationen visas minst: tills symbolen och namnet hunnit fram. */
-private const val MIN_SHOW_MS = 1500L
-private const val EXIT_MS = 420
+/** Så länge animationen visas minst: tills symbolen, namnet och ljussvepet hunnit fram. */
+private const val MIN_SHOW_MS = 2_350L
+private const val EXIT_MS = 560
 /** Längre än så väntar den inte, även om inget blivit klart. */
 private const val MAX_SHOW_MS = 20_000L

@@ -751,7 +751,7 @@ fun PlayerHost(state: AppState, collapse: () -> Float) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         // Liten: överst i sidofältet, i facket det håller fritt. Tv: nere i
         // högra hörnet, ovanpå det man bläddrar i — menyn är gömd där.
-        val shape = RoundedCornerShape(lerp(0.dp, MiniDock.radius, progress))
+        val shape = RoundedCornerShape(lerp(0.dp, if (tvLayout) TV_PIP_RADIUS else MiniDock.radius, progress))
         val miniWidth = if (tvLayout) TV_PIP_WIDTH else MiniDock.videoWidth
         val miniHeight = if (tvLayout) TV_PIP_HEIGHT else MiniDock.videoHeight
         val miniX = if (tvLayout) maxWidth - TV_PIP_WIDTH - TV_PIP_MARGIN else MiniDock.inset
@@ -767,9 +767,16 @@ fun PlayerHost(state: AppState, collapse: () -> Float) {
                     height = lerp(maxHeight, miniHeight, progress),
                 )
                 .glow(palette.glowOf((if (focused) 1f else 0.55f) * progress), shape, 22.dp)
-                .shadow(lerp(0.dp, 14.dp, progress), shape)
+                .shadow(lerp(0.dp, if (tvLayout) 22.dp else 14.dp, progress), shape)
                 .clip(shape)
-                .then(if (focused && progress > 0.5f) Modifier.border(3.dp, palette.focus, shape) else Modifier)
+                .then(
+                    when {
+                        focused && progress > 0.5f -> Modifier.border(3.dp, if (tvLayout) menuFill(palette) else palette.focus, shape)
+                        // Tv: en tunn ljus kant runt den lilla bilden, som en ram.
+                        tvLayout && progress > 0.5f -> Modifier.border(1.5.dp, Color.White.copy(alpha = 0.22f * progress), shape)
+                        else -> Modifier
+                    },
+                )
                 .focusRequester(requester)
                 .onKeyEvent { event ->
                     val ok = event.key == Key.Enter || event.key == Key.NumPadEnter || event.key == Key.DirectionCenter
@@ -790,9 +797,10 @@ fun PlayerHost(state: AppState, collapse: () -> Float) {
 }
 
 /** Tv: minispelaren som en bild i hörnet, i 16:9. */
-private val TV_PIP_WIDTH = 400.dp
-private val TV_PIP_HEIGHT = 225.dp
-private val TV_PIP_MARGIN = 36.dp
+private val TV_PIP_WIDTH = 432.dp
+private val TV_PIP_HEIGHT = 243.dp
+private val TV_PIP_MARGIN = 40.dp
+private val TV_PIP_RADIUS = 14.dp
 
 /** Filmens tid, eller hur långt programmet som sänds just nu på kanalen kommit. */
 private fun miniProgress(state: AppState, playing: NowPlaying, status: VideoPlayer.Status, now: Long): Float? = when {
@@ -821,6 +829,10 @@ private fun DockedOverlay(
     now: Long,
     modifier: Modifier,
 ) {
+    if (tvLayout) {
+        TvMiniOverlay(state, playing, status, focused = visible, now = now, modifier = modifier)
+        return
+    }
     val progress = miniProgress(state, playing, status, now)
     Box(modifier) {
         AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize()) {
@@ -858,6 +870,106 @@ private fun DockedOverlay(
         }
     }
 }
+
+/**
+ * Tv: den lilla bilden i hörnet. Nedtill vad som spelas — LIVE och kanalen,
+ * programmet som sänds eller hur länge det är kvar — och hur långt det
+ * kommit. Strax efter att bilden krympt står att Play förstorar den, och
+ * Fotbollens förhandsvisning säger att den är utan ljud. Markerad: vad OK
+ * och Tillbaka gör.
+ */
+@Composable
+private fun TvMiniOverlay(
+    state: AppState,
+    playing: NowPlaying,
+    status: VideoPlayer.Status,
+    focused: Boolean,
+    now: Long,
+    modifier: Modifier,
+) {
+    val progress = miniProgress(state, playing, status, now)
+    val preview = state.footballPreview != null
+    val fresh = now - state.miniSince < MINI_HINT_MS
+    val onAir = playing.channel?.let { state.guide.current(it, now) }
+    val line = when {
+        preview -> "Utan ljud · Play: titta med ljud"
+        fresh -> "Play: helskärm"
+        onAir != null -> onAir.title
+        !playing.live && status.lengthMs > 0 -> remainingText(status.lengthMs - status.timeMs)
+        else -> playing.subtitle?.takeIf { it.isNotBlank() }
+    }
+    Box(modifier) {
+        Column(
+            Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.84f))))
+                .padding(start = 12.dp, end = 12.dp, top = 26.dp, bottom = 11.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (playing.live) {
+                    Box(
+                        Modifier.clip(RoundedCornerShape(5.dp)).background(MINI_LIVE).padding(horizontal = 6.dp, vertical = 1.dp),
+                    ) {
+                        Text(
+                            "LIVE",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black),
+                            color = Color.White,
+                            maxLines = 1,
+                        )
+                    }
+                    Spacer(Modifier.width(7.dp))
+                }
+                Text(
+                    playing.title,
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (preview) {
+                    Spacer(Modifier.width(7.dp))
+                    Icon(Glyphs.VolumeOff, contentDescription = "Utan ljud", tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(15.dp))
+                }
+            }
+            if (line != null) {
+                Text(
+                    line,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (preview || fresh) Color.White else Color.White.copy(alpha = 0.78f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (focused) {
+            // Vad fjärrkontrollen gör med den markerade bilden.
+            Row(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 10.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.Black.copy(alpha = 0.74f))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                KeyHint("OK", "förstora")
+                Text("·", style = MaterialTheme.typography.labelLarge, color = Color.White.copy(alpha = 0.6f))
+                KeyHint("Tillbaka", "stäng")
+            }
+        }
+        if (progress != null) {
+            ProgressLine(progress, Modifier.align(Alignment.BottomStart))
+        }
+    }
+}
+
+/** Så länge den lilla bilden visar att Play förstorar den, efter att den krympt. */
+private const val MINI_HINT_MS = 6_000L
+private val MINI_LIVE = Color(0xFFE5322D)
 
 /** "OK förstora": knappen i fetstil, vad den gör efter. */
 @Composable

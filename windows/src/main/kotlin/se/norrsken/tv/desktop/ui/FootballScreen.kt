@@ -42,7 +42,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -61,6 +63,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalFocusManager
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -127,6 +130,7 @@ fun FootballScreen(state: AppState) {
     val lists = remember { HashMap<String, LazyListState>() }
     val scrolls = remember { HashMap<String, ScrollState>() }
     val focus = remember { FootballFocus() }
+    LivePreview(state)
 
     Box(Modifier.fillMaxSize()) {
         PitchBackdrop(Modifier.matchParentSize())
@@ -138,6 +142,66 @@ fun FootballScreen(state: AppState) {
         }
     }
 }
+
+/**
+ * Den lilla tv-rutan i hörnet, bara i Fotboll: en stund efter att man kommit
+ * hit visar den en match som pågår på en kanal man har — Malmö FF först,
+ * sedan Sverige — utan ljud. Står man en stund på en annan match som pågår
+ * byter den dit. Play eller OK på rutan ger helskärm med ljud. Spelas redan
+ * något annat lämnas det i fred, och lämnar man Fotboll stängs rutan.
+ */
+@Composable
+private fun LivePreview(state: AppState) {
+    LaunchedEffect(state) {
+        delay(PREVIEW_AFTER_MS)
+        var offered = false
+        snapshotFlow { previewCandidate(state) }.collect { match ->
+            if (match == null) return@collect
+            val current = state.footballPreview
+            when {
+                // En gång per besök, och bara om inget annat spelas.
+                !offered -> {
+                    offered = true
+                    if (current == null && state.nowPlaying == null && !state.footballPreviewDismissed) state.previewMatch(match)
+                }
+                // Matchen i rutan är slut: nästa som pågår.
+                current != null && current != match.id &&
+                    state.footballMatches.none { it.id == current && it.state == MatchState.LIVE } -> state.previewMatch(match)
+            }
+        }
+    }
+    DisposableEffect(state) {
+        onDispose { state.stopFootballPreview() }
+    }
+}
+
+/** Matchen rutan helst visar: en som pågår på en kanal man har, Malmö FF och Sverige först. */
+private fun previewCandidate(state: AppState): FootballMatch? =
+    state.footballMatches
+        .filter { it.state == MatchState.LIVE && !state.matchChannels[it.id].isNullOrEmpty() }
+        .minByOrNull {
+            when {
+                it.isMalmoFF() -> 0
+                it.league == League.SWEDEN -> 1
+                else -> 2
+            }
+        }
+
+/** Står markeringen en stund på en match som pågår: rutan byter dit (om den visas, eller inget spelas). */
+@Composable
+private fun PreviewOnFocus(state: AppState, match: FootballMatch, active: Boolean) {
+    if (match.state != MatchState.LIVE) return
+    LaunchedEffect(active, match.id) {
+        if (!active) return@LaunchedEffect
+        delay(PREVIEW_FOCUS_MS)
+        if (canPreview(state, match)) state.previewMatch(match)
+    }
+}
+
+/** Rutan får visa [match]: den visar något annat än den, eller inget spelas — och man har inte stängt den. */
+private fun canPreview(state: AppState, match: FootballMatch): Boolean =
+    !state.footballPreviewDismissed && state.footballPreview != match.id &&
+        (state.footballPreview != null || state.nowPlaying == null)
 
 /** Översikten eller en liga, med ligorna i kategorilistan på tv:n. */
 @Composable
@@ -176,9 +240,9 @@ private fun FootballBrowse(
             focus.fromList = false
             focus.enterPage = false
             if (enter) {
-                // Lagets ruta i översikten: rakt in på lagets sida.
+                // Lagets ruta i översikten: rakt in på lagets sida, på lagets stora kort.
                 repeat(2) { withFrameNanos { } }
-                runCatching { focus.content.requestFocus() }
+                if (runCatching { focus.first.requestFocus() }.isFailure) runCatching { focus.content.requestFocus() }
             } else if (changed) {
                 withFrameNanos { }
                 // Tv: ligorna ligger i kategorilistan, som tar emot markeringen
@@ -218,13 +282,22 @@ private fun FootballBrowse(
                 // som ligorna, som har annat innehåll och annars inte gick att nå.
                 onEnterContent = {
                     scope.launch {
-                        // Byttes ligan nyss: vänta in den nya sidan.
+                        // Byttes ligan nyss: vänta in den nya sidan. Den kan behöva några
+                        // bilder på sig (lagens sidor räknas fram först), så det prövas igen
+                        // tills markeringen verkligen lämnat ligalistan.
                         repeat(2) { withFrameNanos { } }
-                        val restored = focus.openedKey != null && runCatching { focus.restore.requestFocus() }.isSuccess
-                        if (!restored) runCatching { focus.content.requestFocus() }
-                        withFrameNanos { }
-                        // Fanns inget att stå på: åt höger, som förut.
-                        if (TvNav.drawer == TvDrawer.CATEGORIES) focusManager.moveFocus(FocusDirection.Right)
+                        for (attempt in 0 until ENTER_ATTEMPTS) {
+                            val restored = focus.openedKey != null && runCatching { focus.restore.requestFocus() }.isSuccess
+                            if (!restored && runCatching { focus.first.requestFocus() }.isFailure) {
+                                runCatching { focus.content.requestFocus() }
+                            }
+                            withFrameNanos { }
+                            if (TvNav.drawer != TvDrawer.CATEGORIES) return@launch
+                            // Fanns inget att stå på: åt höger, som förut.
+                            focusManager.moveFocus(FocusDirection.Right)
+                            withFrameNanos { }
+                            if (TvNav.drawer != TvDrawer.CATEGORIES) return@launch
+                        }
                     }
                 },
             )
@@ -266,6 +339,8 @@ private class FootballFocus {
     var fromList = false
     /** Ett lags ruta i översikten valdes: markeringen går in på lagets sida. */
     var enterPage = false
+    /** Det första på sidan: Malmö FF:s kort i översikten, lagets stora kort på dess sida. */
+    val first = FocusRequester()
 }
 
 private fun Modifier.restoreFocus(focus: FootballFocus, key: String): Modifier =
@@ -628,7 +703,10 @@ private fun Overview(state: AppState, focus: FootballFocus, lists: HashMap<Strin
                                 state.footballLeague = team
                             }
                         },
-                        modifier = Modifier.weight(if (team == League.MALMO_FF) 1.3f else 1f).restoreFocus(focus, key),
+                        modifier = Modifier
+                            .weight(if (team == League.MALMO_FF) 1.3f else 1f)
+                            .then(if (team == League.MALMO_FF) Modifier.focusRequester(focus.first) else Modifier)
+                            .restoreFocus(focus, key),
                     )
                 }
             }
@@ -731,7 +809,8 @@ private fun LiveCard(state: AppState, match: FootballMatch, focus: FootballFocus
         modifier = Modifier.width(384.dp).restoreFocus(focus, key),
         shape = shape,
         hoverScale = CARD_SCALE,
-    ) { _ ->
+    ) { active ->
+        PreviewOnFocus(state, match, active)
         Box {
             Column(
                 Modifier
@@ -1218,7 +1297,8 @@ private fun SpotlightCard(
         shape = shape,
         hoverScale = if (big) 1.012f else CARD_SCALE,
         glowing = false,
-    ) { _ ->
+    ) { active ->
+        info.live?.let { PreviewOnFocus(state, it, active) }
         Box(
             Modifier
                 .fillMaxWidth()
@@ -1843,7 +1923,7 @@ private fun TeamView(
             info = info,
             big = true,
             onClick = { info.main?.let { showMatch(state, focus, it, key) } },
-            modifier = Modifier.fillMaxWidth().restoreFocus(focus, key),
+            modifier = Modifier.fillMaxWidth().focusRequester(focus.first).restoreFocus(focus, key),
         )
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -2150,6 +2230,13 @@ private fun MatchPage(state: AppState, match: FootballMatch) {
     // Staplarna jämförs bredvid varandra: är färgerna för lika får bortalaget grått.
     val awayBar = if (similar(homeColor, awayColor)) palette.textTertiary else awayColor
     val canWatch = channels.isNotEmpty() && watchable(match, state.clock)
+    // En match som pågår: rutan i hörnet visar den, om den visas eller inget annat spelas.
+    if (match.state == MatchState.LIVE && channels.isNotEmpty()) {
+        LaunchedEffect(match.id) {
+            delay(PREVIEW_FOCUS_MS)
+            if (canPreview(state, match)) state.previewMatch(match)
+        }
+    }
     // Tv: markeringen börjar på Titta när matchen går att se, annars på Tillbaka.
     val first = remember { FocusRequester() }
     if (tvLayout) {
@@ -3029,6 +3116,11 @@ private val TICKER_BG = Color(0xFF07140D)
 private val GRASS_TOP = Color(0xFF0F3321)
 private val GRASS_BOTTOM = Color(0xFF05130B)
 private const val GOAL_FLASH_MS = 3400
+/** Så många gånger prövas det att gå från ligalistan in på sidan. */
+private const val ENTER_ATTEMPTS = 6
+/** Den lilla rutan: en stund efter att man kommit till Fotboll, och efter en stund på en match. */
+private const val PREVIEW_AFTER_MS = 1_800L
+private const val PREVIEW_FOCUS_MS = 1_400L
 private const val SHEEN_MS = 950
 private val WIN_GREEN = Color(0xFF34C759)
 private val YELLOW_CARD = Color(0xFFFFD60A)

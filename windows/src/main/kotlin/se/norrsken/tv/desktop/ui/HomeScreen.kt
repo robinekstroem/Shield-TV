@@ -946,51 +946,13 @@ internal class HomeCatalog(
      * Raderna i ordning: det personliga först (Fortsätt titta, Min lista,
      * kanalerna), sedan katalogen, med Rekommenderat för dig en bit ner.
      */
+    /**
+     * Startsidans rader. Fortsätt titta, Min lista, favoritkanalerna och de
+     * senaste kanalerna står inte här längre, utan överst bland kategorierna i
+     * Filmer, Serier och Live TV. Historiken och listan styr ändå förslagen.
+     */
     fun rowsFor(history: List<WatchEntry>, myList: List<ListEntry>): List<HomeRow> {
         val rows = ArrayList<HomeRow>()
-        val resume = history.asSequence()
-            .filter { it.kind != WatchKind.LIVE && (it.resumable || it.upNext) }
-            .filter { it.kind != WatchKind.MOVIE || movieByStream.containsKey("${it.sourceId}|${it.itemId}") }
-            // En plats per serie: det senaste avsnittet.
-            .distinctBy { entry ->
-                when (entry.kind) {
-                    WatchKind.EPISODE -> seriesById["${entry.sourceId}|${entry.seriesId}"]?.let { versions.groupKeyOf(it) }
-                        ?: "serie:${entry.sourceId}:${entry.seriesId}"
-                    WatchKind.MOVIE -> movieByStream["${entry.sourceId}|${entry.itemId}"]?.let { versions.groupKeyOf(it) } ?: entry.identity
-                    else -> entry.identity
-                }
-            }
-            .take(20)
-            .map { ResumeItem(it) }
-            .toList()
-        if (resume.isNotEmpty()) rows += HomeRow("Fortsätt titta", resume)
-
-        val mine = myList.mapNotNull { entry ->
-            when (entry.kind) {
-                ListKind.MOVIE -> movieByKey[entry.key]?.let { MovieItem(it) }
-                ListKind.SERIES -> seriesByKey[entry.key]?.let { SeriesItem(it) }
-                ListKind.CHANNEL -> null
-            }
-        }.distinctBy { item ->
-            when (item) {
-                is MovieItem -> versions.groupKeyOf(item.movie)
-                is SeriesItem -> versions.groupKeyOf(item.series)
-                else -> item.key
-            }
-        }
-        if (mine.isNotEmpty()) rows += HomeRow("Min lista", mine)
-
-        val favorites = myList.filter { it.kind == ListKind.CHANNEL }.mapNotNull { channelByKey[it.key] }
-        if (favorites.isNotEmpty()) rows += HomeRow("Favoritkanaler", favorites.map { ChannelItem(it, favorites) })
-
-        val recentChannels = history.asSequence()
-            .filter { it.kind == WatchKind.LIVE }
-            .mapNotNull { channelByHistoryId["${it.sourceId}|${it.itemId}"] }
-            .distinctBy { it.key }
-            .take(15)
-            .toList()
-        if (recentChannels.isNotEmpty()) rows += HomeRow("Senaste kanaler", recentChannels.map { ChannelItem(it, recentChannels) })
-
         rows += leading
         recommended(history, myList)?.let { rows += it }
         rows += trailing

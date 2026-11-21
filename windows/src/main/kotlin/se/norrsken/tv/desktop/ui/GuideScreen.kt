@@ -1,5 +1,7 @@
 package se.norrsken.tv.desktop.ui
 
+import se.norrsken.tv.desktop.data.PersonalKeys
+
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
@@ -101,7 +103,8 @@ fun GuideScreen(state: AppState) {
     val query = state.liveQuery
     val onlyWithGuide = state.guideOnlyWithData
     val clock = state.clock
-    val channels = remember(library, group, query, state.hiddenGroups) { state.filteredChannels() }
+    val personal = if (PersonalKeys.isPersonal(group)) state.history to state.myList else null
+    val channels = remember(library, group, query, state.hiddenGroups, personal) { state.filteredChannels() }
     val rows = remember(channels, guide, onlyWithGuide) {
         if (onlyWithGuide) channels.filter { guide.hasSchedule(it) } else channels
     }
@@ -141,13 +144,14 @@ fun GuideScreen(state: AppState) {
             counts = library.liveCounts,
             selected = group,
             onSelect = { state.liveGroup = it },
+            pinned = personalPinned(state, LibraryFilter.LIVE),
             onEnterContent = {
                 scope.launch { entry.enter { listState.layoutInfo.visibleItemsInfo.map { it.key } } }
             },
         )
         Column(Modifier.weight(1f).fillMaxHeight()) {
             ScreenHeader(
-                title = group ?: "Tablå",
+                title = PersonalKeys.titleOf(group) ?: group ?: "Tablå",
                 subtitle = dayText(clock) + "  ·  " + rows.size.grouped() + " kanaler",
                 query = query,
                 onQuery = { state.liveQuery = it },

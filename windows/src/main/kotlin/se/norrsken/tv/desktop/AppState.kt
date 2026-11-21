@@ -90,6 +90,7 @@ import se.norrsken.tv.data.xtream.XtreamEpisode
 import se.norrsken.tv.data.xtream.XtreamVodInfo
 import se.norrsken.tv.desktop.data.Importer
 import se.norrsken.tv.desktop.data.Library
+import se.norrsken.tv.desktop.data.PersonalKeys
 import se.norrsken.tv.desktop.data.LiveChannel
 import se.norrsken.tv.desktop.data.Movie
 import se.norrsken.tv.desktop.data.SecretBox
@@ -676,10 +677,11 @@ class AppState {
         val merged = Library.merge(sources.mapNotNull { contents[it.id] })
         library = merged
         // En vald kategori som försvann med en borttagen källa ska inte lämna en tom lista.
-        if (liveGroup?.let { merged.liveCounts.containsKey(it) } == false) liveGroup = null
-        // Samlingarna och Disney (nycklar som börjar med \u0001) finns inte bland kategorierna.
+        // Samlingarna, Disney och de egna kategorierna (nycklar som börjar med \u0001)
+        // finns inte bland leverantörens kategorier.
+        if (liveGroup?.let { it.startsWith('\u0001') || merged.liveCounts.containsKey(it) } == false) liveGroup = null
         if (movieGroup?.let { it.startsWith('\u0001') || merged.movieCounts.containsKey(it) } == false) movieGroup = null
-        if (seriesGroup?.let { merged.seriesCounts.containsKey(it) } == false) seriesGroup = null
+        if (seriesGroup?.let { it.startsWith('\u0001') || merged.seriesCounts.containsKey(it) } == false) seriesGroup = null
         val movie = selectedMovie
         if (movie != null && movie.sourceId !in contents) selectedMovie = null
         val series = selectedSeries
@@ -697,6 +699,7 @@ class AppState {
     fun filteredChannels(): List<LiveChannel> {
         val query = liveQuery.trim().lowercase()
         val group = liveGroup
+        if (PersonalKeys.isPersonal(group)) return personalChannels(group, query)
         val hidden = hiddenGroups
         return library.channels.filter { channel ->
             (group == null || channel.group == group) &&
@@ -711,6 +714,7 @@ class AppState {
         val group = movieGroup
         val index = versions
         if (DisneyShelf.isDisney(group)) return disneyMovies(DisneyShelf.of(group), query)
+        if (PersonalKeys.isPersonal(group)) return personalMovies(group, query)
         return library.movies
             .filter { (group == null || it.group == group) && (query.isEmpty() || query in it.searchKey) }
             .ordered(movieSort, { index.titleOf(it) }, { it.addedUtc }, { scoreOf(it) }, { index.yearOf(it) }, { tmdbFor(it)?.popularity })
@@ -838,10 +842,105 @@ class AppState {
         val query = seriesQuery.trim().lowercase()
         val group = seriesGroup
         val index = versions
+        if (PersonalKeys.isPersonal(group)) return personalSeries(group, query)
         return library.series
             .filter { (group == null || it.group == group) && (query.isEmpty() || query in it.searchKey) }
             .ordered(seriesSort, { index.titleOf(it) }, { it.addedUtc }, { scoreOf(it) }, { index.yearOf(it) }, { tmdbFor(it)?.popularity })
             .let { index.collapseSeries(it, preferDefault = group == null && query.isEmpty()) }
+    }
+
+    // --- Egna kategorier: Fortsätt titta, Min lista, Favoriter, Senast sedda -----------
+
+    /** Uppslag från historiken och Min lista till biblioteket. Byggs en gång per bibliotek. */
+    private class PersonalIndex(val library: Library) {
+        val movieByStream: Map<String, Movie> = library.movies.associateBy { "${it.sourceId}|${it.streamId}" }
+        val movieByKey: Map<String, Movie> = library.movies.associateBy { it.key }
+        val seriesById: Map<String, Series> = library.series.associateBy { "${it.sourceId}|${it.seriesId}" }
+        val seriesByKey: Map<String, Series> = library.series.associateBy { it.key }
+        val channelByKey: Map<String, LiveChannel> = library.channels.associateBy { it.key }
+        val channelByHistoryId: Map<String, LiveChannel> =
+            library.channels.associateBy { "${it.sourceId}|${it.streamId?.toString() ?: "namn:${it.name}"}" }
+    }
+
+    @Volatile
+    private var personalIndex: PersonalIndex? = null
+
+    private fun personalIndex(): PersonalIndex {
+        val current = personalIndex
+        val lib = library
+        if (current != null && current.library === lib) return current
+        return PersonalIndex(lib).also { personalIndex = it }
+    }
+
+    /** Filmerna i en egen kategori: den man såg senast först, en gång per film. */
+    private fun personalMovies(group: String?, query: String): List<Movie> {
+        val index = personalIndex()
+        val list = when (group) {
+            PersonalKeys.RESUME -> history.asSequence()
+                .filter { it.kind == WatchKind.MOVIE && it.resumable }
+                .mapNotNull { index.movieByStream["${it.sourceId}|${it.itemId}"] }
+                .toList()
+            PersonalKeys.MY_LIST -> myList.filter { it.kind == ListKind.MOVIE }
+                .sortedByDescending { it.addedUtc }
+                .mapNotNull { index.movieByKey[it.key] }
+            else -> emptyList()
+        }
+        val versionIndex = versions
+        return list.filter { query.isEmpty() || query in it.searchKey }.distinctBy { versionIndex.groupKeyOf(it) }
+    }
+
+    /** Serierna i en egen kategori: den man såg senast först, en gång per serie. */
+    private fun personalSeries(group: String?, query: String): List<Series> {
+        val index = personalIndex()
+        val list = when (group) {
+            PersonalKeys.RESUME -> history.asSequence()
+                .filter { it.kind == WatchKind.EPISODE && (it.resumable || it.upNext) }
+                .mapNotNull { entry -> entry.seriesId?.let { index.seriesById["${entry.sourceId}|$it"] } }
+                .toList()
+            PersonalKeys.MY_LIST -> myList.filter { it.kind == ListKind.SERIES }
+                .sortedByDescending { it.addedUtc }
+                .mapNotNull { index.seriesByKey[it.key] }
+            else -> emptyList()
+        }
+        val versionIndex = versions
+        return list.filter { query.isEmpty() || query in it.searchKey }.distinctBy { versionIndex.groupKeyOf(it) }
+    }
+
+    /** Kanalerna i en egen kategori: favoriterna, eller de senast sedda. */
+    private fun personalChannels(group: String?, query: String): List<LiveChannel> {
+        val index = personalIndex()
+        val list = when (group) {
+            PersonalKeys.FAVORITES -> myList.filter { it.kind == ListKind.CHANNEL }.mapNotNull { index.channelByKey[it.key] }
+            PersonalKeys.RECENT -> history.asSequence()
+                .filter { it.kind == WatchKind.LIVE }
+                .mapNotNull { index.channelByHistoryId["${it.sourceId}|${it.itemId}"] }
+                .distinctBy { it.key }
+                .take(RECENT_CHANNELS)
+                .toList()
+            else -> emptyList()
+        }
+        return list.filter { query.isEmpty() || query in it.searchKey }.distinctBy { it.key }
+    }
+
+    /**
+     * De egna kategorierna som har något i sig, för kategorilistan: Fortsätt
+     * titta och Min lista bland filmer och serier, Favoriter och Senast sedda
+     * bland kanalerna. [kind]: LibraryFilter.MOVIE, SERIES eller LIVE.
+     */
+    fun personalGroups(kind: Char): List<Pair<String, Int>> {
+        val keys = if (kind == LibraryFilter.LIVE) {
+            listOf(PersonalKeys.FAVORITES, PersonalKeys.RECENT)
+        } else {
+            listOf(PersonalKeys.RESUME, PersonalKeys.MY_LIST)
+        }
+        return keys.mapNotNull { key ->
+            val count = when (kind) {
+                LibraryFilter.LIVE -> personalChannels(key, "").size
+                LibraryFilter.SERIES -> personalSeries(key, "").size
+                else -> personalMovies(key, "").size
+            }
+            if (count > 0) key to count else null
+        }
     }
 
     // --- Versioner -----------------------------------------------------------------
@@ -1196,6 +1295,11 @@ class AppState {
     fun watchMatch(match: FootballMatch) {
         val channels = matchChannels[match.id].orEmpty()
         val first = channels.firstOrNull() ?: return
+        // Visas matchen redan i den lilla rutan: den växer upp, med ljud, utan att börja om.
+        if (nowPlaying?.channel?.key == first.key && miniPlayer) {
+            expandPlayer()
+            return
+        }
         playChannel(first, channels)
     }
 
@@ -2000,7 +2104,11 @@ class AppState {
 
     // --- Uppspelning -------------------------------------------------------------
 
-    fun playChannel(channel: LiveChannel, queue: List<LiveChannel>) {
+    /**
+     * [preview]: Fotbollens lilla ruta — kanalen startar i hörnet utan ljud och
+     * räknas inte som sedd förrän man förstorar den.
+     */
+    fun playChannel(channel: LiveChannel, queue: List<LiveChannel>, preview: Boolean = false) {
         val entry = WatchEntry(
             kind = WatchKind.LIVE,
             sourceId = channel.sourceId,
@@ -2011,7 +2119,7 @@ class AppState {
             watchedAtUtc = System.currentTimeMillis(),
         )
         val item = NowPlaying(title = channel.name, subtitle = channel.group, live = true, channel = channel, queue = queue, entry = entry, name = channel.name)
-        launchPlayback(item) {
+        launchPlayback(item, preview) {
             channel.url ?: run {
                 val streamId = channel.streamId ?: return@run null
                 val (source, account) = credentials(channel.sourceId) ?: return@run null
@@ -2088,10 +2196,18 @@ class AppState {
 
     fun retryPlayback() {
         val (item, resolve) = lastLaunch ?: return
-        launchPlayback(item, resolve)
+        launchPlayback(item, resolve = resolve)
     }
 
-    private fun launchPlayback(item: NowPlaying, resolve: suspend () -> String?) {
+    private fun launchPlayback(item: NowPlaying, preview: Boolean = false, resolve: suspend () -> String?) {
+        // Samma sak spelas redan i hörnet (Spela på filmens sida, kanalen i listan):
+        // bilden växer upp i stället för att börja om.
+        val current = nowPlaying
+        val identity = item.entry?.identity
+        if (!preview && current != null && miniPlayer && identity != null && current.entry?.identity == identity && playerError == null) {
+            expandPlayer()
+            return
+        }
         // Det som spelades nyss: spara hur långt man kom innan det byts.
         savePosition()
         historyJob?.cancel()
@@ -2099,9 +2215,13 @@ class AppState {
         nowPlaying = item
         // Nästa avsnitt och introt gäller avsnittet som spelades; ett avsnitt sätter dem igen.
         resetSeriesExtras()
-        item.entry?.let { recordWatch(it) }
+        // En förhandsvisning räknas inte som sedd (se expandPlayer).
+        if (!preview) item.entry?.let { recordWatch(it) }
+        previewMuted = preview
+        if (!preview) footballPreview = null
         // Något nytt att titta på: spelaren växer upp igen om den låg i hörnet.
-        miniPlayer = false
+        // Fotbollens förhandsvisning börjar i stället i hörnet.
+        miniPlayer = preview
         playerError = null
         trackPanelOpen = false
         playbackSession = -1L
@@ -2121,7 +2241,7 @@ class AppState {
             // Bytte användaren kanal medan VLC startade gäller den nya kanalen.
             ensureActive()
             player.setVolume(volume)
-            player.setMuted(muted)
+            player.setMuted(muted || previewMuted)
             player.preferredAudio = preferredAudio
             player.preferredSubtitle = preferredSubtitle
             // Windows behöver veta om bilden är HDR för att visa rätt färger; Shield sköter det själv.
@@ -2167,10 +2287,14 @@ class AppState {
             player.surfaceState?.close()
             player.surfaceState = null
         }
+        // Stängde man fotbollens ruta själv startar den inte igen förrän man lämnat Fotboll.
+        if (footballPreview != null) footballPreviewDismissed = true
         nowPlaying = null
         playerError = null
         fullscreen = false
         miniPlayer = false
+        footballPreview = null
+        previewMuted = false
         trackPanelOpen = false
         playerBoxFocused = false
         playerControlsFocused = false
@@ -2235,6 +2359,7 @@ class AppState {
 
     fun toggleMute() {
         muted = !muted
+        previewMuted = false
         videoPlayer?.setMuted(muted)
     }
 
@@ -2249,13 +2374,68 @@ class AppState {
         if (nowPlaying == null) return
         fullscreen = false
         trackPanelOpen = false
+        playerControlsFocused = false
         miniPlayer = true
+        miniSince = System.currentTimeMillis()
     }
+
+    /** När bilden senast krympte till hörnet: en stund efteråt visar rutan hur man förstorar den. */
+    var miniSince by mutableStateOf(0L)
+        private set
 
     fun expandPlayer() {
         miniPlayer = false
+        // Fotbollens förhandsvisning blir en vanlig kanal: ljudet på, och sedd.
+        if (previewMuted) {
+            previewMuted = false
+            videoPlayer?.setMuted(muted)
+        }
+        if (footballPreview != null) {
+            footballPreview = null
+            nowPlaying?.entry?.let { recordWatch(it.copy(watchedAtUtc = System.currentTimeMillis())) }
+        }
         touchPlayer(force = true)
     }
+
+    // --- Fotbollens lilla ruta ----------------------------------------------------
+
+    /** Fotboll: matchen som visas i den lilla rutan i hörnet, utan ljud. Null: ingen. */
+    var footballPreview by mutableStateOf<String?>(null)
+        private set
+
+    /** Förhandsvisningen spelar utan ljud tills man förstorar den. */
+    private var previewMuted = false
+
+    /**
+     * Fotboll: visar en match som pågår i den lilla rutan i hörnet, utan ljud.
+     * Bara om inget annat spelas — en film eller kanal man själv startat får
+     * vara i fred. Samma kanal som redan visas startas inte om.
+     */
+    fun previewMatch(match: FootballMatch) {
+        val channels = matchChannels[match.id].orEmpty()
+        val channel = channels.firstOrNull() ?: return
+        val playing = nowPlaying
+        if (playing != null && footballPreview == null) return
+        if (playing != null && !miniPlayer) return
+        if (playing?.channel?.key == channel.key) {
+            footballPreview = match.id
+            return
+        }
+        footballPreview = match.id
+        miniSince = System.currentTimeMillis()
+        playChannel(channel, channels, preview = true)
+    }
+
+    /** Lämnar man Fotboll stängs rutan — om man inte förstorat den och gjort den till sin. */
+    fun stopFootballPreview() {
+        if (footballPreview != null && nowPlaying != null && miniPlayer) closePlayer()
+        footballPreview = null
+        footballPreviewDismissed = false
+    }
+
+    /** Fotbollens ruta stängdes av användaren under det här besöket i Fotboll. */
+    var footballPreviewDismissed by mutableStateOf(false)
+        private set
 
     fun touchPlayer(force: Boolean = false) {
         val now = System.currentTimeMillis()
@@ -3108,6 +3288,8 @@ private const val TABLES_MAX_AGE_MS = 30 * 60_000L
 private const val FOOTBALL_FULL_MS = 30 * 60_000L
 /** Malmö FF:s och landslagets matcher, ett halvår runt idag: var sjätte timme. */
 private const val TEAMS_EVERY_MS = 6 * 60 * 60_000L
+/** Senast sedda bland kanalerna: så många. */
+private const val RECENT_CHANNELS = 30
 private const val TEAM_BACK_DAYS = 75L
 private const val TEAM_AHEAD_DAYS = 150L
 /** Utan fliken: hela perioden var tredje timme, ställningen var femte minut medan matcher pågår. */

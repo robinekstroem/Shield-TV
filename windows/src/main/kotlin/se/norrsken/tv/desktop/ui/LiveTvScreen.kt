@@ -1,5 +1,7 @@
 package se.norrsken.tv.desktop.ui
 
+import se.norrsken.tv.desktop.data.PersonalKeys
+
 import se.norrsken.tv.desktop.data.ListKind
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -63,7 +65,9 @@ fun LiveTvScreen(state: AppState) {
 
     val group = state.liveGroup
     val query = state.liveQuery
-    val channels = remember(library, group, query, state.hiddenGroups) { state.filteredChannels() }
+    // Favoriter och Senast sedda följer listan och historiken.
+    val personal = if (PersonalKeys.isPersonal(group)) state.history to state.myList else null
+    val channels = remember(library, group, query, state.hiddenGroups, personal) { state.filteredChannels() }
     val listState = rememberLazyListState()
     val guide = state.guide
     val clock = state.clock
@@ -90,6 +94,7 @@ fun LiveTvScreen(state: AppState) {
             counts = library.liveCounts,
             selected = group,
             onSelect = { state.liveGroup = it },
+            pinned = personalPinned(state, LibraryFilter.LIVE),
             onEnterContent = {
                 scope.launch { entry.enter { listState.layoutInfo.visibleItemsInfo.map { it.key } } }
             },
@@ -102,7 +107,7 @@ fun LiveTvScreen(state: AppState) {
                     if (withPanel) Modifier.width(listWidth).fillMaxHeight() else Modifier.weight(1f).fillMaxHeight(),
                 ) {
                     ScreenHeader(
-                        title = group ?: "Alla kanaler",
+                        title = PersonalKeys.titleOf(group) ?: group ?: "Alla kanaler",
                         subtitle = "${channels.size.grouped()} kanaler",
                         query = query,
                         onQuery = { state.liveQuery = it },
@@ -125,7 +130,7 @@ fun LiveTvScreen(state: AppState) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             ChannelRow(
                                                 channel = channel,
-                                                showGroup = group == null,
+                                                showGroup = group == null || PersonalKeys.isPersonal(group),
                                                 now = guide.current(channel, clock),
                                                 next = guide.next(channel, clock),
                                                 clock = clock,
