@@ -5,7 +5,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import se.norrsken.tv.desktop.data.AppDirs
-import se.norrsken.tv.desktop.platform.WindowsIntegration
 
 /**
  * Hur stort allt är på tv:n: hur bred skärmen är i layoutens enheter. Bredare
@@ -27,17 +26,8 @@ enum class TvResolution(
 object TvDisplay {
     private const val PREFS = "tv-shield"
     private const val KEY = "upplosning"
-    private const val MATCH_KEY = "bildfrekvens"
 
     var resolution by mutableStateOf(load())
-        private set
-
-    /**
-     * Tv:n byter till det som spelas bildfrekvens (24 Hz för film, 50 Hz för
-     * svensk tv), så att rörelser blir jämna. Av: tv:n behåller sitt läge och
-     * blir aldrig svart vid start och stopp, men panoreringar kan rycka lite.
-     */
-    var matchRate by mutableStateOf(prefs().getBoolean(MATCH_KEY, true))
         private set
 
     fun select(option: TvResolution) {
@@ -45,11 +35,6 @@ object TvDisplay {
         prefs().edit().putString(KEY, option.name).apply()
     }
 
-    fun selectMatch(on: Boolean) {
-        matchRate = on
-        prefs().edit().putBoolean(MATCH_KEY, on).apply()
-        WindowsIntegration.refresh()
-    }
 
     private fun load(): TvResolution =
         runCatching { TvResolution.valueOf(prefs().getString(KEY, null).orEmpty()) }.getOrDefault(TvResolution.MEDIUM)

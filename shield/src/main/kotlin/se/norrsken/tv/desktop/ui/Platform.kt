@@ -15,8 +15,6 @@ import android.net.Uri
 import android.view.SurfaceView
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListState
@@ -204,18 +202,6 @@ internal fun DisplayOptions() {
             TvResolution.entries.forEach { option ->
                 Chip(option.label, selected = TvDisplay.resolution == option, onClick = { TvDisplay.select(option) })
             }
-        }
-        Spacer(Modifier.height(8.dp))
-        Text("Tv:ns bildfrekvens", style = MaterialTheme.typography.titleMedium, color = palette.textPrimary)
-        Text(
-            "Följ filmen: tv:n byter till filmens bildfrekvens, så att rörelser blir jämna. Då blir tv:n svart en kort " +
-                "stund när en film startar och när den stängs. Behåll: tv:n blir aldrig svart, men panoreringar i film kan rycka lite.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = palette.textSecondary,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Chip("Följ filmen", selected = TvDisplay.matchRate, onClick = { TvDisplay.selectMatch(true) })
-            Chip("Behåll tv:ns", selected = !TvDisplay.matchRate, onClick = { TvDisplay.selectMatch(false) })
         }
     }
 }
