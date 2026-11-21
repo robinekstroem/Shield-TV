@@ -52,13 +52,14 @@ import se.norrsken.tv.desktop.ui.TvTheme
  * - Play/paus: paus. I minispelaren: tillbaka till helskärm.
  * - ≡: ljud och undertext, och stänger panelen igen.
  *
- * Den lilla bilden nere i högra hörnet: pil höger eller ner förbi
- * innehållets kant markerar den. Då förstorar OK den och Tillbaka stänger den.
+ * Den lilla bilden nere i högra hörnet (knappen Minimera i spelaren): pil
+ * höger eller ner förbi innehållets kant markerar den. Då förstorar OK den
+ * och Tillbaka stänger den.
  *
  * Tillbaka, ett steg i taget: listan eller panelen i spelaren, knapparna,
- * bilden krymper till hörnet (och en gång till stänger den, så länge den är
- * markerad), kategorierna, film-, serie- och matchsidan, och sist menyn. I
- * menyn leder Tillbaka till startsidan, och från startsidan stängs appen.
+ * bilden stängs (den lilla bilden när den är markerad), kategorierna, film-,
+ * serie- och matchsidan, och sist menyn. I menyn leder Tillbaka till
+ * startsidan, och från startsidan stängs appen.
  */
 class MainActivity : ComponentActivity() {
     private lateinit var state: AppState
@@ -173,8 +174,12 @@ class MainActivity : ComponentActivity() {
                 playing != null && !state.miniPlayer && state.dismissPlayerPrompt() -> Unit
                 // Knapparna i spelaren: tillbaka till bilden först.
                 playing != null && !state.miniPlayer && state.leavePlayerControls() -> Unit
-                // Som Esc i Windows: bilden krymper till en liten bild i hörnet och fortsätter där.
-                playing != null && !state.miniPlayer -> state.minimizePlayer()
+                // Som på andra tv-appar: Tillbaka stänger bilden, och man är där man var.
+                // Den lilla bilden i hörnet finns kvar som knapp bland spelarens knappar.
+                playing != null && !state.miniPlayer -> {
+                    state.closePlayer()
+                    TvNav.restoreFocus()
+                }
                 // Den lilla bilden är markerad (som direkt efter att den krympt): stäng den.
                 playing != null && state.playerBoxFocused -> {
                     state.closePlayer()

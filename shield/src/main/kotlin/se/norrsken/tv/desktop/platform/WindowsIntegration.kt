@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Display
 import android.view.WindowManager
+import se.norrsken.tv.shield.TvDisplay
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -21,9 +22,13 @@ import kotlin.math.roundToInt
  * för mycket. Bland lägen som går jämnt upp väljs det snabbaste, så att
  * menyerna ovanpå bilden rör sig mjukt: 50 Hz hellre än 25.
  *
- * Läget gäller bara medan bilden syns. Stängs spelaren går tv:n tillbaka
- * till sitt vanliga läge, så att menyerna aldrig fastnar på 24 Hz. Den
- * lilla bilden i hörnet behåller 50 och 60 Hz, men inte filmens 24.
+ * Läget gäller bara medan bilden syns. Stängs spelaren efter en film går
+ * tv:n tillbaka till sitt vanliga läge, så att menyerna aldrig fastnar på
+ * 24 Hz. Ett läge på 50 eller 60 Hz får vara kvar: menyerna rör sig mjukt i
+ * det, och tv:n slipper bli svart en gång till när man stänger. Den lilla
+ * bilden i hörnet behåller också 50 och 60 Hz, men inte filmens 24.
+ *
+ * Med inställningen av (TvDisplay.matchRate) rörs tv:ns läge aldrig.
  *
  * Allt här körs på huvudtråden.
  */
@@ -123,6 +128,9 @@ object WindowsIntegration {
         }
     }
 
+    /** Inställningen ändrades: gäller direkt, också för det som spelas. */
+    fun refresh() = onMain { apply() }
+
     /** Var bilden syns. Utan spelare glöms bildfrekvensen och tv:n går tillbaka. */
     fun playerView(next: PlayerView) {
         onMain {
@@ -137,8 +145,18 @@ object WindowsIntegration {
         val display = displayOf(current) ?: return
         val attributes = current.window.attributes
         if (attributes.preferredDisplayModeId == 0) uiMode = display.mode
+        val follow = runCatching { TvDisplay.matchRate }.getOrDefault(true)
         val fps = contentFps
-        val target = if (fps == null || view == PlayerView.NONE) {
+        // Spelaren stängd och tv:n står på 50 eller 60 Hz: så får det vara. Menyerna rör
+        // sig mjukt där, och ett byte till skulle göra tv:n svart en gång till.
+        if (follow && view == PlayerView.NONE && attributes.preferredDisplayModeId != 0) {
+            val kept = display.supportedModes.firstOrNull { it.modeId == attributes.preferredDisplayModeId }
+            if (kept != null && kept.refreshRate >= SMOOTH_HZ) {
+                finishSwitch()
+                return
+            }
+        }
+        val target = if (!follow || fps == null || view == PlayerView.NONE) {
             null
         } else {
             // Liten bild i hörnet: menyerna går före, så 24 Hz gäller bara i helbild.
