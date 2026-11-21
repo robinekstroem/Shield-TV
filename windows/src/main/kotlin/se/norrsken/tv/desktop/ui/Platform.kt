@@ -321,5 +321,26 @@ internal fun TmdbPhoneHint(state: AppState) = Unit
  * ritytan, ovanpå det som redan gäller. Startens filmvägg ritas med den.
  */
 internal fun androidx.compose.ui.graphics.drawscope.DrawScope.concatPerspective(m: FloatArray) {
-    drawContext.canvas.nativeCanvas.concat(org.jetbrains.skia.Matrix33(*m))
+    // Composes 4×4-matris, kolumnvis: x, y och perspektivet; z orört.
+    val v = perspectiveMatrix.values
+    v[0] = m[0]
+    v[4] = m[1]
+    v[12] = m[2]
+    v[1] = m[3]
+    v[5] = m[4]
+    v[13] = m[5]
+    v[3] = m[6]
+    v[7] = m[7]
+    v[15] = m[8]
+    v[2] = 0f
+    v[6] = 0f
+    v[8] = 0f
+    v[9] = 0f
+    v[10] = 1f
+    v[11] = 0f
+    v[14] = 0f
+    drawContext.canvas.concat(perspectiveMatrix)
 }
+
+/** Återanvänds: ritningen sker bara på UI-tråden, och duken kopierar matrisen. */
+private val perspectiveMatrix = androidx.compose.ui.graphics.Matrix()
