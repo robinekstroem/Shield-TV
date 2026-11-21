@@ -91,6 +91,8 @@ import se.norrsken.tv.data.xtream.XtreamVodInfo
 import se.norrsken.tv.desktop.data.Importer
 import se.norrsken.tv.desktop.data.Library
 import se.norrsken.tv.desktop.data.PersonalKeys
+import se.norrsken.tv.desktop.data.IntroReelItem
+import se.norrsken.tv.desktop.data.IntroReelStore
 import se.norrsken.tv.desktop.data.LiveChannel
 import se.norrsken.tv.desktop.data.Movie
 import se.norrsken.tv.desktop.data.SecretBox
@@ -623,6 +625,14 @@ class AppState {
         tmdbLogos = extras.logos
         trending = extras.trending
         trendingAt = extras.trendingAt
+        // Startens filmvägg, om det inte fanns någon sparad: räknas fram ur
+        // biblioteket så fort det finns, medan starten fortfarande visas.
+        scope.launch {
+            // Finns en sparad vägg visar starten den; då behöver inget räknas nu.
+            if (withContext(Dispatchers.IO) { IntroReelStore.load().size } >= INTRO_REEL_MIN) return@launch
+            val reel = withContext(Dispatchers.Default) { runCatching { computeIntroReel() }.getOrDefault(emptyList()) }
+            if (reel.isNotEmpty()) introReel = reel
+        }
         seriesMarks = withContext(Dispatchers.IO) { marksStore.load() }
         scope.launch {
             while (true) {
@@ -666,6 +676,77 @@ class AppState {
     fun markHomeReady() {
         homeReady.complete(Unit)
         homeShown = true
+        // En stund senare, när filmserierna och det som trendar finns: filmväggen
+        // till nästa start sparas, så att den har sina omslag direkt.
+        if (!introReelSaving) {
+            introReelSaving = true
+            scope.launch {
+                delay(INTRO_REEL_SAVE_DELAY_MS)
+                val reel = withContext(Dispatchers.Default) { runCatching { computeIntroReel() }.getOrDefault(emptyList()) }
+                if (reel.size >= INTRO_REEL_MIN) withContext(Dispatchers.IO) { IntroReelStore.save(reel) }
+            }
+        }
+    }
+
+    /** Startens filmvägg, räknad ur biblioteket under den här körningen. Tom: inte ännu. */
+    var introReel by mutableStateOf<List<IntroReelItem>>(emptyList())
+        private set
+    private var introReelSaving = false
+
+    /**
+     * Startens filmvägg: de häftigaste filmerna man har just nu — de som trendar,
+     * filmserierna (Marvel, Star Wars …) och nya filmer med högt betyg och
+     * många tittare. En per film, med samma omslag som appen visar (de ligger
+     * redan på disken). Körs utanför UI-tråden, med kopior av faktan.
+     */
+    private fun computeIntroReel(): List<IntroReelItem> {
+        val index = versions
+        val lib = library
+        val facts = tmdbFacts
+        if (lib.movies.isEmpty()) return emptyList()
+        val trendingRank = HashMap<Int, Int>()
+        trending.filter { it.kind == "movie" }.forEachIndexed { rank, title -> trendingRank.putIfAbsent(title.id, rank) }
+        val owned = collections
+        val inFranchise = HashSet<String>()
+        for (franchise in owned.present()) for (movie in owned.ownedIn(franchise).values) inFranchise += movie.key
+        val thisYear = LocalDate.now().year
+        fun usable(url: String?): String? = url?.trim()?.takeIf { it.startsWith("http", ignoreCase = true) }
+        fun tmdbOf(movie: Movie): TmdbFacts? {
+            if (facts.isEmpty()) return null
+            val (title, year) = TitleCleaner.searchTitle(movie.name)
+            return facts[TmdbStore.keyOf("movie", title, year)]?.takeIf { it.found }
+        }
+        val scored = ArrayList<Triple<Movie, TmdbFacts?, Double>>()
+        for (movie in lib.movies) {
+            val year = index.yearOf(movie)
+            // Bara filmserierna och de senaste årens filmer: hela biblioteket tar för lång tid.
+            val franchise = movie.key in inFranchise
+            if (!franchise && (year == null || year < thisYear - INTRO_REEL_YEARS)) continue
+            val tmdb = tmdbOf(movie)
+            var score = 0.0
+            tmdb?.let { hit -> trendingRank[hit.id]?.let { rank -> score += 1_000.0 - rank * 12.0 } }
+            if (franchise) score += 320.0
+            val shownYear = year ?: tmdb?.year
+            if (shownYear != null) score += (shownYear - (thisYear - INTRO_REEL_YEARS)).coerceIn(0, INTRO_REEL_YEARS) * 45.0
+            if (tmdb != null) {
+                score += minOf(tmdb.popularity, 250.0)
+                if ((tmdb.rating ?: 0.0) >= 7.0 && tmdb.votes >= 500) score += 80.0
+            }
+            if (score > 0.0) scored += Triple(movie, tmdb, score)
+        }
+        val seen = HashSet<String>()
+        val result = ArrayList<IntroReelItem>()
+        for ((movie, tmdb, _) in scored.sortedByDescending { it.third }) {
+            if (result.size >= INTRO_REEL_SIZE) break
+            if (!seen.add(index.groupKeyOf(movie))) continue
+            val poster = usable(tmdb?.takeIf { it.sure }?.poster)
+                ?: usable(movie.poster)
+                ?: index.versionsOf(movie).firstNotNullOfOrNull { usable(it.poster) }
+                ?: usable(tmdb?.poster)
+                ?: continue
+            result += IntroReelItem(index.titleOf(movie), poster, usable(tmdb?.backdrop))
+        }
+        return result
     }
 
     /** Väntar tills startsidan är klar, eller som längst [STARTUP_GRACE_MS]: starten går först. */
@@ -3290,6 +3371,11 @@ private const val FOOTBALL_FULL_MS = 30 * 60_000L
 private const val TEAMS_EVERY_MS = 6 * 60 * 60_000L
 /** Senast sedda bland kanalerna: så många. */
 private const val RECENT_CHANNELS = 30
+/** Startens filmvägg: så många filmer, ur de senaste årens; sparas en stund efter starten. */
+private const val INTRO_REEL_SIZE = 32
+private const val INTRO_REEL_MIN = 12
+private const val INTRO_REEL_YEARS = 5
+private const val INTRO_REEL_SAVE_DELAY_MS = 25_000L
 private const val TEAM_BACK_DAYS = 75L
 private const val TEAM_AHEAD_DAYS = 150L
 /** Utan fliken: hela perioden var tredje timme, ställningen var femte minut medan matcher pågår. */

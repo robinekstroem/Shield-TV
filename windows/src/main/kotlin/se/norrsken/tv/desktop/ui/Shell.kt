@@ -349,7 +349,7 @@ fun AppRoot(state: AppState) {
             val library = state.library
             val nothing = library.movies.isEmpty() && library.series.isEmpty() && library.channels.isEmpty()
             val ready = state.homeShown || (!state.loading && (state.screen != Screen.HOME || nothing)) || state.nowPlaying != null
-            StartIntro(ready = ready, onFinished = { state.introDone = true })
+            StartIntro(state = state, ready = ready, onFinished = { state.introDone = true })
         }
     }
 }
