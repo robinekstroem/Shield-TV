@@ -3,10 +3,15 @@ package se.norrsken.tv.desktop.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -126,6 +131,9 @@ private val TV_MENU_WIDTH = 300.dp
 
 /** Hur fort markeringen i menyn tonar mellan raderna. */
 private const val MENU_MS = 170
+
+/** Tv: hur fort markeringen glider från en rad till nästa. */
+private const val PILL_MS = 150
 
 /** Vad som syns till vänster om innehållet på tv:n. */
 internal enum class TvDrawer { NONE, CATEGORIES, MENU }
@@ -333,6 +341,15 @@ fun AppRoot(state: AppState) {
                 PlayerHost(state, collapse = { collapse.value })
             }
         }
+        // Starten: tv:n slås på medan biblioteket laddas och startsidan ordnas
+        // bakom. Klar när startsidan har sina rader, eller när något annat visas
+        // i stället (inget bibliotek, inställningarna vid första starten).
+        if (!state.introDone) {
+            val library = state.library
+            val nothing = library.movies.isEmpty() && library.series.isEmpty() && library.channels.isEmpty()
+            val ready = state.homeShown || (!state.loading && (state.screen != Screen.HOME || nothing)) || state.nowPlaying != null
+            StartIntro(ready = ready, onFinished = { state.introDone = true })
+        }
     }
 }
 
@@ -346,6 +363,8 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
     val palette = LocalPalette.current
     val library = state.library
     var focused by remember { mutableStateOf(false) }
+    // Tv: markeringen glider från raden den lämnar till nästa (se NavItem).
+    val trail = remember(tv) { if (tv) MenuTrail() else null }
     // Den valda fliken tar emot markeringen när menyn kommer fram.
     val current = remember { FocusRequester() }
     if (tv) {
@@ -416,9 +435,13 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
             .width(width)
             .fillMaxHeight()
             // Tv: täckande över innehållet, med en skugga mot det som ligger under.
-            .then(if (tv) Modifier.shadow(24.dp).background(palette.background) else Modifier)
-            .background(palette.ambient)
-            .then(if (tv) Modifier.drawBehind { menuGlow(palette.hairline) } else Modifier)
+            .then(
+                if (tv) {
+                    Modifier.shadow(24.dp).background(palette.background).drawBehind { drawerBackdrop(palette) }
+                } else {
+                    Modifier.background(palette.ambient)
+                },
+            )
             .onFocusChanged {
                 // Markeringen gick vidare: menyn glider undan.
                 if (tv && focused && !it.hasFocus && TvNav.drawer == TvDrawer.MENU) {
@@ -459,18 +482,18 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
                 .padding(vertical = NAV_AIR),
             verticalArrangement = Arrangement.spacedBy(if (tv) 6.dp else 4.dp),
         ) {
-            NavItem(Glyphs.Home, "Hem", "Fortsätt titta & tips", null, state.screen == Screen.HOME, docked, tv = tv, accent = MenuAccents.home, modifier = navModifier(Screen.HOME)) {
+            NavItem(Glyphs.Home, "Hem", "Fortsätt titta & tips", null, state.screen == Screen.HOME, docked, tv = tv, accent = MenuAccents.home, trail = trail, index = 0, modifier = navModifier(Screen.HOME)) {
                 go(Screen.HOME)
             }
-            NavItem(Glyphs.Live, "Live TV", "Direktsändning", library.channels.size, state.screen == Screen.LIVE, docked, tv = tv, accent = MenuAccents.live, modifier = navModifier(Screen.LIVE)) {
+            NavItem(Glyphs.Live, "Live TV", "Direktsändning", library.channels.size, state.screen == Screen.LIVE, docked, tv = tv, accent = MenuAccents.live, trail = trail, index = 1, modifier = navModifier(Screen.LIVE)) {
                 go(Screen.LIVE)
             }
-            NavItem(Glyphs.Guide, "Tablå", "Vad som sänds", state.guide.channelCount, state.screen == Screen.GUIDE, docked, tv = tv, accent = MenuAccents.guide, modifier = navModifier(Screen.GUIDE)) {
+            NavItem(Glyphs.Guide, "Tablå", "Vad som sänds", state.guide.channelCount, state.screen == Screen.GUIDE, docked, tv = tv, accent = MenuAccents.guide, trail = trail, index = 2, modifier = navModifier(Screen.GUIDE)) {
                 go(Screen.GUIDE)
             }
             // Antalet matcher som pågår just nu.
             val liveMatches = state.footballMatches.count { it.state == MatchState.LIVE }
-            NavItem(Glyphs.Football, "Fotboll", "Matcher & tabeller", liveMatches.takeIf { it > 0 }, state.screen == Screen.FOOTBALL, docked, tv = tv, accent = MenuAccents.football, live = true, modifier = navModifier(Screen.FOOTBALL)) {
+            NavItem(Glyphs.Football, "Fotboll", "Matcher & tabeller", liveMatches.takeIf { it > 0 }, state.screen == Screen.FOOTBALL, docked, tv = tv, accent = MenuAccents.football, live = true, trail = trail, index = 3, modifier = navModifier(Screen.FOOTBALL)) {
                 go(Screen.FOOTBALL)
             }
             NavDivider(tv)
@@ -478,16 +501,16 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
             val versions = state.versions
             val movieCount = if (versions.isEmpty) library.movies.size else versions.movieCount
             val seriesCount = if (versions.isEmpty) library.series.size else versions.seriesCount
-            NavItem(Glyphs.Movies, "Filmer", "Filmbiblioteket", movieCount, state.screen == Screen.MOVIES, docked, tv = tv, accent = MenuAccents.movies, modifier = navModifier(Screen.MOVIES)) {
+            NavItem(Glyphs.Movies, "Filmer", "Filmbiblioteket", movieCount, state.screen == Screen.MOVIES, docked, tv = tv, accent = MenuAccents.movies, trail = trail, index = 4, modifier = navModifier(Screen.MOVIES)) {
                 go(Screen.MOVIES)
             }
-            NavItem(Glyphs.Series, "Serier", "Säsonger & avsnitt", seriesCount, state.screen == Screen.SERIES, docked, tv = tv, accent = MenuAccents.series, modifier = navModifier(Screen.SERIES)) {
+            NavItem(Glyphs.Series, "Serier", "Säsonger & avsnitt", seriesCount, state.screen == Screen.SERIES, docked, tv = tv, accent = MenuAccents.series, trail = trail, index = 5, modifier = navModifier(Screen.SERIES)) {
                 go(Screen.SERIES)
             }
-            NavItem(Glyphs.Genres, "Genrer", "Topplistor efter betyg", null, state.screen == Screen.GENRES, docked, tv = tv, accent = MenuAccents.genres, modifier = navModifier(Screen.GENRES)) {
+            NavItem(Glyphs.Genres, "Genrer", "Topplistor efter betyg", null, state.screen == Screen.GENRES, docked, tv = tv, accent = MenuAccents.genres, trail = trail, index = 6, modifier = navModifier(Screen.GENRES)) {
                 go(Screen.GENRES)
             }
-            NavItem(Glyphs.History, "Historik", "Fortsätt där du slutade", null, state.screen == Screen.HISTORY, docked, tv = tv, accent = MenuAccents.history, modifier = navModifier(Screen.HISTORY)) {
+            NavItem(Glyphs.History, "Historik", "Fortsätt där du slutade", null, state.screen == Screen.HISTORY, docked, tv = tv, accent = MenuAccents.history, trail = trail, index = 7, modifier = navModifier(Screen.HISTORY)) {
                 go(Screen.HISTORY)
             }
         }
@@ -497,7 +520,7 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
             Spacer(Modifier.height(8.dp))
         }
 
-        NavItem(Glyphs.Settings, "Inställningar", "Källor & uppspelning", null, state.screen == Screen.SETTINGS, docked, tv = tv, accent = MenuAccents.settings, modifier = navModifier(Screen.SETTINGS)) {
+        NavItem(Glyphs.Settings, "Inställningar", "Källor & uppspelning", null, state.screen == Screen.SETTINGS, docked, tv = tv, accent = MenuAccents.settings, trail = trail, index = 8, modifier = navModifier(Screen.SETTINGS)) {
             go(Screen.SETTINGS)
         }
     }
@@ -543,28 +566,37 @@ private fun MenuBrand(state: AppState, tv: Boolean) {
             }
         }
         if (tv) {
+            // Klockan stor och lätt, som på tv-boxarnas startsidor, och dagen under.
+            val time = Instant.ofEpochMilli(state.clock).atZone(ZoneId.systemDefault())
             Text(
-                clockLine(state.clock),
-                style = MaterialTheme.typography.labelLarge,
-                color = palette.textSecondary,
+                time.format(MENU_TIME),
+                style = TextStyle(
+                    fontWeight = FontWeight.Light,
+                    fontSize = 46.sp,
+                    lineHeight = 50.sp,
+                    letterSpacing = (-1).sp,
+                ),
+                color = palette.textPrimary,
                 maxLines = 1,
                 softWrap = false,
-                modifier = Modifier.padding(start = 4.dp, top = 20.dp),
+                modifier = Modifier.padding(start = 6.dp, top = 22.dp),
+            )
+            Text(
+                time.format(MENU_DATE).replaceFirstChar { it.uppercase() },
+                style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 0.3.sp),
+                color = palette.textTertiary,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.padding(start = 8.dp),
             )
         }
     }
 }
 
-/** "21.40  ·  tisdag 10 november". */
-private fun clockLine(ms: Long): String {
-    val time = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault())
-    return time.format(MENU_TIME) + "  ·  " + time.format(MENU_DATE)
-}
-
 private val MENU_TIME = DateTimeFormatter.ofPattern("HH:mm")
 private val MENU_DATE = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.forLanguageTag("sv-SE"))
 
-/** Mellan det som sänds och biblioteket: en tunn linje på tv:n, lite luft på datorn. */
+/** Mellan det som sänds och biblioteket: en liten rubrik på tv:n, lite luft på datorn. */
 @Composable
 private fun NavDivider(tv: Boolean) {
     val palette = LocalPalette.current
@@ -572,43 +604,41 @@ private fun NavDivider(tv: Boolean) {
         Spacer(Modifier.height(6.dp))
         return
     }
-    Box(
-        Modifier
-            .padding(horizontal = 18.dp, vertical = 8.dp)
-            .fillMaxWidth()
-            .height(1.dp)
-            .background(palette.hairline.copy(alpha = palette.hairline.alpha * 0.7f)),
+    Text(
+        "BIBLIOTEK",
+        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = 2.sp),
+        color = palette.textTertiary,
+        maxLines = 1,
+        softWrap = false,
+        modifier = Modifier.padding(start = 18.dp, top = 14.dp, bottom = 4.dp),
     )
 }
 
 /**
- * Tv-menyns bakgrund: ett svagt sken i märkets färger uppe till vänster, där
- * loggan står, och en tunn kant mot innehållet.
+ * Tv-menyns och kategoriernas bakgrund: mörk, med ett svagt sken av
+ * markeringens färg upptill som tonar bort, mörkare nedtill, och en tunn
+ * ljus kant mot innehållet som tonar ut i båda ändar. Inga färgfläckar.
  */
-private fun DrawScope.menuGlow(edge: Color) {
+internal fun DrawScope.drawerBackdrop(palette: Palette) {
+    val tint = menuFill(palette)
+    drawRect(palette.surface.copy(alpha = palette.surface.alpha * 0.5f))
     drawRect(
-        Brush.radialGradient(
-            listOf(Brand.blue.copy(alpha = 0.24f), Brand.violet.copy(alpha = 0.09f), Color.Transparent),
-            center = Offset(size.width * 0.15f, size.height * 0.05f),
-            radius = size.width * 1.3f,
+        Brush.verticalGradient(
+            listOf(tint.copy(alpha = 0.13f), tint.copy(alpha = 0.03f), Color.Transparent),
+            endY = size.height * 0.6f,
         ),
     )
-    drawRect(
-        Brush.radialGradient(
-            listOf(Brand.teal.copy(alpha = 0.10f), Color.Transparent),
-            center = Offset(0f, size.height * 0.55f),
-            radius = size.width * 0.95f,
-        ),
+    drawRect(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.32f)), startY = size.height * 0.55f))
+    val x = size.width - 0.75.dp.toPx()
+    drawLine(
+        Brush.verticalGradient(listOf(Color.Transparent, EDGE, EDGE, Color.Transparent)),
+        Offset(x, 0f),
+        Offset(x, size.height),
+        strokeWidth = 1.5.dp.toPx(),
     )
-    drawRect(
-        Brush.radialGradient(
-            listOf(Brand.magenta.copy(alpha = 0.15f), Brand.violet.copy(alpha = 0.05f), Color.Transparent),
-            center = Offset(size.width * 0.35f, size.height * 1.02f),
-            radius = size.width * 1.15f,
-        ),
-    )
-    drawLine(edge, Offset(size.width - 0.5f, 0f), Offset(size.width - 0.5f, size.height), strokeWidth = 1f)
 }
+
+private val EDGE = Color.White.copy(alpha = 0.12f)
 
 /**
  * Symbolernas färger i menyn: varje del sin egen, fast i alla teman, så att
@@ -642,11 +672,25 @@ internal fun menuFill(palette: Palette): Color = if (palette.focus.isPale()) Bra
 internal fun menuInk(palette: Palette): Color = if (palette.focus.isPale()) Color.White else palette.onFocus
 
 /**
+ * Tv: var markeringen i menyn senast stod och står nu, som radernas
+ * ordning. Så vet raden som får markeringen varifrån den kommer, och raden
+ * som lämnar den vart den går.
+ */
+private class MenuTrail {
+    var from = -1
+    var to = -1
+}
+
+/**
  * En rad i menyn: symbolen i radens egen färg, och namnet. Markerad fylls
  * raden med temats färg och texten blir vit; fliken man är i har ett streck
  * i kanten. Inget sken och inget som skalas — det gör texten suddig på tv:n.
  * På datorn står också en rad förklaring och antalet; på tv:n bara namnet,
  * och LIVE när något pågår.
+ *
+ * Tv ([trail]): fyllningen glider ut ur raden man lämnar och in i nästa,
+ * från det hållet, så att markeringen ser ut att glida mellan raderna. Bara
+ * ritningen görs om medan den glider.
  */
 @Composable
 private fun NavItem(
@@ -661,6 +705,9 @@ private fun NavItem(
     accent: Color,
     /** Siffran räknar det som pågår just nu: röd, som LIVE. */
     live: Boolean = false,
+    trail: MenuTrail? = null,
+    /** Radens plats i menyn, uppifrån. */
+    index: Int = 0,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
@@ -672,16 +719,73 @@ private fun NavItem(
     val fill = menuFill(palette)
     val ink = menuInk(palette)
     // Markerad: färgen tonar in. Musen över: en svag ton av samma färg.
-    val lit by animateFloatAsState(if (focused) 1f else 0f, tween(MENU_MS), label = "menyrad")
+    val lit by animateFloatAsState(if (focused && trail == null) 1f else 0f, tween(MENU_MS), label = "menyrad")
     val hint by animateFloatAsState(if (hovered && !focused) 0.12f else 0f, tween(MENU_MS), label = "menyhovring")
+    // Tv: fyllningens läge i radhöjder (-1 ovanför, 1 under) och hur mycket den syns.
+    val slide = remember { Animatable(0f) }
+    val shown = remember { Animatable(0f) }
+    if (trail != null) {
+        LaunchedEffect(focused) {
+            if (focused) {
+                val from = trail.from
+                if (from < 0 || from == index) {
+                    slide.snapTo(0f)
+                    shown.animateTo(1f, tween(MENU_MS))
+                } else {
+                    shown.snapTo(1f)
+                    slide.snapTo(if (from < index) -1f else 1f)
+                    slide.animateTo(0f, tween(PILL_MS, easing = FastOutSlowInEasing))
+                }
+            } else if (shown.value > 0f) {
+                val to = trail.to
+                if (to >= 0 && to != index) {
+                    slide.animateTo(if (to > index) 1f else -1f, tween(PILL_MS, easing = FastOutSlowInEasing))
+                } else {
+                    shown.animateTo(0f, tween(MENU_MS))
+                }
+                shown.snapTo(0f)
+                slide.snapTo(0f)
+            }
+        }
+    }
+    // Symbolen kliver lite åt höger på raden som är markerad.
+    val nudge by animateFloatAsState(if (focused && tv) 1f else 0f, tween(MENU_MS), label = "menysymbol")
     val counted = count != null && count > 0
     Box(
         modifier
             .fillMaxWidth()
+            .then(
+                if (trail != null) {
+                    Modifier.onFocusChanged {
+                        if (it.isFocused && trail.to != index) {
+                            trail.from = trail.to
+                            trail.to = index
+                        }
+                    }
+                } else {
+                    Modifier
+                },
+            )
             .clip(shape)
             .drawBehind {
                 if (hint > 0.001f) drawRect(fill, alpha = hint)
                 if (lit > 0.001f) drawRect(fill, alpha = lit)
+                val alpha = shown.value
+                if (alpha > 0.001f) {
+                    val dy = slide.value * size.height
+                    drawRect(fill, topLeft = Offset(0f, dy), size = size, alpha = alpha)
+                    // Ett svagt ljus i plattans överkant.
+                    drawRect(
+                        Brush.verticalGradient(
+                            listOf(Color.White.copy(alpha = 0.16f), Color.Transparent),
+                            startY = dy,
+                            endY = dy + size.height * 0.7f,
+                        ),
+                        topLeft = Offset(0f, dy),
+                        size = size,
+                        alpha = alpha,
+                    )
+                }
             }
             .hoverable(interaction)
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
@@ -704,7 +808,14 @@ private fun NavItem(
                 .padding(horizontal = if (tv) 16.dp else 12.dp, vertical = if (tv) 13.dp else 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(icon, contentDescription = null, tint = if (focused) ink else accent, modifier = Modifier.size(if (tv) 26.dp else 22.dp))
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = if (focused) ink else accent,
+                modifier = Modifier
+                    .size(if (tv) 26.dp else 22.dp)
+                    .graphicsLayer { translationX = nudge * 4.dp.toPx() },
+            )
             Spacer(Modifier.width(if (tv) 16.dp else 14.dp))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -749,15 +860,26 @@ private fun NavItem(
     }
 }
 
-/** "2 LIVE": det som pågår just nu, i rött. */
+/** "● 2 LIVE": det som pågår just nu, i rött, med en prick som pulserar. */
 @Composable
 private fun LiveBadge(count: Int) {
-    Box(
+    val transition = rememberInfiniteTransition(label = "live")
+    val pulse by transition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse),
+        label = "puls",
+    )
+    Row(
         Modifier
-            .clip(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(7.dp))
             .background(LIVE_COUNT)
-            .padding(horizontal = 7.dp, vertical = 2.dp),
+            .padding(start = 7.dp, end = 8.dp, top = 3.dp, bottom = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        // Bara lagrets genomskinlighet ändras: inget ritas om.
+        Box(Modifier.size(6.dp).graphicsLayer { alpha = pulse }.clip(CircleShape).background(Color.White))
+        Spacer(Modifier.width(5.dp))
         Text(
             "$count LIVE",
             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp),

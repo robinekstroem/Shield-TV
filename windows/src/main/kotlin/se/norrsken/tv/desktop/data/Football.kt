@@ -22,16 +22,98 @@ import kotlin.math.roundToInt
  * Fliken Fotboll: matcher, tabeller och startelvor från ESPN:s öppna data.
  * Ingen nyckel behövs. Allt läses tolerant: saknas ett fält blir det tomt i
  * stället för att något går sönder.
+ *
+ * Utöver ligorna två lag: Malmö FF och herrlandslaget. Deras matcher hämtas
+ * ur alla tävlingar de spelar i, ett halvår runt idag, så att nästa match
+ * syns också när den ligger långt fram.
  */
-enum class League(val slug: String, val title: String, val short: String, val accent: Long) {
+enum class League(
+    val slug: String,
+    val title: String,
+    val short: String,
+    val accent: Long,
+    /** Tävlingarna matcherna hämtas ur. En liga: sin egen. */
+    val sources: List<String> = listOf(slug),
+    /** Ett lag: bara dess matcher ur tävlingarna (ESPN:s id och namn). */
+    val teamId: String? = null,
+    val teamName: String? = null,
+) {
+    MALMO_FF(
+        "swe.1",
+        "Malmö FF",
+        "MFF",
+        0xFF6CB4EE,
+        sources = listOf(
+            "swe.1",
+            "uefa.champions",
+            "uefa.europa",
+            "uefa.europa.conf",
+            "uefa.champions_qual",
+            "uefa.europa_qual",
+            "uefa.europa.conf_qual",
+            "club.friendly",
+        ),
+        teamId = "2720",
+        teamName = "Malmö FF",
+    ),
+    SWEDEN(
+        "uefa.nations",
+        "Sverige",
+        "SVE",
+        0xFF0A6FC2,
+        sources = listOf("uefa.nations", "uefa.euroq", "fifa.worldq.uefa", "fifa.friendly"),
+        teamId = "466",
+        // Landslagens namn skrivs på svenska när de läses (se COUNTRY_SV).
+        teamName = "Sverige",
+    ),
+    ALLSVENSKAN("swe.1", "Allsvenskan", "Allsvenskan", 0xFF2E9BFF),
     CHAMPIONS_LEAGUE("uefa.champions", "Champions League", "CL", 0xFF3D6BFF),
     // Europa- och Conference League: Disney+ i Sverige.
     EUROPA_LEAGUE("uefa.europa", "Europa League", "EL", 0xFFFF7A1A),
     CONFERENCE_LEAGUE("uefa.europa.conf", "Conference League", "ECL", 0xFF2BD46B),
     PREMIER_LEAGUE("eng.1", "Premier League", "PL", 0xFFA24DFF),
     LA_LIGA("esp.1", "LaLiga", "LaLiga", 0xFFFF5A4E),
-    ALLSVENSKAN("swe.1", "Allsvenskan", "Allsvenskan", 0xFF2E9BFF),
+    ;
+
+    /** Ett lag (Malmö FF, landslaget), inte en liga. */
+    val isTeam: Boolean get() = teamId != null
+
+    /** En vanlig liga med tabell. */
+    val hasTable: Boolean get() = teamId == null
 }
+
+/**
+ * Tävlingen en match spelas i, kort och på svenska, efter ESPN:s namn på den:
+ * "Allsvenskan", "EL-kval", "Nations League", "Träningsmatch".
+ */
+fun competitionName(slug: String): String = when (slug) {
+    "swe.1" -> "Allsvenskan"
+    "uefa.champions" -> "Champions League"
+    "uefa.europa" -> "Europa League"
+    "uefa.europa.conf" -> "Conference League"
+    "uefa.champions_qual" -> "CL-kval"
+    "uefa.europa_qual" -> "EL-kval"
+    "uefa.europa.conf_qual" -> "ECL-kval"
+    "club.friendly", "fifa.friendly" -> "Träningsmatch"
+    "uefa.nations" -> "Nations League"
+    "uefa.euroq" -> "EM-kval"
+    "fifa.worldq.uefa" -> "VM-kval"
+    "uefa.euro" -> "EM"
+    "fifa.world" -> "VM"
+    "eng.1" -> "Premier League"
+    "esp.1" -> "LaLiga"
+    else -> "Match"
+}
+
+/** Malmö FF, hur ESPN än skriver namnet: "Malmö FF", "Malmo FF", "Malmö". */
+fun FootballTeam.isMalmoFF(): Boolean {
+    val n = normalizeName(name)
+    val s = normalizeName(short)
+    return n == "malmo ff" || n == "malmo" || n.startsWith("malmo ff ") || s == "malmo ff" || s == "malmo"
+}
+
+/** Malmö FF spelar. */
+fun FootballMatch.isMalmoFF(): Boolean = home.isMalmoFF() || away.isMalmoFF()
 
 class FootballTeam(
     val id: String,
@@ -63,6 +145,8 @@ class FootballMatch(
     val awayScore: Int?,
     val venue: String?,
     val goals: List<MatchGoal>,
+    /** Tävlingen hos ESPN, för matchens detaljer: landslagets matcher kommer från flera. */
+    val slug: String = league.slug,
 )
 
 class TableRow(
@@ -138,23 +222,51 @@ class FootballClient {
         return scoreboard(league, months).filter { localDay(it.kickoff) in from..to }
     }
 
-    /** Ligans matcher de här dagarna, en fråga per dag: ställningen medan matcher pågår. */
-    fun matchesOn(league: League, days: List<LocalDate>): List<FootballMatch> =
-        scoreboard(league, days.distinct().map { it.format(DateTimeFormatter.BASIC_ISO_DATE) })
+    /**
+     * Ligans matcher de här dagarna, en fråga per dag: ställningen medan matcher
+     * pågår. Ett lag: bara ur [sources], tävlingarna dess matcher de dagarna hör till.
+     */
+    fun matchesOn(league: League, days: List<LocalDate>, sources: List<String> = league.sources): List<FootballMatch> =
+        scoreboard(league, days.distinct().map { it.format(DateTimeFormatter.BASIC_ISO_DATE) }, sources)
 
-    /** En fråga per datum, "20261106" eller "202611". Samma match i två svar räknas en gång. */
-    private fun scoreboard(league: League, dates: List<String>): List<FootballMatch> {
+    /**
+     * En fråga per tävling och datum, "20261106" eller "202611". Samma match i
+     * två svar räknas en gång. Ett lag: bara dess matcher, och en tävling som
+     * inte svarar hoppas över så länge någon annan gör det.
+     */
+    private fun scoreboard(league: League, dates: List<String>, sources: List<String> = league.sources): List<FootballMatch> {
         val found = LinkedHashMap<String, FootballMatch>()
-        for (value in dates) {
-            val root = get("$SITE/${league.slug}/scoreboard?dates=$value&limit=1000")
-            root.optJSONArray("leagues")?.optJSONObject(0)?.let { rememberLogo(league, it) }
-            val events = root.optJSONArray("events") ?: continue
-            for (event in objects(events)) {
-                val match = runCatching { parseMatch(league, event) }.getOrNull() ?: continue
-                found[match.id] = match
+        val team = league.isTeam
+        var failure: IOException? = null
+        var answered = false
+        for (source in sources) {
+            for (value in dates) {
+                val root = try {
+                    get("$SITE/$source/scoreboard?dates=$value&limit=1000")
+                } catch (error: IOException) {
+                    if (!team) throw error
+                    if (failure == null) failure = error
+                    continue
+                }
+                answered = true
+                if (!team) root.optJSONArray("leagues")?.optJSONObject(0)?.let { rememberLogo(league, it) }
+                val events = root.optJSONArray("events") ?: continue
+                for (event in objects(events)) {
+                    val match = runCatching { parseMatch(league, source, event) }.getOrNull() ?: continue
+                    if (team && !plays(league, match.home) && !plays(league, match.away)) continue
+                    found[match.id] = match
+                }
             }
         }
+        if (!answered) failure?.let { throw it }
         return found.values.toList()
+    }
+
+    /** Laget som [league] följer, med ESPN:s id eller namn ("Malmö FF" och "Malmo FF" är samma). */
+    private fun plays(league: League, team: FootballTeam): Boolean {
+        if (team.id == league.teamId) return true
+        val name = league.teamName ?: return false
+        return normalizeName(team.name) == normalizeName(name)
     }
 
     private fun localDay(ms: Long): LocalDate = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()
@@ -183,6 +295,7 @@ class FootballClient {
 
     /** Ligatabellen, bäst först. ESPN har den under två sökvägar; den andra är reserv. */
     fun table(league: League): List<TableRow> {
+        if (!league.hasTable) return emptyList()
         val first = runCatching { parseTable(get("$STANDINGS/${league.slug}/standings")) }
         first.getOrNull()?.takeIf { it.isNotEmpty() }?.let { return it }
         val second = runCatching { parseTable(get("$SITE/${league.slug}/standings")) }
@@ -207,9 +320,9 @@ class FootballClient {
             .sortedBy { it.rank }
     }
 
-    /** Startelvor, händelser och statistik för en match. */
-    fun detail(league: League, matchId: String, homeTeamId: String): MatchDetail {
-        val root = get("$SITE/${league.slug}/summary?event=$matchId")
+    /** Startelvor, händelser och statistik för en match. [slug]: matchens tävling hos ESPN. */
+    fun detail(slug: String, matchId: String, homeTeamId: String): MatchDetail {
+        val root = get("$SITE/$slug/summary?event=$matchId")
 
         val lineups = ArrayList<Lineup>()
         root.optJSONArray("rosters")?.let { rosters ->
@@ -328,7 +441,7 @@ class FootballClient {
         )
     }
 
-    private fun parseMatch(league: League, e: JSONObject): FootballMatch? {
+    private fun parseMatch(league: League, slug: String, e: JSONObject): FootballMatch? {
         val competition = e.optJSONArray("competitions")?.optJSONObject(0) ?: return null
         val competitors = competition.optJSONArray("competitors") ?: return null
         var homeJson: JSONObject? = null
@@ -338,8 +451,9 @@ class FootballClient {
         }
         val homeSide = homeJson ?: return null
         val awaySide = awayJson ?: return null
-        val home = parseTeam(homeSide.optJSONObject("team") ?: return null, homeSide.text("form"))
-        val away = parseTeam(awaySide.optJSONObject("team") ?: return null, awaySide.text("form"))
+        val national = slug in NATIONAL_COMPETITIONS
+        val home = parseTeam(homeSide.optJSONObject("team") ?: return null, homeSide.text("form"), national)
+        val away = parseTeam(awaySide.optJSONObject("team") ?: return null, awaySide.text("form"), national)
 
         val status = e.optJSONObject("status") ?: competition.optJSONObject("status")
         val type = status?.optJSONObject("type")
@@ -394,6 +508,7 @@ class FootballClient {
             awayScore = if (played) score(awaySide) else null,
             venue = competition.optJSONObject("venue")?.text("fullName"),
             goals = goals,
+            slug = slug,
         )
     }
 
@@ -423,12 +538,15 @@ class FootballClient {
         )
     }
 
-    private fun parseTeam(t: JSONObject, form: String?): FootballTeam {
-        val name = t.text("displayName") ?: t.text("name") ?: "?"
+    /** [national]: ett landslag, vars namn skrivs på svenska ("Estonia" → "Estland"). */
+    private fun parseTeam(t: JSONObject, form: String?, national: Boolean = false): FootballTeam {
+        val english = t.text("displayName") ?: t.text("name") ?: "?"
+        val name = if (national) COUNTRY_SV[english] ?: english else english
+        val short = (t.text("shortDisplayName") ?: english).let { if (national) COUNTRY_SV[it] ?: it else it }
         return FootballTeam(
-            id = t.text("id") ?: name,
+            id = t.text("id") ?: english,
             name = name,
-            short = t.text("shortDisplayName") ?: name,
+            short = if (national && name != english) name else short,
             abbreviation = t.text("abbreviation") ?: name.take(3).uppercase(),
             logo = t.text("logo") ?: t.optJSONArray("logos")?.optJSONObject(0)?.text("href"),
             form = form,
@@ -557,7 +675,9 @@ fun findBroadcasts(matches: List<FootballMatch>, channels: List<LiveChannel>, gu
         if (home.isNotEmpty() && away.isNotEmpty()) names[match.id] = home to away
     }
     val byKickoff = matches.filter { it.id in names }.groupBy { it.kickoff }
-    val leagues = League.entries.associateWith { " " + normalizeName(it.title) + " " }
+    // Ligans namn och ett av lagen räcker. Inte för lagens egna matcher: "Sverige"
+    // eller "Malmö FF" i ett program säger inte vilken match det är.
+    val leagues = League.entries.associateWith { if (it.isTeam) null else " " + normalizeName(it.title) + " " }
     val texts = IdentityHashMap<Programme, String>()
     val found = HashMap<String, MutableList<Pair<Int, LiveChannel>>>()
     // Streamingtjänsterna (Disney+, Prime Video, TV4 Play, Viaplay) ligger ofta
@@ -575,14 +695,14 @@ fun findBroadcasts(matches: List<FootballMatch>, channels: List<LiveChannel>, gu
             }
             for (match in group) {
                 val (home, away) = names[match.id] ?: continue
-                val league = leagues.getValue(match.league)
+                val league = leagues[match.league]
                 var best = 0
                 for (text in programmeTexts) {
                     val h = home.any { it in text }
                     val a = away.any { it in text }
                     val score = when {
                         h && a -> 3
-                        (h || a) && league in text -> 2
+                        (h || a) && league != null && league in text -> 2
                         else -> 0
                     }
                     if (score > best) best = score
@@ -801,6 +921,8 @@ private fun teamKeys(team: FootballTeam, shared: Set<String>): List<String> {
         }
         // Namnen svenska tablåer brukar använda: "Athletic Bilbao", "Inter", "Köpenhamn".
         ALIASES[n]?.let { keys += it }
+        // Landslagen står på svenska ("Estland"); engelska kanalnamn skriver "Estonia".
+        COUNTRY_ALIASES[n]?.let { keys += it }
     }
     val abbreviation = normalizeName(team.abbreviation)
     if (abbreviation.length >= 3 && abbreviation !in COMMON_WORDS && abbreviation !in shared) keys += abbreviation
@@ -829,6 +951,97 @@ private val ALIASES: Map<String, List<String>> = mapOf(
     "celta vigo" to listOf("celta"),
     "rayo vallecano" to listOf("rayo"),
 )
+
+/** Landslagens tävlingar hos ESPN: där är lagen länder. */
+private val NATIONAL_COMPETITIONS = setOf("uefa.nations", "uefa.euroq", "fifa.worldq.uefa", "fifa.friendly", "uefa.euro", "fifa.world")
+
+/** Länderna på svenska, som tablåerna skriver dem. ESPN skriver på engelska. */
+private val COUNTRY_SV: Map<String, String> = mapOf(
+    "Sweden" to "Sverige",
+    "Denmark" to "Danmark",
+    "Norway" to "Norge",
+    "Finland" to "Finland",
+    "Iceland" to "Island",
+    "Faroe Islands" to "Färöarna",
+    "Estonia" to "Estland",
+    "Latvia" to "Lettland",
+    "Lithuania" to "Litauen",
+    "Germany" to "Tyskland",
+    "France" to "Frankrike",
+    "Spain" to "Spanien",
+    "Italy" to "Italien",
+    "Portugal" to "Portugal",
+    "England" to "England",
+    "Scotland" to "Skottland",
+    "Wales" to "Wales",
+    "Northern Ireland" to "Nordirland",
+    "Republic of Ireland" to "Irland",
+    "Ireland" to "Irland",
+    "Switzerland" to "Schweiz",
+    "Austria" to "Österrike",
+    "Netherlands" to "Nederländerna",
+    "Belgium" to "Belgien",
+    "Luxembourg" to "Luxemburg",
+    "Poland" to "Polen",
+    "Czechia" to "Tjeckien",
+    "Czech Republic" to "Tjeckien",
+    "Slovakia" to "Slovakien",
+    "Slovenia" to "Slovenien",
+    "Hungary" to "Ungern",
+    "Croatia" to "Kroatien",
+    "Serbia" to "Serbien",
+    "Bosnia-Herzegovina" to "Bosnien-Hercegovina",
+    "Bosnia and Herzegovina" to "Bosnien-Hercegovina",
+    "Montenegro" to "Montenegro",
+    "Kosovo" to "Kosovo",
+    "Albania" to "Albanien",
+    "North Macedonia" to "Nordmakedonien",
+    "Greece" to "Grekland",
+    "Bulgaria" to "Bulgarien",
+    "Romania" to "Rumänien",
+    "Moldova" to "Moldavien",
+    "Ukraine" to "Ukraina",
+    "Belarus" to "Belarus",
+    "Turkey" to "Turkiet",
+    "Türkiye" to "Turkiet",
+    "Cyprus" to "Cypern",
+    "Malta" to "Malta",
+    "Georgia" to "Georgien",
+    "Armenia" to "Armenien",
+    "Azerbaijan" to "Azerbajdzjan",
+    "Kazakhstan" to "Kazakstan",
+    "Israel" to "Israel",
+    "Andorra" to "Andorra",
+    "San Marino" to "San Marino",
+    "Liechtenstein" to "Liechtenstein",
+    "Gibraltar" to "Gibraltar",
+    "United States" to "USA",
+    "USA" to "USA",
+    "Canada" to "Kanada",
+    "Mexico" to "Mexiko",
+    "Brazil" to "Brasilien",
+    "Argentina" to "Argentina",
+    "Uruguay" to "Uruguay",
+    "Colombia" to "Colombia",
+    "Chile" to "Chile",
+    "Japan" to "Japan",
+    "South Korea" to "Sydkorea",
+    "Australia" to "Australien",
+    "Morocco" to "Marocko",
+    "Egypt" to "Egypten",
+    "Algeria" to "Algeriet",
+    "Tunisia" to "Tunisien",
+    "Saudi Arabia" to "Saudiarabien",
+    "Ivory Coast" to "Elfenbenskusten",
+    "Cameroon" to "Kamerun",
+    "South Africa" to "Sydafrika",
+)
+
+/** Svenska landsnamn → de engelska, för kanaler som skriver på engelska. */
+private val COUNTRY_ALIASES: Map<String, List<String>> by lazy {
+    COUNTRY_SV.entries.filter { (english, swedish) -> english != swedish }
+        .associate { (english, swedish) -> normalizeName(swedish) to listOf(normalizeName(english)) }
+}
 
 /**
  * Gemener utan accenter, bara bokstäver och siffror med ett mellanslag

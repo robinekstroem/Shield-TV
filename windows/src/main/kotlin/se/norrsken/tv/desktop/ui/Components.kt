@@ -73,6 +73,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusDirection
@@ -103,6 +104,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -596,7 +598,7 @@ private fun TvGroupPanel(
                     .fillMaxHeight()
                     .shadow(if (open) 24.dp else 0.dp)
                     .background(if (open) palette.background else Color.Transparent)
-                    .background(palette.surface),
+                    .drawBehind { drawerBackdrop(palette) },
             )
             if (!open) {
                 Icon(
@@ -631,7 +633,7 @@ private fun TvGroupPanel(
                         .fillMaxHeight()
                         .shadow(24.dp)
                         .background(palette.background)
-                        .background(palette.surface),
+                        .drawBehind { drawerBackdrop(palette) },
                 )
                 Box(
                     Modifier
@@ -734,14 +736,18 @@ private fun TvGroupList(
             }
             .focusGroup(),
     ) {
-        Text(
-            title,
-            style = MaterialTheme.typography.labelSmall,
-            color = palette.textTertiary,
-            maxLines = 1,
-            softWrap = false,
-            modifier = Modifier.padding(start = 22.dp, top = 28.dp, bottom = 10.dp).graphicsLayer { alpha = shown() },
-        )
+        // Rubriken med ett kort streck i markeringens färg under.
+        Column(Modifier.padding(start = 22.dp, top = 30.dp, bottom = 14.dp).graphicsLayer { alpha = shown() }) {
+            Text(
+                title,
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = 2.sp),
+                color = palette.textSecondary,
+                maxLines = 1,
+                softWrap = false,
+            )
+            Spacer(Modifier.height(7.dp))
+            Box(Modifier.size(width = 26.dp, height = 3.dp).clip(RoundedCornerShape(2.dp)).background(menuFill(palette)))
+        }
         TvScrolling(lead = 0.2f, trail = 0.2f) {
             LazyColumn(
                 state = listState,
@@ -782,7 +788,13 @@ private suspend fun focusRow(listState: LazyListState, index: Int, requester: Fo
     runCatching { requester.requestFocus() }
 }
 
-/** En kategori i tv-listan. Texten syns bara utfälld; den valda raden syns som en ljus fläck i kanten. */
+/**
+ * En kategori i tv-listan. Texten syns bara utfälld. Markerad fylls raden
+ * med samma färg som menyns markerade rad, som tonar in och ut — ingen ram.
+ * Den valda kategorin har ett streck i kanten. Det som står inom hakparentes
+ * eller sist i namnet om bildkvalitet och språk ("4K", "DV", "MULTI-SUB")
+ * står som små märken efter namnet.
+ */
 @Composable
 private fun TvGroupRow(
     name: String,
@@ -796,21 +808,37 @@ private fun TvGroupRow(
     onClick: () -> Unit,
 ) {
     val palette = LocalPalette.current
-    Pressable(
-        onClick = onClick,
-        selected = selected,
-        glowing = false,
-        modifier = Modifier
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val hovered by interaction.collectIsHoveredAsState()
+    val active = focused || hovered
+    val fill = menuFill(palette)
+    val ink = menuInk(palette)
+    // Läses först när raden ritas: bara ritningen görs om medan den tonar.
+    val lit = animateFloatAsState(if (active) 1f else 0f, tween(ROW_FADE_MS), label = "kategorirad")
+    val label = remember(name) { categoryLabel(name) }
+    Box(
+        Modifier
             .padding(top = if (gapAbove) 10.dp else 0.dp)
             .fillMaxWidth()
             .then(if (focus != null) Modifier.focusRequester(focus) else Modifier)
-            .onFocusChanged { if (it.isFocused) onFocused() },
-    ) { active ->
-        // Markerad: raden fylls med samma färg som menyns markerade rad, utan sken.
-        val ink = menuInk(palette)
-        if (active) {
-            Box(Modifier.matchParentSize().background(menuFill(palette)))
-        } else if (selected) {
+            .onFocusChanged { if (it.isFocused) onFocused() }
+            .clip(RoundedCornerShape(12.dp))
+            .drawBehind {
+                val alpha = lit.value
+                if (alpha > 0.001f) {
+                    drawRect(fill, alpha = alpha)
+                    drawRect(
+                        Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.14f), Color.Transparent)),
+                        alpha = alpha,
+                    )
+                }
+            }
+            .hoverable(interaction)
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .pointerHoverIcon(PointerIcon.Hand),
+    ) {
+        if (selected && !active) {
             // Kategorin man är i: ett streck i märkets färger.
             Box(
                 Modifier
@@ -824,42 +852,118 @@ private fun TvGroupRow(
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(start = if (indent) 30.dp else 14.dp, end = 12.dp, top = 10.dp, bottom = 10.dp)
+                .padding(start = if (indent) 30.dp else 14.dp, end = 14.dp, top = 11.dp, bottom = 11.dp)
                 .graphicsLayer { alpha = shown() },
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                name,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (selected || active) FontWeight.SemiBold else FontWeight.Medium,
-                color = when {
-                    active -> ink
-                    selected -> palette.textPrimary
-                    else -> palette.textSecondary
-                },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.width(8.dp))
-            // Antalet i en liten bricka.
-            Box(
-                Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (active) ink.copy(alpha = 0.18f) else palette.surfaceRaised)
-                    .padding(horizontal = 7.dp, vertical = 2.dp),
-            ) {
+            // Namnet och märkena direkt efter det; antalet längst till höger.
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    count.grouped(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (active) ink else palette.textTertiary,
+                    label.name,
+                    modifier = Modifier.weight(1f, fill = false),
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = if (selected || active) FontWeight.SemiBold else FontWeight.Medium,
+                    color = when {
+                        active -> ink
+                        selected -> palette.textPrimary
+                        else -> palette.textSecondary
+                    },
                     maxLines = 1,
-                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                 )
+                label.marks.forEach { mark ->
+                    Spacer(Modifier.width(6.dp))
+                    CategoryMark(mark, active, ink)
+                }
             }
+            Spacer(Modifier.width(10.dp))
+            Text(
+                count.grouped(),
+                style = MaterialTheme.typography.labelMedium,
+                color = if (active) ink.copy(alpha = 0.78f) else palette.textTertiary,
+                maxLines = 1,
+                softWrap = false,
+            )
         }
     }
 }
+
+/** En kategoris namn utan märkena, och märkena för sig. */
+internal class CategoryLabel(val name: String, val marks: List<String>)
+
+/**
+ * "Filmer [4K]" → "Filmer" med märket 4K; "Action (Multi-Sub)" → "Action"
+ * med MULTI-SUB; "Dokumentär UHD" → "Dokumentär" med UHD. Högst två märken,
+ * och namnet blir aldrig tomt.
+ */
+internal fun categoryLabel(raw: String): CategoryLabel {
+    val marks = ArrayList<String>()
+    var name = BRACKETS.replace(raw) { match ->
+        val inner = match.groupValues[1].trim()
+        if (inner.isNotEmpty() && inner.length <= 12) {
+            marks += inner.uppercase()
+            " "
+        } else {
+            match.value
+        }
+    }
+    // Bildkvaliteten sist i namnet: "Filmer 4K", "Dokumentär UHD HDR".
+    while (true) {
+        val words = name.trim().split(' ').filter { it.isNotEmpty() }
+        val last = words.lastOrNull() ?: break
+        if (words.size < 2 || last.uppercase() !in QUALITY_WORDS) break
+        marks.add(0, last.uppercase())
+        name = words.dropLast(1).joinToString(" ")
+    }
+    name = name.replace(SPACES, " ").trim().trimEnd('-', '|', ':', '/').trim()
+    if (name.isEmpty()) return CategoryLabel(raw.trim(), emptyList())
+    return CategoryLabel(name, marks.distinct().take(2))
+}
+
+private val BRACKETS = Regex("""[\[(]([^\[\]()]*)[\])]""")
+private val SPACES = Regex("""\s+""")
+private val QUALITY_WORDS = setOf("4K", "UHD", "8K", "HDR", "HDR10", "DV", "FHD", "HEVC", "H265", "3D")
+
+/** Ett litet märke efter kategorins namn: guld för 4K, violett för HDR och Dolby Vision. */
+@Composable
+private fun CategoryMark(mark: String, active: Boolean, ink: Color) {
+    val color = when {
+        mark in setOf("4K", "UHD", "8K") -> MARK_GOLD
+        mark in setOf("DV", "HDR", "HDR10") || "VISION" in mark -> MARK_VIOLET
+        "SUB" in mark || "TEXT" in mark -> MARK_TEAL
+        else -> null
+    }
+    val shape = RoundedCornerShape(5.dp)
+    Box(
+        Modifier
+            .clip(shape)
+            .background(
+                when {
+                    active -> ink.copy(alpha = 0.18f)
+                    color != null -> color.copy(alpha = 0.18f)
+                    else -> Color.White.copy(alpha = 0.08f)
+                },
+            )
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+    ) {
+        Text(
+            mark,
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = 0.4.sp),
+            color = when {
+                active -> ink
+                color != null -> color
+                else -> LocalPalette.current.textTertiary
+            },
+            maxLines = 1,
+            softWrap = false,
+        )
+    }
+}
+
+private val MARK_GOLD = Color(0xFFE8B84A)
+private val MARK_VIOLET = Color(0xFFB79CFF)
+private val MARK_TEAL = Color(0xFF52D6C8)
+private const val ROW_FADE_MS = 130
 
 private val TV_GROUPS_CLOSED = 36.dp
 private val TV_GROUPS_OPEN = 340.dp

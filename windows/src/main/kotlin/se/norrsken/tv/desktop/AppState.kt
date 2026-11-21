@@ -381,6 +381,15 @@ class AppState {
         private set
     private val footballClient = FootballClient()
     private var tablesAt = 0L
+    /**
+     * Ligornas matcher och lagens egna (Malmö FF, landslaget) var för sig.
+     * Tillsammans blir de [footballMatches], där en match som finns i båda
+     * står en gång, från sin liga.
+     */
+    private var leagueMatches: List<FootballMatch> = emptyList()
+    private var teamMatches: Map<League, List<FootballMatch>> = emptyMap()
+    /** Lagens matcher hämtas sällan: de ligger glest, månader framåt och bakåt. */
+    private var teamsAt = 0L
     /** När hela perioden senast hämtades; däremellan hämtas bara dagarna kring idag. */
     private var footballFullAt = 0L
     private var footballTriedAt = 0L
@@ -646,8 +655,16 @@ class AppState {
     /** Startsidan har fått sina rader. Tunga bakgrundsjobb väntar på den, högst en stund. */
     private val homeReady = CompletableDeferred<Unit>()
 
+    /** Startsidan har visats med sina rader: startanimationen kan tona bort. */
+    var homeShown by mutableStateOf(false)
+        private set
+
+    /** Startanimationen har spelats klart. En gång per start av appen. */
+    var introDone by mutableStateOf(false)
+
     fun markHomeReady() {
         homeReady.complete(Unit)
+        homeShown = true
     }
 
     /** Väntar tills startsidan är klar, eller som längst [STARTUP_GRACE_MS]: starten går först. */
@@ -967,14 +984,28 @@ class AppState {
                 .filter { it.state == MatchState.LIVE || it.shouldHaveStarted(started) }
                 .map { Instant.ofEpochMilli(it.kickoff).atZone(ZoneId.systemDefault()).toLocalDate() }
             ).distinct()
+        val daySet = days.toSet()
+        // Lagen (Malmö FF, landslaget) hämtas för sig, efter ligorna (se fetchTeams).
+        // Mellan gångerna bara de dagar de spelar, och bara ur tävlingarna de
+        // matcherna hör till. En match som också finns i en liga följer ligan.
+        val teamsDue = full && started - teamsAt > TEAMS_EVERY_MS
+        val inLeagues = leagueMatches.mapTo(HashSet()) { it.id }
+        val teamSources: Map<League, List<String>> = if (full) {
+            emptyMap()
+        } else {
+            teamMatches.mapValues { (_, list) ->
+                list.filter { it.id !in inLeagues && dayOf(it.kickoff) in daySet }.map { it.slug }.distinct()
+            }.filterValues { it.isNotEmpty() }
+        }
+        val leagues = League.entries.filter { !it.isTeam } + teamSources.keys
         val results = coroutineScope {
-            League.entries.map { league ->
+            leagues.map { league ->
                 async(Dispatchers.IO) {
                     league to runCatching {
                         if (full) {
                             footballClient.matches(league, today.minusDays(7), today.plusDays(14))
                         } else {
-                            footballClient.matchesOn(league, days)
+                            footballClient.matchesOn(league, days, teamSources[league] ?: league.sources)
                         }
                     }
                 }
@@ -989,27 +1020,37 @@ class AppState {
             return
         }
         footballError = null
-        val fresh = fetched.flatMap { it.second.getOrDefault(emptyList()) }
-        val merged = if (full) {
+        val fresh = fetched.filter { !it.first.isTeam }.flatMap { it.second.getOrDefault(emptyList()) }
+        leagueMatches = if (full) {
             // En liga som inte gick att hämta den här gången behåller sina matcher.
             val failed = results.filter { it.second.isFailure }.map { it.first }.toSet()
-            fresh + footballMatches.filter { it.league in failed }
+            fresh + leagueMatches.filter { it.league in failed }
         } else {
             // Bara dagarna kring idag: de nya ersätter sina gamla, resten står kvar.
             val ids = fresh.mapTo(HashSet()) { it.id }
-            footballMatches.filter { it.id !in ids } + fresh
+            leagueMatches.filter { it.id !in ids } + fresh
         }
-        footballMatches = merged.sortedBy { it.kickoff }
+        // Lagens matcher de här dagarna ersätter sina gamla på samma sätt.
+        for ((league, result) in fetched) {
+            if (!league.isTeam) continue
+            val found = result.getOrDefault(emptyList())
+            val ids = found.mapTo(HashSet()) { it.id }
+            teamMatches = teamMatches + (league to (teamMatches[league].orEmpty().filter { it.id !in ids } + found))
+        }
+        publishMatches()
         val logos = League.entries.mapNotNull { league -> footballClient.logoOf(league)?.let { league to it } }.toMap()
         if (logos != footballLogos) footballLogos = logos
         val now = System.currentTimeMillis()
         footballUpdatedAt = now
         if (full) footballFullAt = now
-        if (!foreground) return
+        if (!foreground) {
+            if (teamsDue) fetchTeams(today)
+            return
+        }
 
         if (footballTables.isEmpty() || now - tablesAt > TABLES_MAX_AGE_MS) {
             val tables = coroutineScope {
-                League.entries.map { league ->
+                League.entries.filter { it.hasTable }.map { league ->
                     async(Dispatchers.IO) { league to runCatching { footballClient.table(league) }.getOrNull() }
                 }.awaitAll()
             }
@@ -1025,6 +1066,39 @@ class AppState {
         }
         checkLineups()
         refreshMatchChannels()
+        if (teamsDue && fetchTeams(today)) refreshMatchChannels()
+    }
+
+    /** Ligornas och lagens matcher i en lista, i tidsordning: varje match en gång, helst från sin liga. */
+    private fun publishMatches() {
+        val byId = LinkedHashMap<String, FootballMatch>()
+        for (match in leagueMatches) byId[match.id] = match
+        for (list in teamMatches.values) for (match in list) byId.putIfAbsent(match.id, match)
+        footballMatches = byId.values.sortedBy { it.kickoff }
+    }
+
+    private fun dayOf(ms: Long): LocalDate = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()
+
+    /**
+     * Malmö FF:s och herrlandslagets matcher: ett halvår runt idag, ur alla
+     * tävlingar de spelar i. Många frågor, så de görs efter ligorna och bara
+     * var sjätte timme; ligorna syns under tiden. Svarar med om något hämtades.
+     */
+    private suspend fun fetchTeams(today: LocalDate): Boolean {
+        val found = coroutineScope {
+            League.entries.filter { it.isTeam }.map { league ->
+                async(Dispatchers.IO) {
+                    league to runCatching {
+                        footballClient.matches(league, today.minusDays(TEAM_BACK_DAYS), today.plusDays(TEAM_AHEAD_DAYS))
+                    }.getOrNull()
+                }
+            }.awaitAll()
+        }.mapNotNull { (league, list) -> list?.let { league to it } }
+        if (found.isEmpty()) return false
+        teamsAt = System.currentTimeMillis()
+        teamMatches = teamMatches + found
+        publishMatches()
+        return true
     }
 
     /** Kommande matcher inom 75 minuter: är startelvan släppt? Högst var femte minut. */
@@ -1039,7 +1113,7 @@ class AppState {
         val ready = coroutineScope {
             candidates.map { match ->
                 async(Dispatchers.IO) {
-                    val released = runCatching { footballClient.detail(match.league, match.id, match.home.id).lineupsReleased }.getOrDefault(false)
+                    val released = runCatching { footballClient.detail(match.slug, match.id, match.home.id).lineupsReleased }.getOrDefault(false)
                     match.id.takeIf { released }
                 }
             }.awaitAll()
@@ -1090,7 +1164,7 @@ class AppState {
         val match = selectedMatch ?: return
         if (!quiet) matchDetailLoading = true
         val detail = withContext(Dispatchers.IO) {
-            runCatching { footballClient.detail(match.league, match.id, match.home.id) }.getOrNull()
+            runCatching { footballClient.detail(match.slug, match.id, match.home.id) }.getOrNull()
         }
         if (selectedMatch?.id != match.id) return
         matchDetailLoading = false
@@ -1111,7 +1185,7 @@ class AppState {
                 .filter { it.state == MatchState.FINISHED && it.kickoff < match.kickoff && (it.home.id == team.id || it.away.id == team.id) }
                 .maxByOrNull { it.kickoff } ?: continue
             val detail = withContext(Dispatchers.IO) {
-                runCatching { footballClient.detail(last.league, last.id, last.home.id) }.getOrNull()
+                runCatching { footballClient.detail(last.slug, last.id, last.home.id) }.getOrNull()
             } ?: continue
             detail.lineups.firstOrNull { it.teamId == team.id && it.starters.isNotEmpty() }?.let { result[team.id] = it }
         }
@@ -3032,6 +3106,10 @@ private const val TABLES_MAX_AGE_MS = 30 * 60_000L
  * så här ofta. Det är hela månader hos ESPN; däremellan hämtas bara idag.
  */
 private const val FOOTBALL_FULL_MS = 30 * 60_000L
+/** Malmö FF:s och landslagets matcher, ett halvår runt idag: var sjätte timme. */
+private const val TEAMS_EVERY_MS = 6 * 60 * 60_000L
+private const val TEAM_BACK_DAYS = 75L
+private const val TEAM_AHEAD_DAYS = 150L
 /** Utan fliken: hela perioden var tredje timme, ställningen var femte minut medan matcher pågår. */
 private const val FOOTBALL_BACKGROUND_FULL_MS = 3 * 60 * 60_000L
 private const val FOOTBALL_BACKGROUND_LIVE_MS = 5 * 60_000L

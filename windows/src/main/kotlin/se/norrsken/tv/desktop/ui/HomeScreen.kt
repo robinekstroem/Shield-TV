@@ -126,6 +126,18 @@ internal class HomeRow(
 
 private const val ROW = 30
 
+/**
+ * Startsidans senaste rader och vad de räknades fram ur (biblioteket,
+ * TMDB, versionerna …). Står kvar när man lämnar Hem, så att sidan finns
+ * där direkt när man kommer tillbaka.
+ */
+private var lastCatalog: HomeCatalog? = null
+private var lastCatalogInputs: List<Any?> = emptyList()
+
+/** Samma underlag: samma föremål, eller samma tal. Jämför aldrig hela biblioteket. */
+private fun sameInputs(a: List<Any?>, b: List<Any?>): Boolean =
+    a.size == b.size && a.indices.all { i -> a[i] === b[i] || (a[i] is Number && a[i] == b[i]) }
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(state: AppState) {
@@ -165,7 +177,12 @@ fun HomeScreen(state: AppState) {
     val trending = state.trending
     val newSince = state.newSinceUtc
     val hiddenGroups = state.hiddenGroups
-    val catalog by produceState<HomeCatalog?>(null, library, tmdb, facts, versions, trending, newSince, hiddenGroups) {
+    val inputs = listOf<Any?>(library, tmdb, facts, versions, trending, newSince, hiddenGroups)
+    // Tillbaka till Hem: raderna från förra gången står där direkt, i stället
+    // för en tom sida medan de räknas fram igen.
+    val catalog by produceState(lastCatalog, library, tmdb, facts, versions, trending, newSince, hiddenGroups) {
+        // Samma underlag som när raderna räknades: inget att göra om.
+        if (value != null && sameInputs(inputs, lastCatalogInputs)) return@produceState
         // TMDB fylls på i omgångar. Medan hämtningen pågår räknas raderna om
         // högst var trettionde sekund, annars en kort stund efter sista ändringen:
         // omräkningen ska aldrig ta kraft från menyerna.
@@ -176,7 +193,10 @@ fun HomeScreen(state: AppState) {
         }
         // Ett fel här ska synas på startsidan, inte stänga appen.
         try {
-            value = withContext(Dispatchers.Default) { buildCatalog(library, tmdb, facts, versions, trending, newSince, hiddenGroups) }
+            val built = withContext(Dispatchers.Default) { buildCatalog(library, tmdb, facts, versions, trending, newSince, hiddenGroups) }
+            value = built
+            lastCatalog = built
+            lastCatalogInputs = inputs
             lastBuild = System.currentTimeMillis()
             catalogError = null
         } catch (error: CancellationException) {
@@ -190,13 +210,19 @@ fun HomeScreen(state: AppState) {
     // Startsidan har sina rader: de tunga bakgrundsjobben får börja.
     LaunchedEffect(current != null) { if (current != null) state.markHomeReady() }
     if (current == null) {
+        // Raderna räknas fram första gången. Vid starten syns startanimationen
+        // över det här; annars en snurra, och aldrig någon text om det.
         Box(Modifier.fillMaxSize().padding(48.dp), contentAlignment = Alignment.Center) {
             val error = catalogError
-            Text(
-                if (error == null) "Startsidan ordnas…" else "Startsidan gick inte att ordna. Ta ett foto och skicka det i chatten.\n\n$error",
-                style = MaterialTheme.typography.bodyLarge,
-                color = LocalPalette.current.textTertiary,
-            )
+            if (error == null) {
+                Spinner()
+            } else {
+                Text(
+                    "Startsidan gick inte att ordna. Ta ett foto och skicka det i chatten.\n\n$error",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = LocalPalette.current.textTertiary,
+                )
+            }
         }
         return
     }
