@@ -673,6 +673,9 @@ class AppState {
     /** Startanimationen har spelats klart. En gång per start av appen. */
     var introDone by mutableStateOf(false)
 
+    /** Startanimationen tonar bort: startsidan kommer fram och dess omslag vänds fram. */
+    var introRevealing by mutableStateOf(false)
+
     fun markHomeReady() {
         homeReady.complete(Unit)
         homeShown = true

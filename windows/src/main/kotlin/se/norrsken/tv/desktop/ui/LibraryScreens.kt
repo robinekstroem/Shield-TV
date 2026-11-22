@@ -1164,6 +1164,8 @@ internal fun PosterCard(
         // Ovanpå grannarna medan det är markerat, så att det inte hamnar under dem när det växer.
         modifier = modifier
             .zIndex(if (focused) 1f else 0f)
+            // Vänds fram när sidan visas, som omslagen på filmväggen.
+            .coverEntrance()
             .graphicsLayer { alpha = fade }
             .onFocusChanged { change ->
                 if (change.hasFocus != focused) {

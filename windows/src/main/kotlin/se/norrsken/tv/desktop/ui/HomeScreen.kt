@@ -768,7 +768,7 @@ private fun WideCard(
     val shape = RoundedCornerShape(12.dp)
     Pressable(
         onClick = onClick,
-        modifier = modifier.width(if (tvLayout) 340.dp else 300.dp),
+        modifier = modifier.coverEntrance().width(if (tvLayout) 340.dp else 300.dp),
         shape = shape,
         hoverScale = if (tvLayout) 1.07f else 1.03f,
         glowing = false,
@@ -830,7 +830,7 @@ private fun ChannelCard(
     val shape = RoundedCornerShape(12.dp)
     Pressable(
         onClick = onClick,
-        modifier = modifier.width(if (tvLayout) 240.dp else 220.dp),
+        modifier = modifier.coverEntrance().width(if (tvLayout) 240.dp else 220.dp),
         shape = shape,
         hoverScale = if (tvLayout) 1.07f else 1.03f,
         glowing = false,

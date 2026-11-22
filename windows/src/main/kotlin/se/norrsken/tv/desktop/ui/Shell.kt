@@ -88,6 +88,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
@@ -252,15 +253,29 @@ fun AppRoot(state: AppState) {
     // minispelaren går, som då ligger som en liten bild i hörnet.
     val drawers = tvLayout
     var introSkip by remember { mutableStateOf(false) }
+    // Filmväggen: starten visar den, och sedan blir den kvar som bakgrund bakom sidorna.
+    val wall = remember { PosterWall() }
+    PosterWallDriver(state, wall)
     Box(
         Modifier
             .fillMaxSize()
             .background(palette.background)
             .onPreviewKeyEvent { event ->
+                // Väggen står still medan man trycker på fjärren.
+                wall.lastInput = nowMs()
                 // Medan starten visas hoppar en knapptryckning över den, och går inte vidare till sidan bakom.
                 if (state.introDone) return@onPreviewKeyEvent false
                 if (event.type == KeyEventType.KeyDown) introSkip = true
                 true
+            }
+            // Och medan musen rör sig. Bara läser händelserna, tar inga.
+            .pointerInput(wall) {
+                awaitPointerEventScope {
+                    while (true) {
+                        awaitPointerEvent(PointerEventPass.Initial)
+                        wall.lastInput = nowMs()
+                    }
+                }
             },
     ) {
         // Temats dekor rör sig bara när spelaren inte täcker allt.
@@ -269,6 +284,14 @@ fun AppRoot(state: AppState) {
         // med listor och text varje gång snön faller en bit.
         CustomBackdrop(state.backgrounds, running = decorated, modifier = Modifier.fillMaxSize().graphicsLayer())
         ThemeBackdrop(palette.decoration, running = decorated, modifier = Modifier.fillMaxSize().graphicsLayer())
+        // Filmväggen bakom sidorna, mörk och dämpad. Egna bakgrundsbilder går före.
+        if (state.backgrounds.isEmpty()) {
+            PosterWallBackdrop(
+                wall,
+                shown = state.introDone || state.introRevealing,
+                modifier = Modifier.fillMaxSize().graphicsLayer(),
+            )
+        }
         Row(Modifier.fillMaxSize()) {
             if (!drawers) Sidebar(state, docked, tv = false)
             Box(
@@ -302,7 +325,12 @@ fun AppRoot(state: AppState) {
                         },
                     ),
             ) {
-                CompositionLocalProvider(LocalTvDocked provides (!drawers && tvLayout && docked)) {
+                // Omslagen vänds fram när man kommer till en sida, och när starten tonar bort.
+                val entrance = remember(state.screen, state.introRevealing) { CoverEntrance() }
+                CompositionLocalProvider(
+                    LocalTvDocked provides (!drawers && tvLayout && docked),
+                    LocalCoverEntrance provides entrance,
+                ) {
                     if (state.loading) {
                         Spinner(Modifier.align(Alignment.Center))
                     } else {
@@ -360,7 +388,7 @@ fun AppRoot(state: AppState) {
             val library = state.library
             val nothing = library.movies.isEmpty() && library.series.isEmpty() && library.channels.isEmpty()
             val ready = state.homeShown || (!state.loading && (state.screen != Screen.HOME || nothing)) || state.nowPlaying != null
-            StartIntro(state = state, ready = ready, skip = introSkip, onFinished = { state.introDone = true })
+            StartIntro(state = state, wall = wall, ready = ready, skip = introSkip, onFinished = { state.introDone = true })
         }
     }
 }
