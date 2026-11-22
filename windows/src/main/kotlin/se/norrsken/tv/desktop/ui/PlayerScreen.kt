@@ -1,5 +1,13 @@
 package se.norrsken.tv.desktop.ui
 
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.onKeyEvent
@@ -81,8 +89,13 @@ import kotlin.math.roundToInt
 private val idleStatus = MutableStateFlow(VideoPlayer.Status())
 private val clockFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
+/**
+ * Spelaren. [collapse]: hur långt den krympt (0 över allt, 1 liten),
+ * [highlighted]: den lilla bilden är markerad, [staged]: den lilla bilden
+ * står i Live TV:s stora ruta.
+ */
 @Composable
-fun PlayerScreen(state: AppState, collapse: Float = 0f, highlighted: Boolean = false) {
+fun PlayerScreen(state: AppState, collapse: Float = 0f, highlighted: Boolean = false, staged: Boolean = false) {
     val palette = LocalPalette.current
     val playing = state.nowPlaying ?: return
     val player = state.videoPlayer
@@ -237,7 +250,7 @@ fun PlayerScreen(state: AppState, collapse: Float = 0f, highlighted: Boolean = f
 
         if (mini) {
             // Titel och knappar står i sidofältet under bilden; på bilden bara förstora.
-            DockedOverlay(state, playing, status, visible = hovered || highlighted, now = now, modifier = Modifier.fillMaxSize())
+            DockedOverlay(state, playing, status, visible = hovered || highlighted, now = now, staged = staged, modifier = Modifier.fillMaxSize())
         }
     }
 }
@@ -748,14 +761,44 @@ fun PlayerHost(state: AppState, collapse: () -> Float) {
             }
         }
     }
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    // Live TV: den lilla bilden står i den stora rutan till höger, med kanalerna
+    // bredvid, och glider dit och tillbaka när man kommer till Live TV och går.
+    val stage = LiveBox.bounds
+    val place = remember { StagePlace() }
+    if (stage != null) place.last = stage
+    val toStage by animateFloatAsState(
+        targetValue = if (stage != null) 1f else 0f,
+        animationSpec = tween(STAGE_GLIDE_MS, easing = FastOutSlowInEasing),
+        label = "liveruta",
+    )
+    var origin by remember { mutableStateOf(Offset.Zero) }
+    val density = LocalDensity.current
+    BoxWithConstraints(
+        Modifier
+            .fillMaxSize()
+            .onGloballyPositioned { coordinates ->
+                val at = coordinates.positionInWindow()
+                if (at != origin) origin = at
+            },
+    ) {
         // Liten: överst i sidofältet, i facket det håller fritt. Tv: nere i
         // högra hörnet, ovanpå det man bläddrar i — menyn är gömd där.
-        val shape = RoundedCornerShape(lerp(0.dp, if (tvLayout) TV_PIP_RADIUS else MiniDock.radius, progress))
-        val miniWidth = if (tvLayout) TV_PIP_WIDTH else MiniDock.videoWidth
-        val miniHeight = if (tvLayout) TV_PIP_HEIGHT else MiniDock.videoHeight
-        val miniX = if (tvLayout) maxWidth - TV_PIP_WIDTH - TV_PIP_MARGIN else MiniDock.inset
-        val miniY = if (tvLayout) maxHeight - TV_PIP_HEIGHT - TV_PIP_MARGIN else MiniDock.top
+        var miniWidth = if (tvLayout) TV_PIP_WIDTH else MiniDock.videoWidth
+        var miniHeight = if (tvLayout) TV_PIP_HEIGHT else MiniDock.videoHeight
+        var miniX = if (tvLayout) maxWidth - TV_PIP_WIDTH - TV_PIP_MARGIN else MiniDock.inset
+        var miniY = if (tvLayout) maxHeight - TV_PIP_HEIGHT - TV_PIP_MARGIN else MiniDock.top
+        var radius = if (tvLayout) TV_PIP_RADIUS else MiniDock.radius
+        val last = place.last
+        if (last != null && toStage > 0f) {
+            with(density) {
+                miniX = lerp(miniX, (last.left - origin.x).toDp(), toStage)
+                miniY = lerp(miniY, (last.top - origin.y).toDp(), toStage)
+                miniWidth = lerp(miniWidth, last.width.toDp(), toStage)
+                miniHeight = lerp(miniHeight, last.height.toDp(), toStage)
+            }
+            radius = lerp(radius, LIVE_STAGE_RADIUS, toStage)
+        }
+        val shape = RoundedCornerShape(lerp(0.dp, radius, progress))
         Box(
             Modifier
                 .offset(
@@ -766,7 +809,8 @@ fun PlayerHost(state: AppState, collapse: () -> Float) {
                     width = lerp(maxWidth, miniWidth, progress),
                     height = lerp(maxHeight, miniHeight, progress),
                 )
-                .glow(palette.glowOf((if (focused) 1f else 0.55f) * progress), shape, 22.dp)
+                // I den stora rutan i Live TV lyser kanten svagare än i hörnet.
+                .glow(palette.glowOf((if (focused) 1f else 0.55f - 0.3f * toStage) * progress), shape, 22.dp)
                 .shadow(lerp(0.dp, if (tvLayout) 22.dp else 14.dp, progress), shape)
                 .clip(shape)
                 .then(
@@ -791,9 +835,14 @@ fun PlayerHost(state: AppState, collapse: () -> Float) {
                 .onFocusChanged { state.playerBoxFocused = it.isFocused }
                 .focusable(interactionSource = focusSource),
         ) {
-            PlayerScreen(state, progress, highlighted = focused)
+            PlayerScreen(state, progress, highlighted = focused, staged = toStage > 0.5f)
         }
     }
+}
+
+/** Var Live TV:s stora ruta senast stod, så att bilden kan glida därifrån när man lämnar Live TV. */
+private class StagePlace {
+    var last: Rect? = null
 }
 
 /** Tv: minispelaren som en bild i hörnet, i 16:9. */
@@ -801,6 +850,9 @@ private val TV_PIP_WIDTH = 432.dp
 private val TV_PIP_HEIGHT = 243.dp
 private val TV_PIP_MARGIN = 40.dp
 private val TV_PIP_RADIUS = 14.dp
+
+/** Hur fort bilden glider mellan hörnet och Live TV:s stora ruta. */
+private const val STAGE_GLIDE_MS = 420
 
 /** Filmens tid, eller hur långt programmet som sänds just nu på kanalen kommit. */
 private fun miniProgress(state: AppState, playing: NowPlaying, status: VideoPlayer.Status, now: Long): Float? = when {
@@ -827,6 +879,8 @@ private fun DockedOverlay(
     status: VideoPlayer.Status,
     visible: Boolean,
     now: Long,
+    /** I Live TV:s stora ruta: där finns inget kort med knappar under bilden, så stäng står på den. */
+    staged: Boolean,
     modifier: Modifier,
 ) {
     if (tvLayout) {
@@ -861,6 +915,21 @@ private fun DockedOverlay(
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(Glyphs.OpenInFull, contentDescription = "Förstora", tint = Color.White, modifier = Modifier.size(20.dp))
+                    }
+                    if (staged) {
+                        Pressable(
+                            onClick = { state.closePlayer() },
+                            modifier = Modifier.align(Alignment.TopEnd).padding(12.dp).size(38.dp),
+                            shape = RoundedCornerShape(19.dp),
+                            glowing = false,
+                        ) { hovered ->
+                            Box(
+                                Modifier.fillMaxSize().background(Color.Black.copy(alpha = if (hovered) 0.8f else 0.55f)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(Glyphs.Close, contentDescription = "Stäng", tint = Color.White, modifier = Modifier.size(18.dp))
+                            }
+                        }
                     }
                 }
             }

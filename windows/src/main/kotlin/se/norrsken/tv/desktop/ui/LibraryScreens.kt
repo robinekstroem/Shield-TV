@@ -1159,13 +1159,15 @@ internal fun PosterCard(
     val ringAlpha = if (tvLayout) 1f else 0.55f
     val glowAlpha = if (tvLayout) 1f else 0.75f
     val glowRadius = if (tvLayout) 36.dp else 26.dp
+    // Startens slut: ett omslag från filmväggen kan landa här.
+    val spot = rememberMorphSpot(images, maxSide = 480)
     Pressable(
         onClick = onClick,
         // Ovanpå grannarna medan det är markerat, så att det inte hamnar under dem när det växer.
         modifier = modifier
             .zIndex(if (focused) 1f else 0f)
-            // Vänds fram när sidan visas, som omslagen på filmväggen.
-            .coverEntrance()
+            // Tonas fram när sidan visas, som omslagen på filmväggen.
+            .coverEntrance(spot)
             .graphicsLayer { alpha = fade }
             .onFocusChanged { change ->
                 if (change.hasFocus != focused) {
@@ -1186,6 +1188,7 @@ internal fun PosterCard(
                 Modifier
                     .fillMaxWidth()
                     .aspectRatio(2f / 3f)
+                    .morphSpot(spot)
                     // Glöden och kanten visar vilken titel man står på.
                     .glow(if (hovered) palette.glowOf(glowAlpha) else Color.Transparent, shape, glowRadius)
                     .clip(shape)

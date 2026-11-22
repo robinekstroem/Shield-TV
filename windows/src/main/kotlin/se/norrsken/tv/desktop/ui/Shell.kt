@@ -245,8 +245,9 @@ fun AppRoot(state: AppState) {
     // Minispelaren står överst i sidofältet. Fältet ställer om sig medan
     // bilden ännu täcker allt, och tillbaka först när den åter gör det;
     // listorna bakom behöver då bara ordna om sig en gång, i skydd av bilden.
+    // I Live TV står bilden i stället i den stora rutan bredvid kanalerna.
     val docked by remember(state, collapse) {
-        derivedStateOf { state.nowPlaying != null && (state.miniPlayer || collapse.value > 0f) }
+        derivedStateOf { state.nowPlaying != null && (state.miniPlayer || collapse.value > 0f) && LiveBox.bounds == null }
     }
     val focusManager = LocalFocusManager.current
     // Tv: menyn och kategorierna göms medan man är i innehållet — också när
@@ -256,6 +257,8 @@ fun AppRoot(state: AppState) {
     // Filmväggen: starten visar den, och sedan blir den kvar som bakgrund bakom sidorna.
     val wall = remember { PosterWall() }
     PosterWallDriver(state, wall)
+    // Startens slut: omslagen flyger från väggen till startsidans kort.
+    val morph = remember { IntroMorph() }
     Box(
         Modifier
             .fillMaxSize()
@@ -331,6 +334,7 @@ fun AppRoot(state: AppState) {
                 CompositionLocalProvider(
                     LocalTvDocked provides (!drawers && tvLayout && docked),
                     LocalCoverEntrance provides entrance,
+                    LocalIntroMorph provides morph,
                 ) {
                     if (state.loading) {
                         Spinner(Modifier.align(Alignment.Center))
@@ -389,7 +393,7 @@ fun AppRoot(state: AppState) {
             val library = state.library
             val nothing = library.movies.isEmpty() && library.series.isEmpty() && library.channels.isEmpty()
             val ready = state.homeShown || (!state.loading && (state.screen != Screen.HOME || nothing)) || state.nowPlaying != null
-            StartIntro(state = state, wall = wall, ready = ready, skip = introSkip, onFinished = { state.introDone = true })
+            StartIntro(state = state, wall = wall, morph = morph, ready = ready, skip = introSkip, onFinished = { state.introDone = true })
         }
     }
 }
@@ -402,7 +406,6 @@ fun AppRoot(state: AppState) {
 @Composable
 private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
     val palette = LocalPalette.current
-    val library = state.library
     var focused by remember { mutableStateOf(false) }
     // Tv: markeringen glider från raden den lämnar till nästa (se NavItem).
     val trail = remember(tv) { if (tv) MenuTrail() else null }
@@ -526,10 +529,10 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
             NavItem(Glyphs.Home, "Hem", "Fortsätt titta & tips", null, state.screen == Screen.HOME, docked, tv = tv, accent = MenuAccents.home, trail = trail, index = 0, modifier = navModifier(Screen.HOME)) {
                 go(Screen.HOME)
             }
-            NavItem(Glyphs.Live, "Live TV", "Direktsändning", library.channels.size, state.screen == Screen.LIVE, docked, tv = tv, accent = MenuAccents.live, trail = trail, index = 1, modifier = navModifier(Screen.LIVE)) {
+            NavItem(Glyphs.Live, "Live TV", "Direktsändning", null, state.screen == Screen.LIVE, docked, tv = tv, accent = MenuAccents.live, trail = trail, index = 1, modifier = navModifier(Screen.LIVE)) {
                 go(Screen.LIVE)
             }
-            NavItem(Glyphs.Guide, "Tablå", "Vad som sänds", state.guide.channelCount, state.screen == Screen.GUIDE, docked, tv = tv, accent = MenuAccents.guide, trail = trail, index = 2, modifier = navModifier(Screen.GUIDE)) {
+            NavItem(Glyphs.Guide, "Tablå", "Vad som sänds", null, state.screen == Screen.GUIDE, docked, tv = tv, accent = MenuAccents.guide, trail = trail, index = 2, modifier = navModifier(Screen.GUIDE)) {
                 go(Screen.GUIDE)
             }
             // Antalet matcher som pågår just nu.
@@ -538,14 +541,10 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
                 go(Screen.FOOTBALL)
             }
             NavDivider(tv)
-            // Varje film och serie en gång, hur många versioner den än finns i.
-            val versions = state.versions
-            val movieCount = if (versions.isEmpty) library.movies.size else versions.movieCount
-            val seriesCount = if (versions.isEmpty) library.series.size else versions.seriesCount
-            NavItem(Glyphs.Movies, "Filmer", "Filmbiblioteket", movieCount, state.screen == Screen.MOVIES, docked, tv = tv, accent = MenuAccents.movies, trail = trail, index = 4, modifier = navModifier(Screen.MOVIES)) {
+            NavItem(Glyphs.Movies, "Filmer", "Filmbiblioteket", null, state.screen == Screen.MOVIES, docked, tv = tv, accent = MenuAccents.movies, trail = trail, index = 4, modifier = navModifier(Screen.MOVIES)) {
                 go(Screen.MOVIES)
             }
-            NavItem(Glyphs.Series, "Serier", "Säsonger & avsnitt", seriesCount, state.screen == Screen.SERIES, docked, tv = tv, accent = MenuAccents.series, trail = trail, index = 5, modifier = navModifier(Screen.SERIES)) {
+            NavItem(Glyphs.Series, "Serier", "Säsonger & avsnitt", null, state.screen == Screen.SERIES, docked, tv = tv, accent = MenuAccents.series, trail = trail, index = 5, modifier = navModifier(Screen.SERIES)) {
                 go(Screen.SERIES)
             }
             NavItem(Glyphs.Genres, "Genrer", "Topplistor efter betyg", null, state.screen == Screen.GENRES, docked, tv = tv, accent = MenuAccents.genres, trail = trail, index = 6, modifier = navModifier(Screen.GENRES)) {
@@ -736,8 +735,8 @@ private class MenuTrail {
  * En rad i menyn: symbolen i radens egen färg, och namnet. Markerad fylls
  * raden med temats färg och texten blir vit; fliken man är i har ett streck
  * i kanten. Inget sken och inget som skalas — det gör texten suddig på tv:n.
- * På datorn står också en rad förklaring och antalet; på tv:n bara namnet,
- * och LIVE när något pågår.
+ * På datorn står också en rad förklaring; på tv:n bara namnet. Antal står
+ * inte här — bara LIVE när något pågår.
  *
  * Tv ([trail]): fyllningen glider ut ur raden man lämnar och in i nästa,
  * från det hållet, så att markeringen ser ut att glida mellan raderna. Bara
@@ -890,16 +889,9 @@ private fun NavItem(
                     }
                 }
             }
-            when {
-                live && counted -> LiveBadge(count ?: 0)
-                !tv && counted -> Text(
-                    (count ?: 0).grouped(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (focused) ink.copy(alpha = 0.78f) else palette.textTertiary,
-                    maxLines = 1,
-                    softWrap = false,
-                )
-            }
+            // Bara det som pågår just nu. Hur många kanaler, filmer och serier det
+            // finns står på sidan när man kommit dit, inte i menyn.
+            if (live && counted) LiveBadge(count ?: 0)
         }
     }
 }

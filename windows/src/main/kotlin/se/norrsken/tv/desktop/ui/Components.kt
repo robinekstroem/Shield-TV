@@ -87,6 +87,9 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
@@ -525,6 +528,7 @@ private fun GroupRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             GroupBadge(logo, icon, tint = if (selected) palette.textPrimary else palette.textSecondary, size = 22.dp)
+            // Inga antal här: de står på sidan när man valt kategorin.
             Text(
                 name,
                 modifier = Modifier.weight(1f),
@@ -533,8 +537,6 @@ private fun GroupRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.width(8.dp))
-            Text(count.grouped(), style = MaterialTheme.typography.labelSmall, color = palette.textTertiary)
         }
     }
 }
@@ -777,13 +779,13 @@ private fun TvGroupList(
         TvScrolling(lead = 0.2f, trail = 0.2f) {
             LazyColumn(
                 state = listState,
+                modifier = Modifier.fadingEdges(listState),
                 contentPadding = PaddingValues(start = 6.dp, end = 6.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 itemsIndexed(entries, key = { _, entry -> entry.id }) { index, entry ->
                     TvGroupRow(
                         name = entry.name,
-                        count = entry.count,
                         logo = entry.logo,
                         icon = entry.icon,
                         selected = index == selectedIndex,
@@ -807,6 +809,31 @@ private fun TvGroupList(
     }
 }
 
+/**
+ * Tv: listan tonar ut mot över- och underkanten när det finns mer att rulla
+ * fram, i stället för att klippas av rakt. Bara ritningen: inget mäts om.
+ */
+private fun Modifier.fadingEdges(state: LazyListState): Modifier =
+    graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            val top = if (state.canScrollBackward) EDGE_FADE.toPx() else 0f
+            val bottom = if (state.canScrollForward) EDGE_FADE.toPx() * 1.6f else 0f
+            val h = size.height
+            if ((top <= 0f && bottom <= 0f) || h <= 0f) return@drawWithContent
+            drawRect(
+                Brush.verticalGradient(
+                    0f to (if (top > 0f) Color.Transparent else Color.Black),
+                    (top / h).coerceIn(0f, 0.45f) to Color.Black,
+                    (1f - bottom / h).coerceIn(0.55f, 1f) to Color.Black,
+                    1f to (if (bottom > 0f) Color.Transparent else Color.Black),
+                ),
+                blendMode = BlendMode.DstIn,
+            )
+        }
+
+private val EDGE_FADE = 30.dp
+
 /** Markeringen till raden [index]: rullar fram den först om den inte syns. */
 private suspend fun focusRow(listState: LazyListState, index: Int, requester: FocusRequester) {
     if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
@@ -822,13 +849,13 @@ private suspend fun focusRow(listState: LazyListState, index: Int, requester: Fo
  * Kategorin man är i har en svag ton av samma färg och ett streck i kanten.
  * En logga står före namnet när den finns (ligorna). Det som står inom
  * hakparentes eller sist i namnet om bildkvalitet och språk ("4K", "DV",
- * "MULTI-SUB") står som små märken efter namnet, och antalet i en liten
- * kapsel längst till höger.
+ * "MULTI-SUB") står som små märken efter namnet. Inga antal: de står på
+ * sidan när man valt kategorin. Mellan de egna kategorierna överst och
+ * resten går en tunn linje.
  */
 @Composable
 private fun TvGroupRow(
     name: String,
-    count: Int,
     logo: String?,
     icon: ImageVector?,
     selected: Boolean,
@@ -850,43 +877,53 @@ private fun TvGroupRow(
     // Läses först när raden ritas: bara ritningen görs om medan den tonar.
     val lit = animateFloatAsState(if (active) 1f else 0f, tween(ROW_FADE_MS), label = "kategorirad")
     val label = remember(name) { categoryLabel(name) }
-    Box(
-        Modifier
-            .padding(top = if (gapAbove) 10.dp else 0.dp)
-            .fillMaxWidth()
-            .then(if (focus != null) Modifier.focusRequester(focus) else Modifier)
-            .onFocusChanged { if (it.isFocused) onFocused() }
-            .clip(RoundedCornerShape(14.dp))
-            .drawBehind {
-                val alpha = lit.value
-                if (selected && alpha < 1f) drawRect(fill, alpha = SELECTED_TINT * (1f - alpha) * shown())
-                if (alpha > 0.001f) drawRect(brush, alpha = alpha)
-            }
-            .hoverable(interaction)
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-            .pointerHoverIcon(PointerIcon.Hand),
-    ) {
-        if (selected && !active) {
-            // Kategorin man är i: ett streck i märkets färger.
+    Column(Modifier.fillMaxWidth()) {
+        if (gapAbove) {
             Box(
                 Modifier
-                    .align(Alignment.CenterStart)
-                    .padding(start = 4.dp)
-                    .size(width = 3.dp, height = 22.dp)
-                    .clip(CircleShape)
-                    .background(Brand.stripe),
+                    .padding(start = 18.dp, end = 18.dp, top = 9.dp, bottom = 9.dp)
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .graphicsLayer { alpha = shown() }
+                    .background(palette.hairline),
             )
         }
-        Row(
+        Box(
             Modifier
                 .fillMaxWidth()
-                .padding(start = if (indent) 30.dp else 16.dp, end = 12.dp, top = 10.dp, bottom = 10.dp)
-                .graphicsLayer { alpha = shown() },
-            verticalAlignment = Alignment.CenterVertically,
+                .then(if (focus != null) Modifier.focusRequester(focus) else Modifier)
+                .onFocusChanged { if (it.isFocused) onFocused() }
+                .clip(RoundedCornerShape(14.dp))
+                .drawBehind {
+                    val alpha = lit.value
+                    if (selected && alpha < 1f) drawRect(fill, alpha = SELECTED_TINT * (1f - alpha) * shown())
+                    if (alpha > 0.001f) drawRect(brush, alpha = alpha)
+                }
+                .hoverable(interaction)
+                .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+                .pointerHoverIcon(PointerIcon.Hand),
         ) {
-            GroupBadge(logo, icon, tint = if (active) ink else palette.textSecondary, size = 30.dp)
-            // Namnet och märkena direkt efter det; antalet längst till höger.
-            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            if (selected && !active) {
+                // Kategorin man är i: ett streck i märkets färger.
+                Box(
+                    Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(start = 4.dp)
+                        .size(width = 3.dp, height = 22.dp)
+                        .clip(CircleShape)
+                        .background(Brand.stripe),
+                )
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = TV_GROUP_ROW_MIN)
+                    .padding(start = if (indent) 30.dp else 16.dp, end = 14.dp, top = 9.dp, bottom = 9.dp)
+                    .graphicsLayer { alpha = shown() },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                GroupBadge(logo, icon, tint = if (active) ink else palette.textSecondary, size = 30.dp)
+                // Namnet och märkena direkt efter det.
                 Text(
                     label.name,
                     modifier = Modifier.weight(1f, fill = false),
@@ -905,25 +942,12 @@ private fun TvGroupRow(
                     CategoryMark(mark, active, ink)
                 }
             }
-            Spacer(Modifier.width(10.dp))
-            Box(
-                Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (active) ink.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.06f))
-                    .padding(horizontal = 8.dp, vertical = 2.dp),
-            ) {
-                Text(
-                    count.grouped(),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (active) ink else palette.textTertiary,
-                    maxLines = 1,
-                    softWrap = false,
-                )
-            }
         }
     }
 }
+
+/** Tv: raderna i kategorierna lika höga, med eller utan logga. */
+private val TV_GROUP_ROW_MIN = 50.dp
 
 /**
  * Loggan eller symbolen före namnet, i en ruta av fast storlek så att

@@ -398,11 +398,16 @@ private fun HeroInfo(
         if (item == null) return@Row
         val hero = runCatching { heroOf(state, catalog, item) }.getOrNull() ?: return@Row
         val channel = item is ChannelItem
+        val posters = if (channel) emptyList() else state.largePosters(runCatching { posterOf(state, catalog, item) }.getOrNull().orEmpty())
+        // Startens slut: det första omslaget från filmväggen landar här.
+        val spot = if (channel) null else rememberMorphSpot(posters, maxSide = 600, prominent = true)
         // Omslaget skarpt bredvid texten: det man väljer syns alltid, även utan bakgrundsbild.
         Box(
             Modifier
+                .morphReveal(spot)
                 .fillMaxHeight()
                 .aspectRatio(if (channel) 16f / 9f else 2f / 3f, matchHeightConstraintsFirst = true)
+                .morphSpot(spot)
                 .shadow(16.dp, RoundedCornerShape(12.dp))
                 .clip(RoundedCornerShape(12.dp))
                 .background(palette.surfaceRaised),
@@ -419,7 +424,7 @@ private fun HeroInfo(
                     initialsStyle = MaterialTheme.typography.headlineMedium,
                 )
             } else Artwork(
-                candidates = state.largePosters(runCatching { posterOf(state, catalog, item) }.getOrNull().orEmpty()),
+                candidates = posters,
                 modifier = Modifier.fillMaxSize(),
                 maxSide = 600,
                 contentScale = ContentScale.Crop,
@@ -435,7 +440,8 @@ private fun HeroInfo(
                 },
             )
         }
-        Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Texten tonas fram och glider upp när sidan visas, som korten.
+        Column(Modifier.weight(1f).fillMaxHeight().coverEntrance(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (hero.kicker != null) {
                 Text(hero.kicker.uppercase(), style = MaterialTheme.typography.labelLarge, color = palette.focus)
             }
@@ -766,9 +772,11 @@ private fun WideCard(
 ) {
     val palette = LocalPalette.current
     val shape = RoundedCornerShape(12.dp)
+    // Startens slut: ett omslag från filmväggen kan landa här.
+    val spot = rememberMorphSpot(listOfNotNull(image), maxSide = 640)
     Pressable(
         onClick = onClick,
-        modifier = modifier.coverEntrance().width(if (tvLayout) 340.dp else 300.dp),
+        modifier = modifier.coverEntrance(spot).width(if (tvLayout) 340.dp else 300.dp),
         shape = shape,
         hoverScale = if (tvLayout) 1.07f else 1.03f,
         glowing = false,
@@ -780,6 +788,7 @@ private fun WideCard(
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(16f / 9f)
+                .morphSpot(spot)
                 .glow(if (hovered) palette.glowOf(if (tvLayout) 1f else 0.75f) else Color.Transparent, shape, if (tvLayout) 34.dp else 26.dp)
                 .clip(shape)
                 .background(palette.surfaceRaised)

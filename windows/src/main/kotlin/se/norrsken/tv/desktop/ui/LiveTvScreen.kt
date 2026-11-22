@@ -6,6 +6,11 @@ import se.norrsken.tv.desktop.data.ListKind
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -50,10 +55,12 @@ import se.norrsken.tv.desktop.data.LiveChannel
 import se.norrsken.tv.desktop.data.Programme
 
 /**
- * Live TV: kategorierna, kanalerna och — där det finns plats — en panel om
- * kanalen man står på: vad som går nu, hur länge det är kvar, vad det handlar
- * om och vad som kommer sedan. På tv:n glider kategorierna fram med pil
- * vänster, och kategorin byts medan man bläddrar bland dem.
+ * Live TV: kategorierna, kanalerna med vad som sänds under varje, och — där
+ * det finns plats — en stor ruta till höger. Spelas en kanal står bilden i
+ * rutan medan man väljer bland kanalerna: Tillbaka från helskärm lägger den
+ * där, med kanalerna till vänster. Annars visar rutan kanalen man står på.
+ * På tv:n glider kategorierna fram med pil vänster, och kategorin byts
+ * medan man bläddrar bland dem.
  */
 @Composable
 fun LiveTvScreen(state: AppState) {
@@ -72,11 +79,24 @@ fun LiveTvScreen(state: AppState) {
     val guide = state.guide
     val clock = state.clock
     LaunchedEffect(group, query) { listState.scrollToItem(0) }
-    // Tv: var markeringen landar från kategorierna.
+    // Tv: var markeringen landar från kategorierna — och från helskärm: på kanalen som spelas.
     val entry = remember { TvEntry() }
     val scope = rememberCoroutineScope()
-    // Kanalen panelen visar: den markerade på tv:n, den musen står på i Windows.
-    // En kort paus först, så att panelen inte ritas om för varje rad man passerar.
+    val enterList: () -> Unit = {
+        scope.launch {
+            val playing = state.nowPlaying?.channel?.key
+            val index = if (playing != null && state.miniPlayer) channels.indexOfFirst { it.key == playing } else -1
+            if (index >= 0) {
+                entry.last = playing
+                if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
+                    listState.scrollToItem((index - 2).coerceAtLeast(0))
+                }
+            }
+            entry.enter { listState.layoutInfo.visibleItemsInfo.map { it.key } }
+        }
+    }
+    // Kanalen rutan visar: den markerade på tv:n, den musen står på i Windows.
+    // En kort paus först, så att rutan inte ritas om för varje rad man passerar.
     var activeKey by remember { mutableStateOf<String?>(null) }
     var shownKey by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(activeKey) {
@@ -95,16 +115,14 @@ fun LiveTvScreen(state: AppState) {
             selected = group,
             onSelect = { state.liveGroup = it },
             pinned = personalPinned(state, LibraryFilter.LIVE),
-            onEnterContent = {
-                scope.launch { entry.enter { listState.layoutInfo.visibleItemsInfo.map { it.key } } }
-            },
+            onEnterContent = enterList,
         )
         BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
-            val withPanel = maxWidth >= PANEL_FROM
-            val listWidth = (maxWidth * (if (tvLayout) 0.46f else 0.52f)).coerceIn(480.dp, 720.dp)
+            val withStage = maxWidth >= STAGE_FROM
+            val listWidth = (maxWidth * (if (tvLayout) 0.42f else 0.48f)).coerceIn(460.dp, 680.dp)
             Row(Modifier.fillMaxSize()) {
                 Column(
-                    if (withPanel) Modifier.width(listWidth).fillMaxHeight() else Modifier.weight(1f).fillMaxHeight(),
+                    if (withStage) Modifier.width(listWidth).fillMaxHeight() else Modifier.weight(1f).fillMaxHeight(),
                 ) {
                     ScreenHeader(
                         title = PersonalKeys.titleOf(group) ?: group ?: "Alla kanaler",
@@ -123,7 +141,7 @@ fun LiveTvScreen(state: AppState) {
                             TvScrolling(lead = 0.22f, trail = 0.22f) {
                                 LazyColumn(
                                     state = listState,
-                                    contentPadding = PaddingValues(start = if (tvLayout) 36.dp else 20.dp, end = if (withPanel) 12.dp else 28.dp, bottom = 24.dp),
+                                    contentPadding = PaddingValues(start = if (tvLayout) 36.dp else 20.dp, end = if (withStage) 12.dp else 28.dp, bottom = 24.dp),
                                     verticalArrangement = Arrangement.spacedBy(2.dp),
                                 ) {
                                     items(channels, key = { it.key }) { channel ->
@@ -158,16 +176,132 @@ fun LiveTvScreen(state: AppState) {
                         }
                     }
                 }
-                if (withPanel && shown != null) {
-                    ChannelInfo(state, shown, Modifier.weight(1f).fillMaxHeight())
+                if (withStage) {
+                    LiveStage(state, shown, Modifier.weight(1f).fillMaxHeight())
                 }
             }
         }
     }
 }
 
-/** Från den här bredden (utom kategorierna) får panelen om kanalen plats. */
-private val PANEL_FROM = 960.dp
+/** Från den här bredden (utom kategorierna) får den stora rutan plats. */
+private val STAGE_FROM = 960.dp
+
+/**
+ * Live TV:s stora ruta medan den visas, i fönstrets bildpunkter; null
+ * annars. Spelaren lägger den lilla bilden här i stället för i hörnet
+ * (se PlayerHost), och glider mellan dem när man kommer och går.
+ */
+internal object LiveBox {
+    var bounds by mutableStateOf<Rect?>(null)
+}
+
+/** Rutans hörn, också för bilden som ligger i den. */
+internal val LIVE_STAGE_RADIUS = 18.dp
+
+/**
+ * Den stora rutan till höger, i 16:9. Spelas något ligger bilden här (den
+ * ritas av spelaren, ovanpå). Annars kanalen man står på: loggan stort och
+ * vad som sänds nu — mer än så står redan under varje kanal i listan.
+ */
+@Composable
+private fun LiveStage(state: AppState, channel: LiveChannel?, modifier: Modifier) {
+    val palette = LocalPalette.current
+    val shape = RoundedCornerShape(LIVE_STAGE_RADIUS)
+    DisposableEffect(Unit) { onDispose { LiveBox.bounds = null } }
+    Column(
+        modifier.padding(
+            start = 12.dp,
+            end = if (tvLayout) 44.dp else 28.dp,
+            top = if (tvLayout) 34.dp else 28.dp,
+            bottom = 24.dp,
+        ),
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .onGloballyPositioned { coordinates ->
+                    val at = coordinates.positionInWindow()
+                    val bounds = Rect(at.x, at.y, at.x + coordinates.size.width, at.y + coordinates.size.height)
+                    if (LiveBox.bounds != bounds) LiveBox.bounds = bounds
+                }
+                .clip(shape)
+                .background(palette.surface)
+                .border(1.dp, palette.hairline, shape),
+        ) {
+            if (state.nowPlaying == null && channel != null) ChannelStage(state, channel)
+        }
+        if (tvLayout) {
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "OK tittar  ·  pil höger: favorit  ·  pil vänster: kategorier",
+                style = MaterialTheme.typography.labelMedium,
+                color = palette.textTertiary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 4.dp),
+            )
+        }
+    }
+}
+
+/** Rutan utan bild: kanalens logga stort, och vad som sänds nu med hur långt det kommit. */
+@Composable
+private fun ChannelStage(state: AppState, channel: LiveChannel) {
+    val palette = LocalPalette.current
+    val clock = state.clock
+    val now = state.guide.current(channel, clock)
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Brush.radialGradient(listOf(palette.focus.copy(alpha = 0.14f), Color.Transparent))),
+    ) {
+        ChannelLogo(
+            channel.logo,
+            channel.name,
+            width = if (tvLayout) 300.dp else 240.dp,
+            height = if (tvLayout) 150.dp else 120.dp,
+            initialsStyle = MaterialTheme.typography.displaySmall,
+            modifier = Modifier.align(Alignment.Center).padding(bottom = 40.dp),
+        )
+        Column(
+            Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f))))
+                .padding(start = 24.dp, end = 24.dp, top = 28.dp, bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(channel.name, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (now != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Tag("NU", palette.signal)
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        clockText(now.start) + "–" + clockText(now.stop) + "   " + now.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = palette.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text(timeLeft(now, clock), style = MaterialTheme.typography.labelLarge, color = palette.textTertiary, maxLines = 1)
+                }
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(palette.hairline),
+                ) {
+                    Box(Modifier.fillMaxHeight().fillMaxWidth(now.progress(clock)).background(palette.signal))
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun ChannelRow(
@@ -240,129 +374,6 @@ private fun ChannelRow(
             if (hovered) {
                 Icon(Glyphs.Play, contentDescription = "Spela", tint = palette.textPrimary, modifier = Modifier.size(22.dp))
             }
-        }
-    }
-}
-
-/**
- * Panelen till höger: kanalen stort, programmet som går nu med tid kvar och
- * beskrivning, och de närmaste programmen efter det.
- */
-@Composable
-private fun ChannelInfo(state: AppState, channel: LiveChannel, modifier: Modifier) {
-    val palette = LocalPalette.current
-    val guide = state.guide
-    val clock = state.clock
-    val now = guide.current(channel, clock)
-    val minute = clock / 60_000L
-    val upcoming = remember(guide, channel, minute) {
-        guide.schedule(channel).asSequence().filter { it.start >= clock }.take(5).toList()
-    }
-    val shape = RoundedCornerShape(22.dp)
-    Column(
-        modifier
-            .padding(start = 8.dp, end = 32.dp, top = 24.dp, bottom = 24.dp)
-            .clip(shape)
-            .background(palette.surface)
-            .background(Brush.verticalGradient(listOf(palette.focus.copy(alpha = 0.06f), Color.Transparent)))
-            .border(1.dp, palette.hairline, shape)
-            .padding(26.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            ChannelLogo(
-                channel.logo,
-                channel.name,
-                width = 132.dp,
-                height = 72.dp,
-                initialsStyle = MaterialTheme.typography.headlineSmall,
-            )
-            Spacer(Modifier.width(18.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(channel.name, style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(
-                    listOfNotNull(channel.number?.let { "Kanal $it" }, channel.group.ifBlank { null }).joinToString("  ·  "),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = palette.textTertiary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        if (now == null) {
-            Text(
-                if (guide.hasSchedule(channel)) "Inget i tablån just nu." else "Ingen tablå för kanalen.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = palette.textTertiary,
-            )
-        } else {
-            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Tag("NU", palette.signal)
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        clockText(now.start) + "–" + clockText(now.stop),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = palette.textSecondary,
-                    )
-                    Spacer(Modifier.weight(1f))
-                    Text(timeLeft(now, clock), style = MaterialTheme.typography.labelLarge, color = palette.textSecondary)
-                }
-                Text(now.title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                now.subtitle?.ifBlank { null }?.let { subtitle ->
-                    Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = palette.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(palette.hairline),
-                ) {
-                    Box(Modifier.fillMaxHeight().fillMaxWidth(now.progress(clock)).background(palette.signal))
-                }
-            }
-            now.description?.ifBlank { null }?.let { description ->
-                Text(
-                    description,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = palette.textSecondary,
-                    maxLines = if (tvLayout) 5 else 6,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        if (upcoming.isNotEmpty()) {
-            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                Text("SEDAN", style = MaterialTheme.typography.labelSmall, color = palette.textTertiary)
-                upcoming.forEach { programme ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            clockText(programme.start),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = palette.textTertiary,
-                            modifier = Modifier.width(58.dp),
-                        )
-                        Text(
-                            programme.title,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = palette.textSecondary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-            }
-        }
-        Spacer(Modifier.weight(1f))
-        if (tvLayout) {
-            Text(
-                "OK tittar  ·  pil höger: favorit  ·  pil vänster: kategorier",
-                style = MaterialTheme.typography.labelSmall,
-                color = palette.textTertiary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
     }
 }
