@@ -289,6 +289,7 @@ fun AppRoot(state: AppState) {
             PosterWallBackdrop(
                 wall,
                 shown = state.introDone || state.introRevealing,
+                quiet = state.screen == Screen.GUIDE || state.screen == Screen.LIVE || state.screen == Screen.SETTINGS,
                 modifier = Modifier.fillMaxSize().graphicsLayer(),
             )
         }

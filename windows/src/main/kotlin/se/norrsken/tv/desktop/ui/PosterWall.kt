@@ -248,7 +248,7 @@ internal class PosterWall {
      * Bakgrunden i appen: samma vägg, mörk och med lite färg, tonad mot
      * temats bakgrundsfärg [tint] så att text och omslag framför syns tydligt.
      */
-    fun drawBackdrop(scope: DrawScope, tint: Color) {
+    fun drawBackdrop(scope: DrawScope, tint: Color, quiet: Boolean) {
         noteSize(scope.size)
         val u = clock.longValue
         loads.intValue
@@ -266,6 +266,8 @@ internal class PosterWall {
                     1f to tint.copy(alpha = 0.80f),
                 ),
             )
+            // Sidor med mycket text (tablån, kanalerna, inställningarna): ännu mörkare.
+            if (quiet) drawRect(tint.copy(alpha = QUIET_DIM))
         }
     }
 
@@ -970,9 +972,9 @@ internal fun PosterWallDriver(state: AppState, wall: PosterWall) {
  * färg. Tänds väggen först nu (första starten) vänds omslagen fram här.
  */
 @Composable
-internal fun PosterWallBackdrop(wall: PosterWall, shown: Boolean, modifier: Modifier = Modifier) {
+internal fun PosterWallBackdrop(wall: PosterWall, shown: Boolean, quiet: Boolean, modifier: Modifier = Modifier) {
     val tint = LocalPalette.current.background
-    Spacer(modifier.drawBehind { if (shown) wall.drawBackdrop(this, tint) })
+    Spacer(modifier.drawBehind { if (shown) wall.drawBackdrop(this, tint, quiet) })
 }
 
 // --- Omslag som vänds fram ------------------------------------------------------------
@@ -1163,6 +1165,7 @@ private const val BACKDROP_FOG = 0.55f
 /** Bakgrunden i appen: hur mörk och hur färgstark, hur fort, och när den står still. */
 private const val BACKDROP_BRIGHTNESS = 0.36f
 private const val BACKDROP_SATURATION = 0.5f
+private const val QUIET_DIM = 0.5f
 private const val AMBIENT_SPEED = 0.45f
 private const val IDLE_MS = 1_500L
 private const val EASE_MS = 1_400f
