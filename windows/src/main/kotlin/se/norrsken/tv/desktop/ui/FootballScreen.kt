@@ -265,12 +265,25 @@ private fun FootballBrowse(
                     entry.title to if (entry == League.MALMO_FF) all.count { it.isMalmoFF() } else all.count { it.league == entry }
                 }
             }
+            // Ligornas loggor bredvid namnen; Malmö FF och landslaget med sina märken.
+            val logos = remember(state.footballMatches, state.footballLogos) {
+                League.entries.mapNotNull { entry ->
+                    val url = if (entry.isTeam) {
+                        teamCrest(state.footballMatches, entry) ?: entry.teamId?.let { "$ESPN_TEAM_LOGOS/$it.png" }
+                    } else {
+                        state.footballLogos[entry]
+                    }
+                    url?.let { entry.title to it }
+                }.toMap()
+            }
             GroupColumn(
                 allLabel = "Översikt",
                 total = state.footballMatches.size,
                 groups = League.entries.map { it.title },
                 counts = counts,
                 selected = league?.title,
+                logos = logos,
+                allIcon = Glyphs.Football,
                 onSelect = { title ->
                     val next = League.entries.firstOrNull { it.title == title }
                     if (next != state.footballLeague) focus.fromList = true
@@ -3127,3 +3140,6 @@ private val YELLOW_CARD = Color(0xFFFFD60A)
 private val PITCH_TOP = Color(0xFF1F5C37)
 private val PITCH_BOTTOM = Color(0xFF14432A)
 private val INK = Color(0xFF101318)
+
+/** ESPN:s lagmärken, efter lagets id: Malmö FF 2720, Sverige 466. */
+private const val ESPN_TEAM_LOGOS = "https://a.espncdn.com/i/teamlogos/soccer/500"

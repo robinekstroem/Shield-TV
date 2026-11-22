@@ -92,6 +92,8 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.platform.LocalFocusManager
@@ -466,9 +468,13 @@ fun GroupColumn(
     pinned: List<PinnedGroup> = emptyList(),
     /** Tv: pil höger eller OK i listan går hit — till det man senast stod på i innehållet. */
     onEnterContent: (() -> Unit)? = null,
+    /** En logga bredvid namnet, som ligornas: kategorins namn → bildens adress. */
+    logos: Map<String, String> = emptyMap(),
+    /** En symbol bredvid "Alla" när de andra har loggor. */
+    allIcon: ImageVector? = null,
 ) {
     if (tvLayout) {
-        TvGroupPanel(allLabel, total, groups, counts, selected, onSelect, title, pinned, onEnterContent)
+        TvGroupPanel(allLabel, total, groups, counts, selected, onSelect, title, pinned, onEnterContent, logos, allIcon)
         return
     }
     val palette = LocalPalette.current
@@ -487,14 +493,14 @@ fun GroupColumn(
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 item {
-                    GroupRow(allLabel, total, selected == null) { onSelect(null) }
+                    GroupRow(allLabel, total, selected == null, icon = allIcon) { onSelect(null) }
                 }
                 items(pinned, key = { it.key }) { group ->
-                    GroupRow(group.title, group.count, selected == group.key, indent = group.indent) { onSelect(group.key) }
+                    GroupRow(group.title, group.count, selected == group.key, indent = group.indent, logo = logos[group.title]) { onSelect(group.key) }
                 }
                 if (pinned.isNotEmpty()) item { Spacer(Modifier.height(10.dp)) }
                 items(groups, key = { it }) { group ->
-                    GroupRow(group, counts[group] ?: 0, selected == group) { onSelect(group) }
+                    GroupRow(group, counts[group] ?: 0, selected == group, logo = logos[group]) { onSelect(group) }
                 }
             }
             Scrollbar(listState, modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(vertical = 4.dp))
@@ -503,13 +509,22 @@ fun GroupColumn(
 }
 
 @Composable
-private fun GroupRow(name: String, count: Int, selected: Boolean, indent: Boolean = false, onClick: () -> Unit) {
+private fun GroupRow(
+    name: String,
+    count: Int,
+    selected: Boolean,
+    indent: Boolean = false,
+    logo: String? = null,
+    icon: ImageVector? = null,
+    onClick: () -> Unit,
+) {
     val palette = LocalPalette.current
     Pressable(onClick = onClick, selected = selected, modifier = Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth().padding(start = if (indent) 26.dp else 12.dp, end = 12.dp, top = 9.dp, bottom = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            GroupBadge(logo, icon, tint = if (selected) palette.textPrimary else palette.textSecondary, size = 22.dp)
             Text(
                 name,
                 modifier = Modifier.weight(1f),
@@ -525,7 +540,14 @@ private fun GroupRow(name: String, count: Int, selected: Boolean, indent: Boolea
 }
 
 /** En rad i tv-listan: "Alla", en egen kategori eller en vanlig. */
-private class GroupEntry(val key: String?, val name: String, val count: Int, val indent: Boolean) {
+private class GroupEntry(
+    val key: String?,
+    val name: String,
+    val count: Int,
+    val indent: Boolean,
+    val logo: String? = null,
+    val icon: ImageVector? = null,
+) {
     val id: String get() = key ?: ALL_ID
 }
 
@@ -556,6 +578,8 @@ private fun TvGroupPanel(
     title: String,
     pinned: List<PinnedGroup>,
     onEnterContent: (() -> Unit)?,
+    logos: Map<String, String>,
+    allIcon: ImageVector?,
 ) {
     val palette = LocalPalette.current
     // Menyn räknar med kategorierna när man väljer en flik: finns de, går markeringen hit.
@@ -586,7 +610,7 @@ private fun TvGroupPanel(
         // Platsen i raden är kantens bredd; utfälld lägger sig listan över innehållet.
         Box(Modifier.width(TV_GROUPS_CLOSED).fillMaxHeight().zIndex(1f)) {
             TvGroupList(
-                allLabel, total, groups, counts, selected, onSelect, title, pinned,
+                allLabel, total, groups, counts, selected, onSelect, title, pinned, logos, allIcon,
                 shown = shown,
                 takeFocus = false,
                 onLeft = null,
@@ -621,7 +645,7 @@ private fun TvGroupPanel(
         ) {
             Row(Modifier.fillMaxHeight()) {
                 TvGroupList(
-                    allLabel, total, groups, counts, selected, onSelect, title, pinned,
+                    allLabel, total, groups, counts, selected, onSelect, title, pinned, logos, allIcon,
                     shown = { 1f },
                     takeFocus = true,
                     onLeft = { TvNav.openMenu() },
@@ -657,6 +681,8 @@ private fun TvGroupList(
     onSelect: (String?) -> Unit,
     title: String,
     pinned: List<PinnedGroup>,
+    logos: Map<String, String>,
+    allIcon: ImageVector?,
     shown: () -> Float,
     /** Tar emot markeringen när listan visas och när menyn lämnar över den. */
     takeFocus: Boolean,
@@ -671,11 +697,11 @@ private fun TvGroupList(
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
     var focused by remember { mutableStateOf(false) }
-    val entries = remember(allLabel, total, groups, counts, pinned) {
+    val entries = remember(allLabel, total, groups, counts, pinned, logos, allIcon) {
         buildList {
-            add(GroupEntry(null, allLabel, total, indent = false))
-            pinned.forEach { add(GroupEntry(it.key, it.title, it.count, it.indent)) }
-            groups.forEach { add(GroupEntry(it, it, counts[it] ?: 0, indent = false)) }
+            add(GroupEntry(null, allLabel, total, indent = false, icon = allIcon))
+            pinned.forEach { add(GroupEntry(it.key, it.title, it.count, it.indent, logo = logos[it.title])) }
+            groups.forEach { add(GroupEntry(it, it, counts[it] ?: 0, indent = false, logo = logos[it])) }
         }
     }
     val selectedIndex = entries.indexOfFirst { it.key == selected }.coerceAtLeast(0)
@@ -758,6 +784,8 @@ private fun TvGroupList(
                     TvGroupRow(
                         name = entry.name,
                         count = entry.count,
+                        logo = entry.logo,
+                        icon = entry.icon,
                         selected = index == selectedIndex,
                         shown = shown,
                         focus = if (index == selectedIndex) selectedRow else null,
@@ -790,15 +818,19 @@ private suspend fun focusRow(listState: LazyListState, index: Int, requester: Fo
 
 /**
  * En kategori i tv-listan. Texten syns bara utfälld. Markerad fylls raden
- * med samma färg som menyns markerade rad, som tonar in och ut — ingen ram.
- * Den valda kategorin har ett streck i kanten. Det som står inom hakparentes
- * eller sist i namnet om bildkvalitet och språk ("4K", "DV", "MULTI-SUB")
- * står som små märken efter namnet.
+ * med menyns färg, som tonar in och ut — platt, utan glans och utan ram.
+ * Kategorin man är i har en svag ton av samma färg och ett streck i kanten.
+ * En logga står före namnet när den finns (ligorna). Det som står inom
+ * hakparentes eller sist i namnet om bildkvalitet och språk ("4K", "DV",
+ * "MULTI-SUB") står som små märken efter namnet, och antalet i en liten
+ * kapsel längst till höger.
  */
 @Composable
 private fun TvGroupRow(
     name: String,
     count: Int,
+    logo: String?,
+    icon: ImageVector?,
     selected: Boolean,
     shown: () -> Float,
     focus: FocusRequester?,
@@ -814,6 +846,7 @@ private fun TvGroupRow(
     val active = focused || hovered
     val fill = menuFill(palette)
     val ink = menuInk(palette)
+    val brush = remember(fill) { menuBrush(fill) }
     // Läses först när raden ritas: bara ritningen görs om medan den tonar.
     val lit = animateFloatAsState(if (active) 1f else 0f, tween(ROW_FADE_MS), label = "kategorirad")
     val label = remember(name) { categoryLabel(name) }
@@ -823,16 +856,11 @@ private fun TvGroupRow(
             .fillMaxWidth()
             .then(if (focus != null) Modifier.focusRequester(focus) else Modifier)
             .onFocusChanged { if (it.isFocused) onFocused() }
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(14.dp))
             .drawBehind {
                 val alpha = lit.value
-                if (alpha > 0.001f) {
-                    drawRect(fill, alpha = alpha)
-                    drawRect(
-                        Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.14f), Color.Transparent)),
-                        alpha = alpha,
-                    )
-                }
+                if (selected && alpha < 1f) drawRect(fill, alpha = SELECTED_TINT * (1f - alpha) * shown())
+                if (alpha > 0.001f) drawRect(brush, alpha = alpha)
             }
             .hoverable(interaction)
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
@@ -844,7 +872,7 @@ private fun TvGroupRow(
                 Modifier
                     .align(Alignment.CenterStart)
                     .padding(start = 4.dp)
-                    .size(width = 3.dp, height = 20.dp)
+                    .size(width = 3.dp, height = 22.dp)
                     .clip(CircleShape)
                     .background(Brand.stripe),
             )
@@ -852,10 +880,11 @@ private fun TvGroupRow(
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(start = if (indent) 30.dp else 14.dp, end = 14.dp, top = 11.dp, bottom = 11.dp)
+                .padding(start = if (indent) 30.dp else 16.dp, end = 12.dp, top = 10.dp, bottom = 10.dp)
                 .graphicsLayer { alpha = shown() },
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            GroupBadge(logo, icon, tint = if (active) ink else palette.textSecondary, size = 30.dp)
             // Namnet och märkena direkt efter det; antalet längst till höger.
             Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -877,16 +906,51 @@ private fun TvGroupRow(
                 }
             }
             Spacer(Modifier.width(10.dp))
-            Text(
-                count.grouped(),
-                style = MaterialTheme.typography.labelMedium,
-                color = if (active) ink.copy(alpha = 0.78f) else palette.textTertiary,
-                maxLines = 1,
-                softWrap = false,
-            )
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (active) ink.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.06f))
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+            ) {
+                Text(
+                    count.grouped(),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (active) ink else palette.textTertiary,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
         }
     }
 }
+
+/**
+ * Loggan eller symbolen före namnet, i en ruta av fast storlek så att
+ * namnen står i linje. Ingenting när raden har varken eller.
+ */
+@Composable
+private fun GroupBadge(logo: String?, icon: ImageVector?, tint: Color, size: Dp) {
+    if (logo == null && icon == null) return
+    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
+        if (logo != null) {
+            RemoteImage(logo, Modifier.fillMaxSize(), maxSide = 96, contentScale = ContentScale.Fit)
+        } else if (icon != null) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(size * 0.72f))
+        }
+    }
+    Spacer(Modifier.width(12.dp))
+}
+
+/**
+ * Den markerade radens fyllning i menyerna: temats färg, som ljusnar en
+ * aning mot höger. Platt — inget ljus ovanifrån, ingen glans.
+ */
+internal fun menuBrush(fill: Color): Brush =
+    Brush.horizontalGradient(listOf(fill, lerp(fill, Color.White, 0.12f)))
+
+/** Den valda kategorins svaga ton när markeringen står någon annanstans. */
+private const val SELECTED_TINT = 0.14f
 
 /** En kategoris namn utan märkena, och märkena för sig. */
 internal class CategoryLabel(val name: String, val marks: List<String>)

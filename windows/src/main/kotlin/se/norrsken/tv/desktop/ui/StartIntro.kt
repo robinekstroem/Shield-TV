@@ -26,6 +26,8 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import kotlinx.coroutines.delay
@@ -39,17 +41,17 @@ import kotlin.math.sin
  * Starten, som inledningen på en film på bio.
  *
  * Projektorn tänds: ljusstrålar uppifrån flimrar till och blir stadiga, och
- * i ljuset tänds filmväggen — omslagen vänds fram i en våg från mitten
- * medan kameran sakta glider bakåt. Sedan virvlar omslagen som bläddrade
- * sidor, allt snabbare medan kameran trycker sig fram, och landar alla i
- * samma ögonblick: ett slag, kameran studsar till och ljuset slår upp över
- * hela väggen. Samma film syns aldrig två gånger.
+ * i ljuset tonas filmväggen fram, från mitten och utåt, medan kameran sakta
+ * glider bakåt. Sedan klipper väggen mellan filmerna i vågor, allt tätare,
+ * som en filmtrailer — och vid slaget byter alla på en gång och allt
+ * stannar: kameran studsar till och ljuset slår upp över hela väggen.
+ * Samma film syns aldrig två gånger, och inget roteras.
  *
- * När startsidan är klar öppnar sig väggen på mitten som två jättelika
- * grindar och svänger bort åt sidorna, biofälten försvinner, och man kör
- * rakt in i appen. Väggen blir kvar bakom sidorna, mörk och dämpad, medan
- * startsidans omslag vänds fram. Ingen logga, ingen text, inget ljud. En
- * knapptryckning eller ett klick hoppar över.
+ * När startsidan är klar delar sig väggen på mitten och glider isär åt
+ * sidorna, som ridån på bio, biofälten försvinner och man kör in i appen.
+ * Väggen blir kvar bakom sidorna, mörk och dämpad, medan startsidans omslag
+ * tonas fram. Ingen logga, ingen text, inget ljud. En knapptryckning eller
+ * ett klick hoppar över.
  *
  * Väggen själv ([PosterWall]) delas med bakgrunden: här ritas den i full
  * styrka, med projektorn, färgton, mörkare hörn och biofält ovanpå.
@@ -76,7 +78,7 @@ internal fun StartIntro(state: AppState, wall: PosterWall, ready: Boolean, skip:
         if (!skipping) {
             while (!mayEnd(wall, clock.longValue)) delay(40)
         }
-        // Startsidan kommer fram bakom grindarna, och dess omslag vänds fram.
+        // Startsidan kommer fram bakom ridån, och dess omslag tonas fram.
         state.introRevealing = true
         val duration = when {
             !wall.lit -> EXIT_PLAIN_MS
@@ -97,7 +99,7 @@ internal fun StartIntro(state: AppState, wall: PosterWall, ready: Boolean, skip:
         Modifier
             .fillMaxSize()
             .graphicsLayer {
-                // Det sista av grindarna tonar bort när de nästan öppnat sig.
+                // Det sista av ridån tonar bort när den nästan glidit undan.
                 alpha = 1f - smoothstep(if (wall.lit) FADE_FROM else 0f, 1f, exit.value)
                 compositingStrategy = CompositingStrategy.ModulateAlpha
             }
@@ -110,13 +112,13 @@ internal fun StartIntro(state: AppState, wall: PosterWall, ready: Boolean, skip:
                 .drawBehind {
                     val t = clock.longValue
                     val e = exit.value
-                    val open = if (wall.lit) easeInOutCubic((e / GATES_OPEN).coerceIn(0f, 1f)) else 0f
+                    val open = if (wall.lit) easeInOutCubic((e / CURTAIN_OPEN).coerceIn(0f, 1f)) else 0f
                     if (open <= 0f) {
                         drawRect(INTRO_BLACK)
                         wall.drawIntro(this)
                     } else {
-                        looks.gate(this, left = true, open = open) { wall.drawIntro(this) }
-                        looks.gate(this, left = false, open = open) { wall.drawIntro(this) }
+                        curtain(left = true, open = open) { wall.drawIntro(this) }
+                        curtain(left = false, open = open) { wall.drawIntro(this) }
                     }
                     if (!wall.lit) drawGlow(t)
                     looks.draw(this, t, e, open)
@@ -131,6 +133,28 @@ private fun mayEnd(wall: PosterWall, elapsed: Long): Boolean = when {
     // Omslagen laddas: väggen tänds strax.
     wall.lightingSoon(nowMs()) -> false
     else -> elapsed >= AMBIENT_MIN_MS
+}
+
+/**
+ * Ridån: väggens vänstra eller högra halva, som glider undan åt sitt håll
+ * medan kameran kör fram mot öppningen. Inget vrids — halvorna bara glider,
+ * och mörknar lite på vägen ut.
+ */
+private inline fun DrawScope.curtain(left: Boolean, open: Float, content: DrawScope.() -> Unit) {
+    val w = size.width
+    val hh = size.height
+    val half = w / 2f
+    val shift = (if (left) -1f else 1f) * half * CURTAIN_TRAVEL * open
+    val drive = 1f + CURTAIN_DRIVE * open * open
+    scale(drive, drive, pivot = Offset(half, hh / 2f)) {
+        translate(left = shift) {
+            clipRect(if (left) 0f else half, 0f, if (left) half else w, hh) {
+                drawRect(INTRO_BLACK)
+                content()
+                drawRect(Color.Black, alpha = CURTAIN_SHADE * open)
+            }
+        }
+    }
 }
 
 /** Innan väggen tänts: ett svagt sken i mörkret. */
@@ -150,7 +174,7 @@ private fun DrawScope.drawGlow(t: Long) {
 
 /**
  * Det som ligger ovanpå väggen i starten: projektorns strålar, färgtonen,
- * mörkare hörn och biofälten (bilden i 2,39:1), och grindarna i slutet.
+ * mörkare hörn och biofälten (bilden i 2,39:1).
  */
 private class IntroLooks {
     private var width = -1f
@@ -158,8 +182,6 @@ private class IntroLooks {
     private var grade: Brush? = null
     private var vignette: Brush? = null
     private val rays = Array(RAYS) { Path() }
-    private val gateMatrix = FloatArray(9)
-    private val scratch = FloatArray(9)
 
     fun draw(scope: DrawScope, t: Long, e: Float, open: Float) {
         with(scope) { drawLooks(t, e, open) }
@@ -184,9 +206,9 @@ private class IntroLooks {
                 radius = max(width, height) * 0.72f,
             )
         }
-        drawRays(t, 1f - open)
-        // Färgton och hörn hör till väggen: de går bort när grindarna öppnar sig.
         val keep = 1f - open
+        drawRays(t, keep)
+        // Färgton och hörn hör till väggen: de går bort när ridån öppnar sig.
         grade?.let { drawRect(it, alpha = keep) }
         vignette?.let { drawRect(it, alpha = keep) }
         val full = ((height - width / LETTERBOX) / 2f).coerceAtLeast(0f)
@@ -200,7 +222,7 @@ private class IntroLooks {
     /**
      * Projektorn: strålar som solfjäder uppifrån, ovanför bilden. Lampan
      * flimrar till ett par gånger när den tänds, lyser stadigt medan väggen
-     * vänds fram, och bleknar sedan bort.
+     * tonas fram, och bleknar sedan bort.
      */
     private fun DrawScope.drawRays(t: Long, strength: Float) {
         val level = projector(t) * strength
@@ -214,16 +236,16 @@ private class IntroLooks {
             val angle = (spread * 27f + 1.3f * sin(t / 2900f + i * 1.7f)) * DEG
             val dirX = sin(angle)
             val dirY = cos(angle)
-            val start = width * 0.004f
-            val end = width * (0.045f + 0.03f * rayWidth(i))
+            val narrow = width * 0.004f
+            val wide = width * (0.045f + 0.03f * rayWidth(i))
             val endX = sourceX + dirX * length
             val endY = sourceY + dirY * length
             val path = rays[i]
             path.reset()
-            path.moveTo(sourceX + dirY * start, sourceY - dirX * start)
-            path.lineTo(endX + dirY * end, endY - dirX * end)
-            path.lineTo(endX - dirY * end, endY + dirX * end)
-            path.lineTo(sourceX - dirY * start, sourceY + dirX * start)
+            path.moveTo(sourceX + dirY * narrow, sourceY - dirX * narrow)
+            path.lineTo(endX + dirY * wide, endY - dirX * wide)
+            path.lineTo(endX - dirY * wide, endY + dirX * wide)
+            path.lineTo(sourceX - dirY * narrow, sourceY + dirX * narrow)
             path.close()
             val alpha = level * (0.035f + 0.03f * rayWidth(i + 7))
             drawPath(
@@ -236,43 +258,6 @@ private class IntroLooks {
                     end = Offset(endX, endY),
                 ),
             )
-        }
-    }
-
-    /**
-     * En grind: väggens vänstra eller högra halva, som svänger bort från
-     * kameran runt sitt gångjärn i skärmens kant. Kameran kör samtidigt fram
-     * genom öppningen. Grinden mörknar ju mer den vrids från ljuset.
-     */
-    fun gate(scope: DrawScope, left: Boolean, open: Float, content: DrawScope.() -> Unit) {
-        with(scope) {
-            val w = size.width
-            val hh = size.height
-            val cx = w / 2f
-            val cy = hh / 2f
-            val theta = GATE_ANGLE * DEG * open
-            val c = cos(theta)
-            val s = sin(theta)
-            val d = GATE_DEPTH * w
-            if (left) {
-                planeMatrix(cx, cy, d, -cx, -cy, 0f, c, 0f, s, 0f, 1f, 0f, scratch)
-            } else {
-                planeMatrix(cx, cy, d, cx - 2f * cx * c, -cy, 2f * cx * s, c, 0f, -s, 0f, 1f, 0f, scratch)
-            }
-            // Kameran kör fram: allt växer kring mitten.
-            val k = 1f + GATE_DRIVE * open * open
-            for (i in 0 until 3) {
-                gateMatrix[i] = k * scratch[i] + cx * (1f - k) * scratch[6 + i]
-                gateMatrix[3 + i] = k * scratch[3 + i] + cy * (1f - k) * scratch[6 + i]
-                gateMatrix[6 + i] = scratch[6 + i]
-            }
-            projected(gateMatrix) {
-                clipRect(if (left) 0f else cx, 0f, if (left) cx else w, hh) {
-                    drawRect(INTRO_BLACK)
-                    content()
-                    drawRect(Color.Black, alpha = GATE_SHADE * s)
-                }
-            }
         }
     }
 }
@@ -305,22 +290,21 @@ private val BEAM = Color(0xFFFFF0D8)
 /** Projektorns strålar. */
 private const val RAYS = 7
 
-/** Slutet, i förloppet 0–1: biofälten och grindarna öppnar sig, och till sist tonar det sista bort. */
+/** Slutet, i förloppet 0–1: biofälten och ridån öppnar sig, och till sist tonar det sista bort. */
 private const val BARS_OPEN_FROM = 0f
 private const val BARS_OPEN_TO = 0.65f
-private const val GATES_OPEN = 0.9f
-private const val FADE_FROM = 0.82f
-/** Grindarna: hur långt de svänger (grader), kamerans avstånd (skärmbredder), hur långt den kör fram, och skuggan. */
-private const val GATE_ANGLE = 86f
-private const val GATE_DEPTH = 1.1f
-private const val GATE_DRIVE = 0.28f
-private const val GATE_SHADE = 0.6f
+private const val CURTAIN_OPEN = 0.9f
+private const val FADE_FROM = 0.8f
+/** Ridån: hur långt halvorna glider (halva skärmar), hur långt kameran kör fram, och skuggan. */
+private const val CURTAIN_TRAVEL = 1.05f
+private const val CURTAIN_DRIVE = 0.14f
+private const val CURTAIN_SHADE = 0.45f
 
 /** Hur länge: minst så länge väggen visas (efter slaget), minst utan vägg, och slutens längd. */
 private const val WALL_MIN_MS = SLAM_MS + 900L
 private const val AMBIENT_MIN_MS = 900L
-private const val EXIT_MS = 1_700
-private const val EXIT_SKIP_MS = 1_100
+private const val EXIT_MS = 1_600
+private const val EXIT_SKIP_MS = 1_000
 private const val EXIT_PLAIN_MS = 500
 /** Längre än så väntar den inte, även om inget blivit klart. */
 private const val MAX_SHOW_MS = 20_000L

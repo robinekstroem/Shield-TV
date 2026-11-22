@@ -256,8 +256,6 @@ fun AppRoot(state: AppState) {
     // Filmväggen: starten visar den, och sedan blir den kvar som bakgrund bakom sidorna.
     val wall = remember { PosterWall() }
     PosterWallDriver(state, wall)
-    // Byter man sida vänder väggen bakom blad, medan sidans omslag vänds fram.
-    LaunchedEffect(state.screen) { if (state.introDone) wall.turnPage() }
     Box(
         Modifier
             .fillMaxSize()
@@ -328,7 +326,7 @@ fun AppRoot(state: AppState) {
                         },
                     ),
             ) {
-                // Omslagen vänds fram när man kommer till en sida, och när starten tonar bort.
+                // Omslagen tonas fram när man kommer till en sida, och när starten tonar bort.
                 val entrance = remember(state.screen, state.introRevealing) { CoverEntrance() }
                 CompositionLocalProvider(
                     LocalTvDocked provides (!drawers && tvLayout && docked),
@@ -658,20 +656,30 @@ private fun NavDivider(tv: Boolean) {
 }
 
 /**
- * Tv-menyns och kategoriernas bakgrund: mörk, med ett svagt sken av
- * markeringens färg upptill som tonar bort, mörkare nedtill, och en tunn
- * ljus kant mot innehållet som tonar ut i båda ändar. Inga färgfläckar.
+ * Tv-menyns och kategoriernas bakgrund: djup och mörk, med ett mjukt sken
+ * av menyns färg från övre hörnet som tonar bort långt innan nederkanten,
+ * mörkare nedtill, och en tunn ljus kant mot innehållet som tonar ut i
+ * båda ändar. Inga band och inga fläckar.
  */
 internal fun DrawScope.drawerBackdrop(palette: Palette) {
     val tint = menuFill(palette)
     drawRect(palette.surface.copy(alpha = palette.surface.alpha * 0.5f))
     drawRect(
-        Brush.verticalGradient(
-            listOf(tint.copy(alpha = 0.13f), tint.copy(alpha = 0.03f), Color.Transparent),
-            endY = size.height * 0.6f,
+        Brush.radialGradient(
+            0f to tint.copy(alpha = 0.14f),
+            0.45f to tint.copy(alpha = 0.05f),
+            1f to Color.Transparent,
+            center = Offset(0f, 0f),
+            radius = maxOf(size.width * 1.25f, 1f),
         ),
     )
-    drawRect(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.32f)), startY = size.height * 0.55f))
+    drawRect(
+        Brush.verticalGradient(
+            0f to Color.Transparent,
+            0.5f to Color.Transparent,
+            1f to Color.Black.copy(alpha = 0.38f),
+        ),
+    )
     val x = size.width - 0.75.dp.toPx()
     drawLine(
         Brush.verticalGradient(listOf(Color.Transparent, EDGE, EDGE, Color.Transparent)),
@@ -761,6 +769,7 @@ private fun NavItem(
     val shape = RoundedCornerShape(if (tv) 14.dp else 10.dp)
     val fill = menuFill(palette)
     val ink = menuInk(palette)
+    val brush = remember(fill) { menuBrush(fill) }
     // Markerad: färgen tonar in. Musen över: en svag ton av samma färg.
     val lit by animateFloatAsState(if (focused && trail == null) 1f else 0f, tween(MENU_MS), label = "menyrad")
     val hint by animateFloatAsState(if (hovered && !focused) 0.12f else 0f, tween(MENU_MS), label = "menyhovring")
@@ -811,23 +820,15 @@ private fun NavItem(
             )
             .clip(shape)
             .drawBehind {
+                // Fliken man är i: en svag ton i dess egen färg.
+                if (selected && !focused && tv) drawRect(accent, alpha = 0.10f)
                 if (hint > 0.001f) drawRect(fill, alpha = hint)
-                if (lit > 0.001f) drawRect(fill, alpha = lit)
+                if (lit > 0.001f) drawRect(brush, alpha = lit)
                 val alpha = shown.value
                 if (alpha > 0.001f) {
+                    // Platt, utan glans: färgen ljusnar bara en aning mot höger.
                     val dy = slide.value * size.height
-                    drawRect(fill, topLeft = Offset(0f, dy), size = size, alpha = alpha)
-                    // Ett svagt ljus i plattans överkant.
-                    drawRect(
-                        Brush.verticalGradient(
-                            listOf(Color.White.copy(alpha = 0.16f), Color.Transparent),
-                            startY = dy,
-                            endY = dy + size.height * 0.7f,
-                        ),
-                        topLeft = Offset(0f, dy),
-                        size = size,
-                        alpha = alpha,
-                    )
+                    drawRect(brush, topLeft = Offset(0f, dy), size = size, alpha = alpha)
                 }
             }
             .hoverable(interaction)

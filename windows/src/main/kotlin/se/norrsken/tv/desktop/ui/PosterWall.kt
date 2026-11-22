@@ -23,13 +23,16 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -57,17 +60,18 @@ import kotlin.math.sqrt
  * Filmväggen: omslag från de häftigaste filmerna man har — det som trendar,
  * Marvel och de andra filmserierna, klassiker som Jurassic Park och Ensam
  * hemma, nya filmer med högt betyg — på en stor vägg som står snett i
- * djupet, i riktig 3D. Starten visar den i full styrka: omslagen vänds fram
- * ur mörkret, virvlar sedan allt snabbare som bläddrade sidor och landar
- * alla på en gång med ett slag. Sedan blir väggen kvar som appens
- * bakgrund, mörk och dämpad; den glider sakta medan man inte trycker på
- * något och vänder blad när man byter sida.
+ * djupet, i riktig 3D. Starten visar den i full styrka: omslagen tonas fram
+ * ur mörkret, och sedan klipper väggen mellan filmerna allt snabbare, som
+ * en filmtrailer, tills allt stannar med ett slag. Sedan blir väggen kvar
+ * som appens bakgrund, mörk och dämpad, och glider sakta medan man inte
+ * trycker på något.
  *
- * Samma film syns aldrig två gånger samtidigt: väggen räknar ut vilka
- * platser som syns och ger var och en ett eget omslag, och ett omslag som
- * vänds byter film först när det står på kant. Allt ritas i en enda
- * ritning med en egen perspektivprojektion — inget mäts om och inget sätts
- * ihop på nytt medan den rör sig. Ingen oskärpa och ingen glans.
+ * Omslagen roteras aldrig, och väggen vrids inte: den står fast och
+ * raderna glider. Samma film syns aldrig två gånger samtidigt: väggen
+ * räknar ut vilka platser som syns och ger var och en ett eget omslag.
+ * Allt ritas i en enda ritning genom en och samma perspektivprojektion —
+ * inget mäts om och inget sätts ihop på nytt medan den rör sig. Ingen
+ * oskärpa och ingen glans.
  *
  * Fälten ändras bara på UI-tråden: i ritningen, när ett omslag laddats och
  * i klockan som driver väggen.
@@ -93,23 +97,22 @@ internal class PosterWall {
     /** Ökar när ett omslag laddats, så att ritningen tar med det också medan väggen står still. */
     private val loads = mutableIntStateOf(0)
     private var elapsed = 0.0
-    private var nextFlipAt = 0L
-    private var waveRequested = false
+    private var nextSwapAt = 0L
 
     /** Väggen har tänts. */
     var lit = false
         private set
 
-    /** Väggen tändes i starten: den har virveln och slaget. Tänds den först som bakgrund blir det lugnare. */
+    /** Väggen tändes i starten: den har klippen och slaget. Tänds den först som bakgrund blir det lugnare. */
     private var cinematic = false
 
-    /** Efter starten: väggen är bakgrund, och omslagen byts bara när man byter sida. */
+    /** Efter starten: väggen är bakgrund, och omslagen byts inte längre. */
     var ambient = false
 
     /** Senaste knapptryckningen eller musrörelsen, i [nowMs]. */
     var lastInput = 0L
 
-    /** Något omslag vänds, eller ska strax vändas: väggen ska gå i full fart tills det är klart. */
+    /** Något omslag tonas fram eller byts: väggen ska gå i full fart tills det är klart. */
     var busy = false
         private set
 
@@ -133,7 +136,6 @@ internal class PosterWall {
     private val rot = FloatArray(9)
     private val wall = FloatArray(9)
     private val wallInverse = FloatArray(9)
-    private val h = FloatArray(9)
     private var projX = 0f
     private var projY = 0f
     private var lightX = 0f
@@ -146,15 +148,9 @@ internal class PosterWall {
     private var fogEndX = 0f
     private var fogEndY = 0f
 
-    // --- Hur ett omslag rör sig just nu (se [motion]) --------------------------------------
-    private var motionTheta = 0f
-    private var motionLift = 0f
-    private var motionAlpha = 1f
-
     // --- Platserna ---------------------------------------------------------------------
     private val tiles = ArrayList<Tile>()
     private val spare = ArrayList<Tile>()
-    private val raised = ArrayList<Tile>()
     private val fresh = ArrayList<Tile>()
     private var rowFirst = 0
     private var rowCount = 0
@@ -175,6 +171,11 @@ internal class PosterWall {
     private var preparedAt = Long.MIN_VALUE
     private var dirty = true
     private var ready = false
+
+    init {
+        // Väggen står fast: samma vinkel hela tiden, bara kameran går närmare och längre bort.
+        rotation(PITCH, YAW, ROLL)
+    }
 
     fun setReel(size: Int) {
         count = size
@@ -225,7 +226,7 @@ internal class PosterWall {
             cinematic = !ambient
             elapsed = 0.0
             clock.longValue = 0L
-            nextFlipAt = if (cinematic) SLAM_MS + LIVE_AFTER_SLAM_MS else Long.MAX_VALUE
+            nextSwapAt = if (cinematic) SLAM_MS + SWAP_AFTER_SLAM_MS else Long.MAX_VALUE
             fitTiles()
             dirty = true
         }
@@ -234,17 +235,6 @@ internal class PosterWall {
     /** Omslagen laddas och väggen tänds snart: starten väntar in den. */
     fun lightingSoon(now: Long): Boolean =
         !lit && count > 0 && (loadedCount > 0 || (loadedCount + failedCount < count && now < reelAt + WALL_WAIT_MS))
-
-    /**
-     * Man bytte sida: väggen bakom vänder blad, omslag för omslag från vänster
-     * till höger, och nya filmer kommer fram.
-     */
-    fun turnPage() {
-        if (!lit || !ambient) return
-        waveRequested = true
-        dirty = true
-        busy = true
-    }
 
     /** Väggens tid går fram [ms]; syns först efter [publish]. */
     fun advance(ms: Double) {
@@ -313,8 +303,10 @@ internal class PosterWall {
             // Fönstret bytte storlek: väggen läggs om.
             val u = clock.longValue
             for (i in tiles.indices) {
-                release(tiles[i].poster, u)
-                spare.add(tiles[i])
+                val tile = tiles[i]
+                release(tile.poster, u)
+                release(tile.previous, u)
+                spare.add(tile)
             }
             tiles.clear()
             fitTiles()
@@ -332,7 +324,6 @@ internal class PosterWall {
         light(u)
         fog()
         updateTiles(u)
-        scheduleLife(u)
     }
 
     /**
@@ -378,27 +369,20 @@ internal class PosterWall {
     // --- Kameran -----------------------------------------------------------------------
 
     /**
-     * Kameran [u] ms efter att väggen tänts: nära och snett i början, sedan
-     * glider den sakta bakåt och rätar upp sig, och vaggar lite hela tiden.
-     * Under virveln trycker den sig fram och vrider sig, och vid slaget
-     * studsar den tillbaka.
+     * Kameran [u] ms efter att väggen tänts: nära i början, sedan glider den
+     * sakta rakt bakåt. Under klippen trycker den sig fram, och vid slaget
+     * studsar den tillbaka. Vinkeln är densamma hela tiden.
      */
     private fun pose(u: Long) {
         val p = 1f - exp(-u / SETTLE_MS)
-        val seconds = u / 1000f
-        val impact = impact(u)
-        zoom = (ZOOM_FROM + (ZOOM_TO - ZOOM_FROM) * p) * (1f + FLURRY_PUSH * impact)
-        val pitch = PITCH_FROM + (PITCH_TO - PITCH_FROM) * p
-        val yaw = YAW_FROM + (YAW_TO - YAW_FROM) * p + YAW_SWAY * sin(seconds / 15f * TAU + 1f)
-        val roll = ROLL_FROM + (ROLL_TO - ROLL_FROM) * p + ROLL_SWAY * sin(seconds / 12f * TAU) + FLURRY_ROLL * impact
-        rotation(pitch, yaw, roll)
+        zoom = (ZOOM_FROM + (ZOOM_TO - ZOOM_FROM) * p) * (1f + FLURRY_PUSH * impact(u))
         val s = zoom
         homography(0f, 0f, 0f, s * rot[0], s * rot[3], s * rot[6], s * rot[1], s * rot[4], s * rot[7], wall)
         invert(wall, wallInverse)
     }
 
     /**
-     * Virvelns tryck: växer allt fortare fram till slaget, och studsar sedan
+     * Klippens tryck: växer allt fortare fram till slaget, och studsar sedan
      * tillbaka förbi vila och lägger sig — som en stöt.
      */
     private fun impact(u: Long): Float {
@@ -411,7 +395,7 @@ internal class PosterWall {
         return exp(-t / 260f) * cos(t / 900f * TAU)
     }
 
-    /** Vridningen: lutning runt x, sidvridning runt y och rotation runt z, i grader. */
+    /** Vinkeln: lutning runt x, sidvridning runt y och rotation runt z, i grader. */
     private fun rotation(pitch: Float, yaw: Float, roll: Float) {
         val ca = cos(pitch * DEG)
         val sa = sin(pitch * DEG)
@@ -440,30 +424,6 @@ internal class PosterWall {
         bx: Float, by: Float, bz: Float,
         out: FloatArray,
     ) = planeMatrix(width / 2f, height / 2f, depth, ox, oy, oz, ax, ay, az, bx, by, bz, out)
-
-    /**
-     * Ett omslag med mitten i ([x], [y]) på väggen, vridet [thetaDeg] grader
-     * runt sin lodräta mittlinje och lyft [lift] av vägen mot kameran längs
-     * synlinjen: det står kvar på sin plats i bild, men större.
-     */
-    private fun tileHomography(x: Float, y: Float, thetaDeg: Float, lift: Float) {
-        val s = zoom
-        val keep = 1f - lift
-        val qx = s * (rot[0] * x + rot[1] * y) * keep
-        val qy = s * (rot[3] * x + rot[4] * y) * keep
-        val qz = s * (rot[6] * x + rot[7] * y) * keep - depth * lift
-        val c = cos(thetaDeg * DEG)
-        val sn = sin(thetaDeg * DEG)
-        val ax = s * (rot[0] * c + rot[2] * sn)
-        val ay = s * (rot[3] * c + rot[5] * sn)
-        val az = s * (rot[6] * c + rot[8] * sn)
-        val bx = s * rot[1]
-        val by = s * rot[4]
-        val bz = s * rot[7]
-        val hw = tileW / 2f
-        val hh = tileH / 2f
-        homography(qx - ax * hw - bx * hh, qy - ay * hw - by * hh, qz - az * hw - bz * hh, ax, ay, az, bx, by, bz, h)
-    }
 
     /** Väggens punkt (x, y) på skärmen, i [projX] och [projY]. */
     private fun project(x: Float, y: Float) {
@@ -573,7 +533,7 @@ internal class PosterWall {
     }
 
     /**
-     * Radernas egen tid: under virveln rusar de allt fortare, efter slaget
+     * Radernas egen tid: under klippen rusar de allt fortare, efter slaget
      * står de nästan still en stund och kommer sedan i gång igen.
      */
     private fun driftTime(u: Long): Float {
@@ -588,7 +548,7 @@ internal class PosterWall {
         val calm = DRIFT_CALM_MS
         val since = t - SLAM_MS
         if (since <= calm) {
-            // 0,25 i fart direkt efter slaget, mjukt tillbaka till full fart.
+            // En fjärdedels fart direkt efter slaget, mjukt tillbaka till full fart.
             val x = since / calm
             return atSlam + 0.25f * since + 0.75f * calm * (x * x * x - x * x * x * x / 2f)
         }
@@ -615,7 +575,7 @@ internal class PosterWall {
 
     /**
      * Ljuset på väggen: från mitten av bilden vandrar det sakta runt. Under
-     * virveln drar det ihop sig, och vid slaget slår det upp över hela väggen.
+     * klippen drar det ihop sig, och vid slaget slår det upp över hela väggen.
      */
     private fun light(u: Long) {
         val seconds = u / 1000f
@@ -681,12 +641,13 @@ internal class PosterWall {
             val inside = row in 0 until rowCount && tile.col >= keepFrom[row] && tile.col <= keepTo[row]
             if (!inside) {
                 release(tile.poster, u)
+                release(tile.previous, u)
                 tiles.removeAt(i)
                 spare.add(tile)
             }
             i--
         }
-        // Nya platser i bilden. Vågen går utåt från mitten, så de närmast mitten vänds först.
+        // Nya platser i bilden. De närmast mitten tonas fram först.
         for (row in 0 until rowCount) {
             val r = rowFirst + row
             for (col in enterFrom[row]..enterTo[row]) {
@@ -695,19 +656,15 @@ internal class PosterWall {
                 tile.reset(r, col)
                 tile.createdAt = u
                 project(tileLeft(tile, u) + tileW / 2f, r * pitchY)
-                val dx = projX - width / 2f
-                val dy = projY - height / 2f
-                tile.side = if (dx < 0f) -1f else 1f
-                tile.dist = hypot(dx, dy) / (width / 2f)
+                tile.dist = hypot(projX - width / 2f, projY - height / 2f) / (width / 2f)
                 tile.igniteAt = if (u < BLOOM_UNTIL_MS) {
                     (IGNITE_DELAY_MS + tile.dist * IGNITE_SPREAD_MS + hash(r, col) * IGNITE_JITTER_MS).toLong()
                 } else {
                     // Kommer in från kanten: sitter redan på plats.
                     u - IGNITE_MS.toLong()
                 }
-                // Kommer den in mitt i virveln virvlar den med därifrån.
-                val phase = flurryPhase(tile, u)
-                if (phase >= 0f) tile.flurrySwaps = floor(phase + 0.5f).toInt()
+                // Mitt i klippen: med från det slag som är nu, inte alla som redan varit.
+                tile.beats = beatsPassed(tile, u)
                 // Närmast mitten först: de får de bästa filmerna.
                 var at = fresh.size
                 while (at > 0 && fresh[at - 1].dist > tile.dist) at--
@@ -716,7 +673,7 @@ internal class PosterWall {
         }
         for (k in fresh.indices) tiles.add(fresh[k])
         fresh.clear()
-        // Omslag till platserna som väntar. Kom det sent vänds det fram nu.
+        // Omslag till platserna som väntar. Kom det sent tonas det fram nu.
         for (k in tiles.indices) {
             val tile = tiles[k]
             if (tile.poster >= 0) continue
@@ -725,57 +682,82 @@ internal class PosterWall {
             tile.poster = poster
             if (tile.createdAt < u && tile.igniteAt < u) tile.igniteAt = u
         }
-        // Bladet vänds: från vänster till höger, ett omslag i taget.
-        if (waveRequested) {
-            waveRequested = false
-            for (k in tiles.indices) {
-                val tile = tiles[k]
-                if (tile.poster < 0 || tile.flipAt >= 0 || u < tile.igniteAt + IGNITE_MS.toLong()) continue
-                project(tileLeft(tile, u) + tileW / 2f, tile.row * pitchY)
-                val across = (projX / width).coerceIn(-0.2f, 1.2f) + 0.2f
-                tile.flipAt = u + (PAGE_DELAY_MS + across * PAGE_SPREAD_MS + hash(tile.row, tile.col) * PAGE_JITTER_MS).toLong()
-                tile.flipMs = PAGE_FLIP_MS
-                tile.flipDir = 1f
-                tile.flipSwapped = false
-            }
-        }
-        // Omslag som vänds byter film när de står på kant, så att ingen film syns två gånger.
+        // Klippen: vid varje slag byter omslagen film, i en våg från mitten.
+        // Vid själva slaget byter alla på en gång.
         var moving = false
         for (k in tiles.indices) {
             val tile = tiles[k]
             if (tile.poster < 0) continue
-            val phase = flurryPhase(tile, u)
-            if (phase >= 0f) {
-                val target = floor(phase + 0.5f).toInt()
-                while (tile.flurrySwaps < target) {
-                    swap(tile, u)
-                    tile.flurrySwaps++
-                }
-                moving = true
+            if (tile.previous >= 0 && u >= tile.cutAt + tile.cutMs) {
+                release(tile.previous, u)
+                tile.previous = -1
             }
-            if (tile.flipAt >= 0) {
-                val f = (u - tile.flipAt) / tile.flipMs
-                if (f >= 1f) {
-                    tile.flipAt = -1L
-                } else {
-                    if (f >= 0.5f && !tile.flipSwapped) {
-                        swap(tile, u)
-                        tile.flipSwapped = true
-                    }
-                    moving = true
+            if (cinematic && u < SLAM_MS + 200L) {
+                val passed = beatsPassed(tile, u)
+                if (passed > tile.beats) {
+                    tile.beats = passed
+                    cut(tile, u, cutLength(passed - 1))
                 }
             }
-            if (u < tile.igniteAt + IGNITE_MS.toLong()) moving = true
+            if (tile.previous >= 0 || u < tile.igniteAt + IGNITE_MS.toLong()) moving = true
         }
-        busy = moving || waveRequested
+        // Efter slaget, om starten fortsätter: då och då byter ett omslag film.
+        if (!ambient && u >= nextSwapAt) {
+            nextSwapAt = u + (SWAP_EVERY_MS * (0.7f + 0.6f * hash(u.toInt(), 11))).toLong()
+            pick(u)?.let { cut(it, u, SWAP_FADE_MS) }
+        }
+        busy = moving
     }
 
-    /** Byter till en film som inte syns någon annanstans; finns ingen behålls den gamla. */
-    private fun swap(tile: Tile, u: Long) {
+    /** Hur många av klippens slag som nått omslaget vid tiden [u]. Slaget självt räknas som det sista. */
+    private fun beatsPassed(tile: Tile, u: Long): Int {
+        if (!cinematic) return 0
+        var n = 0
+        for (k in BEATS.indices) {
+            val at = if (k == BEATS.lastIndex) BEATS[k].toFloat() else BEATS[k] + tile.dist * beatSpread(k)
+            if (u >= at) n = k + 1 else break
+        }
+        return n
+    }
+
+    /** Hur fort vågen går ut från mitten vid slag [k]: snabbare ju tätare slagen kommer. */
+    private fun beatSpread(k: Int): Float {
+        val gap = if (k + 1 < BEATS.size) (BEATS[k + 1] - BEATS[k]).toFloat() else 0f
+        return min(BEAT_SPREAD_MS, gap * 0.7f)
+    }
+
+    /** Övertoningen vid slag [k]: kortare ju tätare slagen kommer. Slaget självt är ett rent klipp. */
+    private fun cutLength(k: Int): Float {
+        if (k >= BEATS.lastIndex) return SLAM_CUT_MS
+        val gap = (BEATS[k + 1] - BEATS[k]).toFloat()
+        return (gap * 0.5f).coerceIn(60f, 170f)
+    }
+
+    /**
+     * Omslaget byter till en film som inte syns någon annanstans, och tonar
+     * över i den på [fadeMs]. Den gamla räknas som synlig tills den tonat bort.
+     * Finns ingen ledig film står den kvar.
+     */
+    private fun cut(tile: Tile, u: Long, fadeMs: Float) {
+        if (tile.previous >= 0) {
+            release(tile.previous, u)
+            tile.previous = -1
+        }
+        if (fadeMs <= HARD_CUT_MS) {
+            // Ett rent klipp: den gamla filmen syns inte längre, så den kan lämnas
+            // tillbaka först — då räcker filmerna till att alla byter på en gång.
+            val old = tile.poster
+            release(old, u)
+            val next = take(shared = false)
+            tile.poster = if (next >= 0) next else old.also { if (it >= 0) users[it]++ }
+            return
+        }
         val next = take(shared = false)
         if (next < 0) return
-        release(tile.poster, u)
+        tile.previous = tile.poster
         tile.poster = next
+        tile.cutAt = u
+        tile.cutMs = fadeMs
     }
 
     /**
@@ -805,18 +787,6 @@ internal class PosterWall {
         if (users[poster] == 0) freeSince[poster] = u
     }
 
-    /** Efter slaget, om starten fortsätter: då och då vänds ett omslag och en annan film kommer fram. */
-    private fun scheduleLife(u: Long) {
-        if (ambient || u < nextFlipAt) return
-        nextFlipAt = u + (FLIP_EVERY_MS * (0.7f + 0.6f * hash(u.toInt(), 11))).toLong()
-        val tile = pick(u) ?: return
-        tile.flipAt = u
-        tile.flipMs = FLIP_MS
-        tile.flipDir = if (hash(u.toInt(), 12) < 0.5f) -1f else 1f
-        tile.flipSwapped = false
-        busy = true
-    }
-
     /** Ett omslag som syns helt och står still, gärna nära mitten. */
     private fun pick(u: Long): Tile? {
         val inset = width * 0.02f
@@ -824,7 +794,7 @@ internal class PosterWall {
         var bestScore = Float.NEGATIVE_INFINITY
         for (i in tiles.indices) {
             val tile = tiles[i]
-            if (tile.poster < 0 || tile.flipAt >= 0) continue
+            if (tile.poster < 0 || tile.previous >= 0) continue
             if (u < tile.igniteAt + IGNITE_MS.toLong()) continue
             if (!fullyInside(tile, u, inset)) continue
             project(tileLeft(tile, u) + tileW / 2f, tile.row * pitchY)
@@ -836,60 +806,6 @@ internal class PosterWall {
             }
         }
         return best
-    }
-
-    /**
-     * Virveln för ett omslag: hur många vändningar det gjort (med bråkdel),
-     * eller -1 utanför virveln. Vågen går ut från mitten; varje omslag vänder
-     * allt fortare, och alla landar rättvända precis vid slaget.
-     */
-    private fun flurryPhase(tile: Tile, u: Long): Float {
-        if (!cinematic || u >= SLAM_MS) return -1f
-        val start = FLURRY_FROM_MS + tile.dist * FLURRY_SPREAD_MS
-        if (u < start) return -1f
-        val span = SLAM_MS - start
-        if (span < 120f) return -1f
-        val turns = max(1f, (span / FLURRY_FLIP_MS).roundToInt().toFloat())
-        val x = (u - start) / span
-        return turns * x.pow(FLURRY_ACCEL)
-    }
-
-    /**
-     * Hur omslaget rör sig vid tiden [u]: sätter [motionTheta] (vridningen,
-     * rättvänd), [motionLift] och [motionAlpha]. Falskt: det sitter still på väggen.
-     */
-    private fun motion(tile: Tile, u: Long): Boolean {
-        motionAlpha = 1f
-        val ignite = (u - tile.igniteAt) / IGNITE_MS
-        if (ignite < 1f) {
-            // Fram ur mörkret, lugnt och utan studs.
-            val q = ignite.coerceIn(0f, 1f)
-            motionTheta = tile.side * IGNITE_TURN * (1f - easeOutCubic(q))
-            motionLift = IGNITE_LIFT * (1f - easeOutCubic(q))
-            motionAlpha = smoothstep(0f, 0.4f, q)
-            return true
-        }
-        val phase = flurryPhase(tile, u)
-        if (phase >= 0f) {
-            // Som bläddrade sidor: varje vändning saktar in mot kanten och tar fart igen.
-            val within = phase - floor(phase)
-            turn(smoothstep(0f, 1f, within), FLURRY_DIR)
-            motionLift = FLURRY_LIFT * sin(PI_F * within)
-            return true
-        }
-        if (tile.flipAt >= 0 && u >= tile.flipAt) {
-            val f = ((u - tile.flipAt) / tile.flipMs).coerceIn(0f, 1f)
-            turn(easeInOutCubic(f), tile.flipDir)
-            motionLift = FLIP_LIFT * sin(PI_F * f)
-            return true
-        }
-        return false
-    }
-
-    /** En halv vändning [progress] 0–1: efter halva vägen syns andra sidan, rättvänd. */
-    private fun turn(progress: Float, direction: Float) {
-        val angle = 180f * progress
-        motionTheta = if (angle <= 90f) direction * angle else direction * (angle - 180f)
     }
 
     // --- Det som ritas -----------------------------------------------------------------
@@ -911,45 +827,33 @@ internal class PosterWall {
         )
     }
 
+    /**
+     * Alla omslag genom en och samma projektion, bara flyttade. Ett omslag som
+     * tonas fram växer lite in på sin plats; ett som byter film tonar över.
+     */
     private fun DrawScope.drawTiles(u: Long, filter: ColorFilter?) {
-        raised.clear()
-        // Omslagen som sitter på väggen: en och samma projektion, bara flyttade.
+        val center = Offset(tileW / 2f, tileH / 2f)
         projected(wall) {
             for (i in tiles.indices) {
                 val tile = tiles[i]
                 if (tile.poster < 0 || u < tile.igniteAt) continue
-                if (motion(tile, u)) {
-                    tile.lift = motionLift
-                    // Det närmast kameran ritas sist.
-                    var at = raised.size
-                    while (at > 0 && raised[at - 1].lift > tile.lift) at--
-                    raised.add(at, tile)
-                    continue
-                }
+                val ignite = (u - tile.igniteAt) / IGNITE_MS
                 translate(tileLeft(tile, u), tileTop(tile)) {
-                    poster(tile.poster, 1f, filter)
+                    if (ignite < 1f) {
+                        val q = ignite.coerceIn(0f, 1f)
+                        val grow = 1f + IGNITE_GROW * (1f - easeOutCubic(q))
+                        scale(grow, grow, pivot = center) {
+                            poster(tile.poster, smoothstep(0f, 1f, q), filter)
+                        }
+                    } else if (tile.previous >= 0) {
+                        val fade = ((u - tile.cutAt) / tile.cutMs).coerceIn(0f, 1f)
+                        poster(tile.previous, 1f, filter)
+                        poster(tile.poster, fade, filter)
+                    } else {
+                        poster(tile.poster, 1f, filter)
+                    }
                 }
             }
-        }
-        for (i in raised.indices) drawRaised(raised[i], u, filter)
-        raised.clear()
-    }
-
-    /**
-     * Ett omslag som vänds: fram ur mörkret när väggen tänds, i virveln, eller
-     * till en annan film. Det är mörkare när det står på kant, som i verkligheten.
-     */
-    private fun DrawScope.drawRaised(tile: Tile, u: Long, filter: ColorFilter?) {
-        if (!motion(tile, u)) return
-        val theta = motionTheta
-        val alpha = motionAlpha
-        tileHomography(tileLeft(tile, u) + tileW / 2f, tile.row * pitchY, theta, motionLift)
-        val facing = abs(cos(theta * DEG))
-        val shade = EDGE_SHADE * (1f - facing)
-        val area = Size(tileW.toFloat(), tileH.toFloat())
-        projected(h) {
-            poster(tile.poster, alpha, filter)
-            if (shade > 0.01f) drawRect(Color.Black, size = area, alpha = shade * alpha)
         }
     }
 
@@ -996,38 +900,30 @@ private class Tile {
     var col = 0
     /** Omslaget, eller -1 medan platsen väntar på ett. */
     var poster = -1
+    /** Filmen den tonar över från efter ett klipp, eller -1. */
+    var previous = -1
+    var cutAt = 0L
+    var cutMs = 1f
+    /** Hur många av klippens slag som nått den. */
+    var beats = 0
     /** När platsen kom in i bild (väggens tid). */
     var createdAt = 0L
-    /** När omslaget börjar vändas fram (väggens tid). */
+    /** När omslaget börjar tonas fram (väggens tid). */
     var igniteAt = 0L
-    /** Åt vilket håll det vänds fram: -1 till vänster om mitten, 1 till höger. */
-    var side = 1f
     /** Avståndet till bildens mitt när platsen kom in, i halva skärmbredder. */
     var dist = 0f
-    /** Hur många gånger omslaget bytt film i virveln. */
-    var flurrySwaps = 0
-    /** En enstaka vändning: när den börjar (-1: ingen), hur länge, åt vilket håll, och om filmen bytts. */
-    var flipAt = -1L
-    var flipMs = 1f
-    var flipDir = 1f
-    var flipSwapped = false
-    /** Hur nära kameran den är just nu, för ritordningen. */
-    var lift = 0f
 
     fun reset(row: Int, col: Int) {
         this.row = row
         this.col = col
         poster = -1
+        previous = -1
+        cutAt = 0L
+        cutMs = 1f
+        beats = 0
         createdAt = 0L
         igniteAt = 0L
-        side = 1f
         dist = 0f
-        flurrySwaps = 0
-        flipAt = -1L
-        flipMs = 1f
-        flipDir = 1f
-        flipSwapped = false
-        lift = 0f
     }
 }
 
@@ -1081,16 +977,18 @@ internal fun PosterWallDriver(state: AppState, wall: PosterWall) {
                 if (wall.lightingSoon(nowMs())) withFrameMillis { wall.tryLight(nowMs()) } else delay(250)
                 continue
             }
+            val idle = nowMs() - wall.lastInput >= IDLE_MS
             val target = when {
                 !state.introDone -> 1f
-                // Ett blad som vänds får vändas klart, i vanlig fart.
-                wall.busy -> 1f
                 state.nowPlaying != null -> 0f
-                nowMs() - wall.lastInput < IDLE_MS -> 0f
-                else -> AMBIENT_SPEED
+                // Ett omslag som tonas fram (det laddades sent) får tonas klart.
+                wall.busy -> AMBIENT_SPEED
+                idle -> AMBIENT_SPEED
+                else -> 0f
             }
-            if (speed <= 0f && target <= 0f) {
-                // Stilla: ingen bild ritas om förrän väggen ska röra sig igen.
+            if (target <= 0f) {
+                // Man trycker på fjärren, eller video spelas: väggen står still direkt,
+                // och ingen bild ritas om förrän den ska röra sig igen.
                 speed = 0f
                 last = -1L
                 delay(120)
@@ -1099,17 +997,11 @@ internal fun PosterWallDriver(state: AppState, wall: PosterWall) {
             withFrameMillis { frame ->
                 val dt = if (last < 0) 16L else (frame - last).coerceIn(0L, 100L)
                 last = frame
-                // Kommer i gång mjukt, stannar fort när man trycker; ett blad som vänds tar fart direkt.
-                val ease = when {
-                    target <= 0f -> STOP_MS
-                    wall.busy && state.introDone -> TURN_MS
-                    else -> EASE_MS
-                }
-                val rate = dt / ease
-                speed = if (target > speed) min(target, speed + rate) else max(target, speed - rate)
+                // Kommer i gång mjukt.
+                speed = if (target > speed) min(target, speed + dt / EASE_MS) else max(target, speed - dt / EASE_MS)
                 wall.advance(dt * speed.toDouble())
-                // Som bakgrund räcker trettio bilder i sekunden, utom när bladet vänds.
-                if (!state.introDone || wall.busy || frame - published >= 33L) {
+                // Som bakgrund räcker tjugofyra bilder i sekunden.
+                if (!state.introDone || frame - published >= AMBIENT_FRAME_MS) {
                     wall.publish()
                     published = frame
                 }
@@ -1120,7 +1012,7 @@ internal fun PosterWallDriver(state: AppState, wall: PosterWall) {
 
 /**
  * Väggen som bakgrund bakom sidorna: mörk, dämpad och tonad mot temats
- * färg. Tänds väggen först nu (första starten) vänds omslagen fram här.
+ * färg. Tänds väggen först nu (första starten) tonas omslagen fram här.
  */
 @Composable
 internal fun PosterWallBackdrop(wall: PosterWall, shown: Boolean, quiet: Boolean, modifier: Modifier = Modifier) {
@@ -1128,10 +1020,10 @@ internal fun PosterWallBackdrop(wall: PosterWall, shown: Boolean, quiet: Boolean
     Spacer(modifier.drawBehind { if (shown) wall.drawBackdrop(this, tint, quiet) })
 }
 
-// --- Omslag som vänds fram ------------------------------------------------------------
+// --- Omslag som tonas fram ------------------------------------------------------------
 
 /**
- * Omslagen vänds fram i en våg när en sida visas, som väggen i starten: de
+ * Omslagen tonas fram i en våg när en sida visas, som väggen i starten: de
  * som kommer fram den första stunden, i den ordning de kommer. Det som
  * rullas fram senare står redan på plats.
  */
@@ -1150,7 +1042,11 @@ internal class CoverEntrance {
 
 internal val LocalCoverEntrance = compositionLocalOf<CoverEntrance?> { null }
 
-/** Kortet vänds fram när sidan visas, som omslagen på väggen. */
+/**
+ * Kortet tonas fram och glider upp lite på plats när sidan visas. Inget
+ * roteras, och genomskinligheten läggs direkt på det som ritas, utan
+ * mellanlager: det kostar nästan ingenting.
+ */
 @Composable
 internal fun Modifier.coverEntrance(): Modifier {
     val entrance = LocalCoverEntrance.current ?: return this
@@ -1164,8 +1060,8 @@ internal fun Modifier.coverEntrance(): Modifier {
     return graphicsLayer {
         val p = progress.value
         alpha = p
-        rotationY = ENTRANCE_TURN * (1f - p)
-        cameraDistance = ENTRANCE_CAMERA * density
+        translationY = (1f - p) * ENTRANCE_RISE.toPx()
+        compositingStrategy = CompositingStrategy.ModulateAlpha
     }
 }
 
@@ -1248,6 +1144,23 @@ private fun hash(i: Int, k: Int): Float {
     return (x and 0xFFFFFF) / 16_777_215f
 }
 
+/**
+ * Klippens slag, i väggens tid: först glest, sedan allt tätare, och sist
+ * slaget självt. Räknas fram en gång.
+ */
+private val BEATS: LongArray = run {
+    val list = ArrayList<Long>()
+    var at = FLURRY_FROM_MS.toFloat()
+    var gap = BEAT_FIRST_GAP_MS
+    while (at < SLAM_MS - BEAT_MIN_GAP_MS) {
+        list += at.toLong()
+        at += gap
+        gap = max(BEAT_MIN_GAP_MS, gap * BEAT_SHRINK)
+    }
+    list += SLAM_MS
+    list.toLongArray()
+}
+
 /** Bakgrunden: omslagen mörka och med hälften av färgen kvar. */
 private val backdropFilter: ColorFilter = run {
     val s = BACKDROP_SATURATION
@@ -1267,7 +1180,6 @@ private val backdropFilter: ColorFilter = run {
     )
 }
 
-internal const val PI_F = 3.1415927f
 internal const val TAU = 6.2831855f
 internal const val DEG = 0.017453292f
 
@@ -1282,24 +1194,19 @@ private const val LOAD_PARALLEL = 6
 /** Väggen tänds när så många omslag laddats (eller alla, eller efter en stund). */
 private const val START_LOADED = 24
 private const val WALL_WAIT_MS = 1_800L
-/** Omslag i reserv utöver de som syns, till vändningarna. */
-private const val RESERVE = 4
+/** Omslag i reserv utöver de som syns, till klippen. */
+private const val RESERVE = 8
 private const val MAX_ROWS = 24
 private val SAMPLE_TIMES = longArrayOf(0L, 1_500L, 3_000L, 4_000L, 4_600L, 6_000L, 9_000L, 14_000L, 20_000L, 60_000L)
 
-/** Kameran: avståndet i skärmbredder, hur den lägger sig och vaggar (grader). */
+/** Kameran: avståndet i skärmbredder, den fasta vinkeln (grader), och hur den glider bakåt. */
 private const val CAMERA_DISTANCE = 1.5f
+private const val PITCH = -9f
+private const val YAW = -15f
+private const val ROLL = -11.5f
 private const val SETTLE_MS = 3_400f
-private const val ZOOM_FROM = 1.28f
+private const val ZOOM_FROM = 1.26f
 private const val ZOOM_TO = 1.0f
-private const val PITCH_FROM = -12f
-private const val PITCH_TO = -7f
-private const val YAW_FROM = -21f
-private const val YAW_TO = -12f
-private const val ROLL_FROM = -13.5f
-private const val ROLL_TO = -10.5f
-private const val YAW_SWAY = 1.1f
-private const val ROLL_SWAY = 0.7f
 
 /** Radernas fart: del av skärmens höjd per sekund (väggens tid). Lite fartigare i början. */
 private val ROW_SPEEDS = floatArrayOf(0.025f, 0.020f, 0.029f, 0.022f, 0.027f, 0.019f)
@@ -1311,45 +1218,37 @@ internal const val LETTERBOX = 2.39f
 private const val ENTER_MARGIN = 0.015f
 private const val KEEP_MARGIN = 0.05f
 
-/** Vågen när väggen tänds: från mitten och utåt, lugnt, utan studs. */
+/** När väggen tänds: omslagen tonas fram från mitten och utåt och växer lite in på plats. */
 private const val IGNITE_DELAY_MS = 250f
 private const val IGNITE_SPREAD_MS = 1_250f
 private const val IGNITE_JITTER_MS = 160f
-private const val IGNITE_MS = 1_150f
-private const val IGNITE_TURN = 80f
-private const val IGNITE_LIFT = 0.18f
+private const val IGNITE_MS = 900f
+private const val IGNITE_GROW = 0.05f
 private const val BLOOM_UNTIL_MS = 2_800L
 
 /**
- * Virveln, som bläddrade sidor: börjar i mitten och sprider sig utåt, vänder
- * allt fortare och slutar för alla i samma ögonblick — slaget.
+ * Klippen, som i en filmtrailer: väggen byter filmer i vågor från mitten,
+ * allt tätare, och vid slaget byter alla på en gång och allt stannar.
  */
-internal const val FLURRY_FROM_MS = 3_100L
+internal const val FLURRY_FROM_MS = 3_000L
 internal const val SLAM_MS = 4_700L
-private const val FLURRY_SPREAD_MS = 750f
-private const val FLURRY_FLIP_MS = 240f
-private const val FLURRY_ACCEL = 1.7f
-private const val FLURRY_DIR = 1f
-private const val FLURRY_LIFT = 0.05f
+private const val BEAT_FIRST_GAP_MS = 330f
+private const val BEAT_MIN_GAP_MS = 110f
+private const val BEAT_SHRINK = 0.82f
+private const val BEAT_SPREAD_MS = 320f
+/** Vid slaget: ett rent klipp för alla. Kortare övertoning än så räknas som rent klipp. */
+private const val SLAM_CUT_MS = 0f
+private const val HARD_CUT_MS = 30f
 private const val FLURRY_PUSH = 0.10f
-private const val FLURRY_ROLL = 3f
 private const val DRIFT_RUSH = 1.8f
 private const val DRIFT_CALM_MS = 1_600f
 
-/** Vändningarna efter slaget, om starten fortsätter. */
-private const val LIVE_AFTER_SLAM_MS = 1_600L
-private const val FLIP_EVERY_MS = 1_250f
-private const val FLIP_MS = 1_500f
-private const val FLIP_LIFT = 0.10f
-private const val EDGE_SHADE = 0.78f
+/** Efter slaget, om starten fortsätter: ett omslag i taget byter film. */
+private const val SWAP_AFTER_SLAM_MS = 1_400L
+private const val SWAP_EVERY_MS = 1_100f
+private const val SWAP_FADE_MS = 650f
 
-/** Bladet som vänds i bakgrunden när man byter sida: från vänster till höger. */
-private const val PAGE_DELAY_MS = 140f
-private const val PAGE_SPREAD_MS = 900f
-private const val PAGE_JITTER_MS = 120f
-private const val PAGE_FLIP_MS = 700f
-
-/** Ljuset som vandrar i starten: drar ihop sig i virveln och slår upp vid slaget. Och djupet. */
+/** Ljuset som vandrar i starten: drar ihop sig under klippen och slår upp vid slaget. Och djupet. */
 private const val LIGHT_SWING_X = 0.55f
 private const val LIGHT_SWING_Y = 0.28f
 private const val POOL_RADIUS = 1.3f
@@ -1367,16 +1266,14 @@ private const val BACKDROP_BRIGHTNESS = 0.36f
 private const val BACKDROP_SATURATION = 0.5f
 private const val QUIET_DIM = 0.5f
 private const val AMBIENT_SPEED = 0.45f
+private const val AMBIENT_FRAME_MS = 41L
 private const val IDLE_MS = 1_500L
 private const val EASE_MS = 1_400f
-private const val STOP_MS = 260f
-private const val TURN_MS = 200f
 
-/** Korten som vänds fram när en sida visas. */
+/** Korten som tonas fram när en sida visas. */
 private const val ENTRANCE_WINDOW_MS = 900L
-private const val ENTRANCE_STAGGER_MS = 34L
-private const val ENTRANCE_MAX_STEPS = 22
-private const val ENTRANCE_MS = 620
-private const val ENTRANCE_TURN = 62f
-private const val ENTRANCE_CAMERA = 14f
+private const val ENTRANCE_STAGGER_MS = 30L
+private const val ENTRANCE_MAX_STEPS = 20
+private const val ENTRANCE_MS = 520
+private val ENTRANCE_RISE = 18.dp
 private val ENTRANCE_EASING = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
