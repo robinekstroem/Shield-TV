@@ -256,6 +256,8 @@ fun AppRoot(state: AppState) {
     // Filmväggen: starten visar den, och sedan blir den kvar som bakgrund bakom sidorna.
     val wall = remember { PosterWall() }
     PosterWallDriver(state, wall)
+    // Byter man sida vänder väggen bakom blad, medan sidans omslag vänds fram.
+    LaunchedEffect(state.screen) { if (state.introDone) wall.turnPage() }
     Box(
         Modifier
             .fillMaxSize()

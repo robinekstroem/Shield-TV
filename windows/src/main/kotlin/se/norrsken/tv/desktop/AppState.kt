@@ -722,13 +722,17 @@ class AppState {
         val scored = ArrayList<Triple<Movie, TmdbFacts?, Double>>()
         for (movie in lib.movies) {
             val year = index.yearOf(movie)
-            // Bara filmserierna och de senaste årens filmer: hela biblioteket tar för lång tid.
             val franchise = movie.key in inFranchise
-            if (!franchise && (year == null || year < thisYear - INTRO_REEL_YEARS)) continue
+            val recent = year != null && year >= thisYear - INTRO_REEL_YEARS
             val tmdb = tmdbOf(movie)
+            // Klassikerna från alla år också — Jurassic Park, Ensam hemma, Tillbaka till framtiden:
+            // filmer som väldigt många har sett och tyckt om.
+            val classic = tmdb != null && tmdb.votes >= INTRO_CLASSIC_VOTES && (tmdb.rating ?: 0.0) >= INTRO_CLASSIC_RATING
+            if (!franchise && !recent && !classic) continue
             var score = 0.0
             tmdb?.let { hit -> trendingRank[hit.id]?.let { rank -> score += 1_000.0 - rank * 12.0 } }
             if (franchise) score += 320.0
+            if (classic) score += 300.0
             val shownYear = year ?: tmdb?.year
             if (shownYear != null) score += (shownYear - (thisYear - INTRO_REEL_YEARS)).coerceIn(0, INTRO_REEL_YEARS) * 45.0
             if (tmdb != null) {
@@ -3391,6 +3395,9 @@ private const val RECENT_CHANNELS = 30
 private const val INTRO_REEL_SIZE = 72
 private const val INTRO_REEL_MIN = 12
 private const val INTRO_REEL_YEARS = 5
+/** Klassiker i startens filmvägg: så många röster på TMDB, och minst det betyget. */
+private const val INTRO_CLASSIC_VOTES = 6_000
+private const val INTRO_CLASSIC_RATING = 7.0
 private const val INTRO_REEL_SAVE_DELAY_MS = 25_000L
 private const val TEAM_BACK_DAYS = 75L
 private const val TEAM_AHEAD_DAYS = 150L
