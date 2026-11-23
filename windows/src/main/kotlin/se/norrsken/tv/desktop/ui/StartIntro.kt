@@ -22,7 +22,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -33,30 +32,28 @@ import androidx.compose.ui.layout.positionInWindow
 import kotlinx.coroutines.delay
 import se.norrsken.tv.desktop.AppState
 import kotlin.math.abs
-import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 
 /**
- * Starten, som inledningen på en film på bio.
+ * Starten, som inledningen på en film på bio — i ett enda flöde.
  *
- * Projektorn tänds: ljusstrålar uppifrån flimrar till och blir stadiga, och
- * i ljuset tonas filmväggen fram, från mitten och utåt, medan kameran sakta
- * glider bakåt. Sedan klipper väggen mellan filmerna i vågor, allt tätare,
- * som en filmtrailer — och vid slaget byter alla på en gång och allt
- * stannar: kameran studsar till och ljuset slår upp över hela väggen.
- * Samma film syns aldrig två gånger, och inget roteras.
- *
- * Sedan flyter väggen över i startsidan: omslag lyfter från väggen och
- * flyger i mjuka bågar till startsidans omslag — det stora överst först,
- * sedan raderna i en våg från vänster — och lägger sig precis på dem,
- * medan väggen tonar ner till bakgrunden, biofälten glider undan och
- * startsidan kommer fram runt omkring. Ingen logga, ingen text, inget ljud.
- * En knapptryckning eller ett klick hoppar över, eller skyndar på slutet.
+ * Långsamt först: filmväggen tonas fram ur mörkret, från mitten och utåt,
+ * medan kameran sakta glider bakåt och de första omslagen mjukt tonar över
+ * i nya. Sedan tar det fart: väggen klipper mellan filmerna i vågor från
+ * mitten, allt tätare, raderna glider fortare och kameran glider fram mot
+ * väggen. På toppen, utan att något stannar, flyter väggen över i
+ * startsidan: omslag lyfter och flyger i mjuka bågar till startsidans
+ * omslag — det stora överst först, sedan raderna i en våg från vänster —
+ * och lägger sig precis på dem, medan klippen glesnar, väggen tonar ner
+ * till bakgrunden, biofälten glider undan och startsidan kommer fram runt
+ * omkring. Samma film syns aldrig två gånger, och inget roteras. Ingen
+ * logga, ingen text, inget ljud, ingen strålkastare. En knapptryckning
+ * eller ett klick hoppar över, eller skyndar på slutet.
  *
  * Väggen själv ([PosterWall]) delas med bakgrunden: här ritas den i full
- * styrka, med projektorn, färgton, mörkare hörn och biofält ovanpå.
+ * styrka, med färgton, mörkare hörn och biofält ovanpå.
  */
 @Composable
 internal fun StartIntro(
@@ -120,6 +117,8 @@ internal fun StartIntro(
                 // En tung bild (startsidan som kommer fram) får inte slutet att hoppa.
                 val dt = (now - last).coerceIn(0L, 50L)
                 last = now
+                // Klippen har nått toppen: väggen flyter över i startsidan, i samma bild.
+                if (!ending.started && ending.armed && wall.time >= wall.peakAt) begin(fast = false)
                 if (ending.started) {
                     time += dt * ending.rate
                     morph.clock.longValue = time.toLong()
@@ -141,11 +140,20 @@ internal fun StartIntro(
             return@LaunchedEffect
         }
         if (!ready) return@LaunchedEffect
-        // Spelas klart först, om man inte hoppar över.
-        if (!skipping) {
-            while (!mayEnd(wall, clock.longValue)) delay(40)
+        if (skipping) {
+            begin(fast = true)
+            return@LaunchedEffect
         }
-        begin(fast = skipping)
+        // Omslagen laddas: väggen får tändas först.
+        while (!wall.lit && wall.lightingSoon(nowMs())) delay(40)
+        if (wall.lit) {
+            // Klippen börjar ta fart; på toppen börjar slutet (se klockan ovan).
+            wall.startRush()
+            ending.armed = true
+        } else {
+            while (clock.longValue < AMBIENT_MIN_MS) delay(40)
+            begin(fast = false)
+        }
     }
     LaunchedEffect(Unit) {
         delay(MAX_SHOW_MS)
@@ -164,7 +172,7 @@ internal fun StartIntro(
             // Ett klick hoppar över, och går inte vidare till sidan bakom.
             .pointerInput(Unit) { detectTapGestures { clicked = true } },
     ) {
-        // Väggen i full styrka, med projektorn, färgtonen och hörnen. I slutet tonar
+        // Väggen i full styrka, med färgtonen och hörnen. I slutet tonar
         // den ner till bakgrunden, som är samma vägg, mörk, bakom startsidan.
         Spacer(
             Modifier
@@ -179,7 +187,7 @@ internal fun StartIntro(
                     drawRect(INTRO_BLACK)
                     wall.drawIntro(this)
                     if (!wall.lit) drawGlow(t)
-                    looks.drawWall(this, t)
+                    looks.drawWall(this)
                 },
         )
         // Omslagen på väg till startsidan, och biofälten överst.
@@ -193,14 +201,6 @@ internal fun StartIntro(
                 },
         )
     }
-}
-
-/** Tidigast när starten får gå över i startsidan. */
-private fun mayEnd(wall: PosterWall, elapsed: Long): Boolean = when {
-    wall.lit -> wall.time >= WALL_MIN_MS
-    // Omslagen laddas: väggen tänds strax.
-    wall.lightingSoon(nowMs()) -> false
-    else -> elapsed >= AMBIENT_MIN_MS
 }
 
 /**
@@ -230,8 +230,12 @@ private fun barsOpen(ending: Ending, m: Long): Float = when {
     else -> smoothstep(0f, BARS_MS, m.toFloat())
 }
 
-/** Slutet: om det börjat, om väggen saknas, hur fort det går och hur länge det varar. */
+/**
+ * Slutet: väntar på toppen ([armed]), om det börjat, om väggen saknas, hur
+ * fort det går och hur länge det varar.
+ */
 private class Ending {
+    var armed = false
     var started = false
     var plain = false
     var rate = 1f
@@ -270,20 +274,18 @@ private fun DrawScope.drawGlow(t: Long) {
 }
 
 /**
- * Det som ligger ovanpå väggen i starten: projektorns strålar, färgtonen och
- * mörkare hörn ([drawWall]), och biofälten — bilden i 2,39:1 ([drawBars]).
+ * Det som ligger ovanpå väggen i starten: färgtonen och mörkare hörn
+ * ([drawWall]), och biofälten — bilden i 2,39:1 ([drawBars]).
  */
 private class IntroLooks {
     private var width = -1f
     private var height = -1f
     private var grade: Brush? = null
     private var vignette: Brush? = null
-    private val rays = Array(RAYS) { Path() }
 
-    fun drawWall(scope: DrawScope, t: Long) {
+    fun drawWall(scope: DrawScope) {
         with(scope) {
             measure()
-            drawRays(t)
             grade?.let { drawRect(it) }
             vignette?.let { drawRect(it) }
         }
@@ -321,68 +323,6 @@ private class IntroLooks {
             radius = max(width, height) * VIGNETTE_REACH,
         )
     }
-
-    /**
-     * Projektorn: strålar som solfjäder uppifrån, ovanför bilden. Lampan
-     * flimrar till ett par gånger när den tänds, lyser stadigt medan väggen
-     * tonas fram, och bleknar sedan bort.
-     */
-    private fun DrawScope.drawRays(t: Long) {
-        val level = projector(t)
-        if (level <= 0.003f) return
-        val sourceX = width / 2f
-        val sourceY = -0.42f * height
-        val length = height * 1.75f
-        val middle = (RAYS - 1) / 2f
-        for (i in 0 until RAYS) {
-            val spread = (i - middle) / middle
-            val angle = (spread * 27f + 1.3f * sin(t / 2900f + i * 1.7f)) * DEG
-            val dirX = sin(angle)
-            val dirY = cos(angle)
-            val narrow = width * 0.004f
-            val wide = width * (0.045f + 0.03f * rayWidth(i))
-            val endX = sourceX + dirX * length
-            val endY = sourceY + dirY * length
-            val path = rays[i]
-            path.reset()
-            path.moveTo(sourceX + dirY * narrow, sourceY - dirX * narrow)
-            path.lineTo(endX + dirY * wide, endY - dirX * wide)
-            path.lineTo(endX - dirY * wide, endY + dirX * wide)
-            path.lineTo(sourceX - dirY * narrow, sourceY + dirX * narrow)
-            path.close()
-            val alpha = level * (0.035f + 0.03f * rayWidth(i + 7))
-            drawPath(
-                path,
-                Brush.linearGradient(
-                    0f to BEAM.copy(alpha = alpha),
-                    0.55f to BEAM.copy(alpha = alpha * 0.45f),
-                    1f to Color.Transparent,
-                    start = Offset(sourceX, sourceY),
-                    end = Offset(endX, endY),
-                ),
-            )
-        }
-    }
-}
-
-/** Lampan: två korta blink när den tänds, sedan stadigt, och till sist bleknar den. */
-private fun projector(t: Long): Float {
-    val lamp = when {
-        t < 180L -> 0f
-        t < 260L -> 0.55f
-        t < 330L -> 0.08f
-        t < 380L -> 0.8f
-        t < 470L -> 0.22f
-        else -> 0.45f + 0.55f * smoothstep(470f, 950f, t.toFloat())
-    }
-    return lamp * (1f - smoothstep(2_300f, 3_800f, t.toFloat()))
-}
-
-/** Strålarnas bredd och styrka varierar: fast slumptal 0–1 för [i]. */
-private fun rayWidth(i: Int): Float {
-    var x = i * 1_103_515_245 + 12_345
-    x = x xor (x ushr 15)
-    return (x and 0xFFFF) / 65_535f
 }
 
 // --- Startsidans kort i slutet --------------------------------------------------------
@@ -505,13 +445,8 @@ internal fun Modifier.morphReveal(spot: MorphSpot?): Modifier {
 private val INTRO_BLACK = Color(0xFF020306)
 private val WARM = Color(0xFFFFC27A)
 private val COLD = Color(0xFF3E8BFF)
-private val BEAM = Color(0xFFFFF0D8)
 
-/** Projektorns strålar. */
-private const val RAYS = 7
-
-/** Hur länge: minst så länge väggen visas (efter slaget), och minst utan vägg. */
-private const val WALL_MIN_MS = SLAM_MS + 250L
+/** Utan vägg: minst så här länge innan startsidan kommer fram. */
 private const val AMBIENT_MIN_MS = 900L
 /** Slutet utan vägg: allt tonar bort. */
 private const val EXIT_PLAIN_MS = 500L

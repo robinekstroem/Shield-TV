@@ -107,6 +107,8 @@ fun LiveTvScreen(state: AppState) {
     val shown = remember(channels, shownKey) { channels.firstOrNull { it.key == shownKey } ?: channels.firstOrNull() }
 
     Row(Modifier.fillMaxSize()) {
+        // Tv: den första kanalens logga bredvid varje kategori.
+        val covers = if (tvLayout) rememberInBackground(library) { state.categoryCovers(LibraryFilter.LIVE) } else null
         GroupColumn(
             allLabel = "Alla kanaler",
             total = library.channels.size,
@@ -116,6 +118,9 @@ fun LiveTvScreen(state: AppState) {
             onSelect = { state.liveGroup = it },
             pinned = personalPinned(state, LibraryFilter.LIVE),
             onEnterContent = enterList,
+            look = GroupLook(MenuAccents.live, "Live TV", Glyphs.Live),
+            covers = covers.orEmpty(),
+            coverStyle = CoverStyle.LOGOS,
         )
         BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
             val withStage = maxWidth >= STAGE_FROM

@@ -137,6 +137,8 @@ fun GuideScreen(state: AppState) {
     LaunchedEffect(group, query, onlyWithGuide) { listState.scrollToItem(0) }
 
     Row(Modifier.fillMaxSize()) {
+        // Tv: den första kanalens logga bredvid varje kategori.
+        val covers = if (tvLayout) rememberInBackground(library) { state.categoryCovers(LibraryFilter.LIVE) } else null
         GroupColumn(
             allLabel = "Alla kanaler",
             total = library.channels.size,
@@ -148,6 +150,9 @@ fun GuideScreen(state: AppState) {
             onEnterContent = {
                 scope.launch { entry.enter { listState.layoutInfo.visibleItemsInfo.map { it.key } } }
             },
+            look = GroupLook(MenuAccents.guide, "Tablå", Glyphs.Guide),
+            covers = covers.orEmpty(),
+            coverStyle = CoverStyle.LOGOS,
         )
         Column(Modifier.weight(1f).fillMaxHeight()) {
             ScreenHeader(

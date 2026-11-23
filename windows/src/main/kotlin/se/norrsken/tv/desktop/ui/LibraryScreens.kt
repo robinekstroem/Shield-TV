@@ -220,6 +220,8 @@ fun MoviesScreen(state: AppState) {
     }
 
     Row(Modifier.fillMaxSize()) {
+        // Tv: en liten bunt omslag ur varje kategori, de senast tillagda.
+        val covers = if (tvLayout) rememberInBackground(library, state.tmdbFacts) { state.categoryCovers(LibraryFilter.MOVIE) } else null
         GroupColumn(
             allLabel = "Alla filmer",
             total = if (state.versions.isEmpty) library.movies.size else state.versions.movieCount,
@@ -234,6 +236,8 @@ fun MoviesScreen(state: AppState) {
             },
             pinned = personalPinned(state, LibraryFilter.MOVIE) + collectionsPinned(state),
             onEnterContent = enterGrid,
+            look = GroupLook(MenuAccents.movies, "Filmer", Glyphs.Movies),
+            covers = covers.orEmpty(),
         )
         val franchise = CollectionKeys.franchiseOf(group)
         when {
@@ -793,6 +797,8 @@ fun SeriesScreen(state: AppState) {
     }
 
     Row(Modifier.fillMaxSize()) {
+        // Tv: en liten bunt omslag ur varje kategori, de senast tillagda.
+        val covers = if (tvLayout) rememberInBackground(library, state.tmdbFacts) { state.categoryCovers(LibraryFilter.SERIES) } else null
         GroupColumn(
             allLabel = "Alla serier",
             total = if (state.versions.isEmpty) library.series.size else state.versions.seriesCount,
@@ -802,6 +808,8 @@ fun SeriesScreen(state: AppState) {
             onSelect = { state.seriesGroup = it },
             pinned = personalPinned(state, LibraryFilter.SERIES),
             onEnterContent = { scope.launch { entry.enter { posterKeys(gridState) } } },
+            look = GroupLook(MenuAccents.series, "Serier", Glyphs.Series),
+            covers = covers.orEmpty(),
         )
         Box(Modifier.weight(1f).fillMaxHeight()) {
             if (spotlight != null) {

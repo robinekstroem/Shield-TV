@@ -284,6 +284,7 @@ private fun FootballBrowse(
                 selected = league?.title,
                 logos = logos,
                 allIcon = Glyphs.Football,
+                look = GroupLook(MenuAccents.football, "Fotboll", Glyphs.Football),
                 onSelect = { title ->
                     val next = League.entries.firstOrNull { it.title == title }
                     if (next != state.footballLeague) focus.fromList = true

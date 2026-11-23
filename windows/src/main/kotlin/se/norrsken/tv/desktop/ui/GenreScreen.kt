@@ -151,6 +151,7 @@ fun GenreScreen(state: AppState) {
             onEnterContent = {
                 scope.launch { entry.enter { gridState.layoutInfo.visibleItemsInfo.map { it.key } } }
             },
+            look = GroupLook(MenuAccents.genres, "Topplistor", Glyphs.Genres),
         )
         Column(Modifier.weight(1f).fillMaxHeight()) {
             ScreenHeader(

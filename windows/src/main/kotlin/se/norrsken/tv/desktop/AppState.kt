@@ -132,6 +132,9 @@ private const val STARTUP_GRACE_MS = 12_000L
 private const val CHANNELS_FRESH_MS = 20 * 60_000L
 /** Står appen framme hela tiden hämtas kanalerna om så här ofta. */
 private const val CHANNELS_STALE_MS = 3 * HOUR
+/** Bilderna bredvid kategorierna på tv:n: så många omslag per kategori, och så många titlar som mest gås igenom. */
+private const val COVERS_PER_GROUP = 3
+private const val COVER_SCAN_LIMIT = 8_000
 private val SWEDISH: Locale = Locale.forLanguageTag("sv-SE")
 private val GUIDE_STAMP: DateTimeFormatter =
     DateTimeFormatter.ofPattern("d MMM 'kl.' HH:mm", SWEDISH).withZone(ZoneId.systemDefault())
@@ -1789,6 +1792,63 @@ class AppState {
             }
         }
         return result.toList()
+    }
+
+    /**
+     * Bilderna bredvid kategorierna på tv:n, kategorins namn → adresser. För
+     * filmer och serier upp till tre omslag ur varje kategori, de senast
+     * tillagda först — samma omslag som visas annars, och de som oftast redan
+     * sparats. För kanalerna den första kanalens logga.
+     *
+     * Körs utanför UI-tråden, så TMDB slås upp direkt i en kopia av faktan.
+     */
+    fun categoryCovers(kind: Char): Map<String, List<String>> {
+        val lib = library
+        val facts = tmdbFacts
+        fun usable(url: String?): String? = url?.trim()?.takeIf { it.startsWith("http", ignoreCase = true) }
+        fun surePoster(tmdbKind: String, name: String, fallbackYear: Int?): String? {
+            if (facts.isEmpty()) return null
+            val (title, year) = TitleCleaner.searchTitle(name)
+            return facts[TmdbStore.keyOf(tmdbKind, title, year ?: fallbackYear)]?.takeIf { it.found && it.sure }?.poster
+        }
+        val result = HashMap<String, ArrayList<String>>()
+        // Lägger till ett omslag i kategorin; sant när den därmed blev full.
+        fun add(group: String, url: String?): Boolean {
+            val cover = url ?: return false
+            val list = result.getOrPut(group) { ArrayList(COVERS_PER_GROUP) }
+            if (list.size >= COVERS_PER_GROUP || cover in list) return false
+            list += cover
+            return list.size == COVERS_PER_GROUP
+        }
+        when (kind) {
+            LibraryFilter.LIVE -> for (channel in lib.channels) {
+                if (result[channel.group]?.isNotEmpty() == true) continue
+                usable(channel.logo)?.let { logo -> result.getOrPut(channel.group) { ArrayList(1) } += logo }
+            }
+            LibraryFilter.MOVIE -> {
+                val groups = lib.movieGroups.size
+                var full = 0
+                var looked = 0
+                for (movie in lib.movies.sortedByDescending { it.addedUtc }) {
+                    if (full >= groups || looked >= COVER_SCAN_LIMIT) break
+                    if ((result[movie.group]?.size ?: 0) >= COVERS_PER_GROUP) continue
+                    looked++
+                    if (add(movie.group, usable(surePoster("movie", movie.name, null)) ?: usable(movie.poster))) full++
+                }
+            }
+            LibraryFilter.SERIES -> {
+                val groups = lib.seriesGroups.size
+                var full = 0
+                var looked = 0
+                for (item in lib.series.sortedByDescending { it.addedUtc }) {
+                    if (full >= groups || looked >= COVER_SCAN_LIMIT) break
+                    if ((result[item.group]?.size ?: 0) >= COVERS_PER_GROUP) continue
+                    looked++
+                    if (add(item.group, usable(surePoster("tv", item.name, item.year?.toIntOrNull())) ?: usable(item.cover))) full++
+                }
+            }
+        }
+        return result.filterValues { it.isNotEmpty() }
     }
 
     fun sortMovies(order: SortOrder) {

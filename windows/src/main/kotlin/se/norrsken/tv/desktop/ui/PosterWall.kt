@@ -60,11 +60,12 @@ import kotlin.math.sqrt
  * Filmväggen: omslag från de häftigaste filmerna man har — det som trendar,
  * Marvel och de andra filmserierna, klassiker som Jurassic Park och Ensam
  * hemma, nya filmer med högt betyg — på en stor vägg som står snett i
- * djupet, i riktig 3D. Starten visar den i full styrka: omslagen tonas fram
- * ur mörkret, och sedan klipper väggen mellan filmerna allt snabbare, som
- * en filmtrailer, tills allt stannar med ett slag. Sedan blir väggen kvar
- * som appens bakgrund, mörk och dämpad, och glider sakta medan man inte
- * trycker på något.
+ * djupet, i riktig 3D. Starten visar den i full styrka: omslagen tonas
+ * lugnt fram ur mörkret, och sedan klipper väggen mellan filmerna allt
+ * snabbare, som en filmtrailer, ända upp till toppen där omslagen flyger
+ * till startsidan — och klippen glesnar igen medan väggen tonar ner. Sedan
+ * blir väggen kvar som appens bakgrund, mörk och dämpad, och glider sakta
+ * medan man inte trycker på något.
  *
  * Omslagen roteras aldrig, och väggen vrids inte: den står fast och
  * raderna glider. Samma film syns aldrig två gånger samtidigt: väggen
@@ -105,8 +106,11 @@ internal class PosterWall {
     var lit = false
         private set
 
-    /** Väggen tändes i starten: den har klippen och slaget. Tänds den först som bakgrund blir det lugnare. */
+    /** Väggen tändes i starten: den har klippen. Tänds den först som bakgrund blir det lugnare. */
     private var cinematic = false
+
+    /** När klippen börjar ta fart, i väggens tid (se [startRush]); Long.MAX_VALUE tills dess. */
+    private var rushAt = Long.MAX_VALUE
 
     /** Efter starten: väggen är bakgrund, och omslagen byts inte längre. */
     var ambient = false
@@ -230,11 +234,25 @@ internal class PosterWall {
             cinematic = !ambient
             elapsed = 0.0
             clock.longValue = 0L
-            nextSwapAt = if (cinematic) SLAM_MS + SWAP_AFTER_SLAM_MS else Long.MAX_VALUE
+            nextSwapAt = if (cinematic) SWAP_FROM_MS else Long.MAX_VALUE
+            rushAt = Long.MAX_VALUE
             fitTiles()
             dirty = true
         }
     }
+
+    /**
+     * Startsidan är klar: klippen börjar ta fart — långsamt och mjukt först,
+     * sedan allt tätare — och når toppen vid [peakAt], där väggen flyter över
+     * i startsidan. Tidigast när väggen hunnit tonas fram.
+     */
+    fun startRush() {
+        if (!lit || !cinematic || rushAt != Long.MAX_VALUE) return
+        rushAt = max(elapsed.toLong() + 16L, RUSH_EARLIEST_MS)
+    }
+
+    /** Toppen, i väggens tid: klippen går som fortast. Long.MAX_VALUE innan farten börjat. */
+    val peakAt: Long get() = if (rushAt == Long.MAX_VALUE) Long.MAX_VALUE else rushAt + Rush.peak
 
     /** Omslagen laddas och väggen tänds snart: starten väntar in den. */
     fun lightingSoon(now: Long): Boolean =
@@ -252,7 +270,7 @@ internal class PosterWall {
 
     // --- Ritningen ---------------------------------------------------------------------
 
-    /** Starten: väggen i full styrka, med ljuset som vandrar och djupet som mörknar. */
+    /** Starten: väggen i full styrka, med ett stilla ljus kring mitten och djupet som mörknar. */
     fun drawIntro(scope: DrawScope) {
         noteSize(scope.size)
         val u = clock.longValue
@@ -375,29 +393,31 @@ internal class PosterWall {
 
     /**
      * Kameran [u] ms efter att väggen tänts: nära i början, sedan glider den
-     * sakta rakt bakåt. Under klippen trycker den sig fram, och vid slaget
-     * studsar den tillbaka. Vinkeln är densamma hela tiden.
+     * sakta bakåt och lägger sig. När klippen tar fart glider den mjukt fram
+     * mot väggen igen, allt fortare, och fortsätter en bit förbi toppen medan
+     * den saktar in — inga stötar och inga stopp. Vinkeln är densamma hela tiden.
      */
     private fun pose(u: Long) {
-        val p = 1f - exp(-u / SETTLE_MS)
-        zoom = (ZOOM_FROM + (ZOOM_TO - ZOOM_FROM) * p) * (1f + FLURRY_PUSH * impact(u))
+        val back = easeOutCubic((u / GLIDE_MS).coerceIn(0f, 1f))
+        zoom = (ZOOM_FROM + (ZOOM_TO - ZOOM_FROM) * back) * (1f + push(u))
         val s = zoom
         homography(0f, 0f, 0f, s * rot[0], s * rot[3], s * rot[6], s * rot[1], s * rot[4], s * rot[7], wall)
         invert(wall, wallInverse)
     }
 
     /**
-     * Klippens tryck: växer allt fortare fram till slaget, och studsar sedan
-     * tillbaka förbi vila och lägger sig — som en stöt.
+     * Hur mycket närmare kameran går medan klippen tar fart: allt fortare fram
+     * till toppen, och sedan med samma fart in i en mjuk inbromsning.
      */
-    private fun impact(u: Long): Float {
-        if (!cinematic || u < FLURRY_FROM_MS) return 0f
-        if (u < SLAM_MS) {
-            val x = (u - FLURRY_FROM_MS) / (SLAM_MS - FLURRY_FROM_MS).toFloat()
-            return x * x * x
+    private fun push(u: Long): Float {
+        if (rushAt == Long.MAX_VALUE || u <= rushAt) return 0f
+        val t = (u - rushAt).toFloat()
+        val peak = Rush.peak.toFloat()
+        if (t <= peak) {
+            val x = t / peak
+            return PUSH * x * x
         }
-        val t = (u - SLAM_MS).toFloat()
-        return exp(-t / 260f) * cos(t / 900f * TAU)
+        return PUSH + 2f * PUSH / peak * PUSH_EASE_MS * (1f - exp(-(t - peak) / PUSH_EASE_MS))
     }
 
     /** Vinkeln: lutning runt x, sidvridning runt y och rotation runt z, i grader. */
@@ -538,26 +558,19 @@ internal class PosterWall {
     }
 
     /**
-     * Radernas egen tid: under klippen rusar de allt fortare, efter slaget
-     * står de nästan still en stund och kommer sedan i gång igen.
+     * Radernas egen tid: när klippen tar fart glider de allt fortare, och
+     * efter toppen saktar de mjukt in till vanlig fart igen — inget stopp.
      */
     private fun driftTime(u: Long): Float {
         val t = u.toFloat()
-        if (!cinematic || t <= FLURRY_FROM_MS) return t
-        val rush = (SLAM_MS - FLURRY_FROM_MS).toFloat()
-        if (t <= SLAM_MS) {
-            val x = (t - FLURRY_FROM_MS) / rush
-            return t + DRIFT_RUSH * rush * x * x * x / 3f
+        if (rushAt == Long.MAX_VALUE || u <= rushAt) return t
+        val since = (u - rushAt).toFloat()
+        val peak = Rush.peak.toFloat()
+        if (since <= peak) {
+            val x = since / peak
+            return t + DRIFT_RUSH * peak * x * x * x / 3f
         }
-        val atSlam = SLAM_MS + DRIFT_RUSH * rush / 3f
-        val calm = DRIFT_CALM_MS
-        val since = t - SLAM_MS
-        if (since <= calm) {
-            // En fjärdedels fart direkt efter slaget, mjukt tillbaka till full fart.
-            val x = since / calm
-            return atSlam + 0.25f * since + 0.75f * calm * (x * x * x - x * x * x * x / 2f)
-        }
-        return atSlam + 0.25f * calm + 0.75f * calm * 0.5f + (since - calm)
+        return t + DRIFT_RUSH * peak / 3f + DRIFT_RUSH * DRIFT_EASE_MS * (1f - exp(-(since - peak) / DRIFT_EASE_MS))
     }
 
     private fun tileLeft(tile: Tile, u: Long): Float = rowLeft(tile.row, u) + tile.col * pitchX
@@ -579,27 +592,15 @@ internal class PosterWall {
     }
 
     /**
-     * Ljuset på väggen: från mitten av bilden vandrar det sakta runt. Under
-     * klippen drar det ihop sig, och vid slaget slår det upp över hela väggen.
+     * Ljuset på väggen: ett mjukt, stilla sken kring mitten som mörknar mot
+     * kanterna. Ingen strålkastare, inget som vandrar.
      */
+    @Suppress("UNUSED_PARAMETER")
     private fun light(u: Long) {
-        val seconds = u / 1000f
-        lightX = LIGHT_SWING_X * unit * sin(seconds / 13f * TAU)
-        lightY = LIGHT_SWING_Y * unit * sin(seconds / 9f * TAU)
+        lightX = 0f
+        lightY = 0f
         poolRadius = POOL_RADIUS
         poolDark = POOL_DARK
-        if (cinematic && u >= FLURRY_FROM_MS) {
-            if (u < SLAM_MS) {
-                val x = smoothstep(FLURRY_FROM_MS.toFloat(), SLAM_MS.toFloat(), u.toFloat())
-                poolRadius = POOL_RADIUS + (POOL_TIGHT - POOL_RADIUS) * x
-                poolDark = POOL_DARK + (POOL_DARK_TIGHT - POOL_DARK) * x
-            } else {
-                val burst = smoothstep(SLAM_MS.toFloat(), SLAM_MS + 140f, u.toFloat())
-                val fade = exp(-(u - SLAM_MS) / POOL_SETTLE_MS)
-                poolRadius = POOL_TIGHT + (POOL_RADIUS + (POOL_WIDE - POOL_RADIUS) * fade - POOL_TIGHT) * burst
-                poolDark = POOL_DARK_TIGHT + (POOL_DARK + (POOL_DARK_WIDE - POOL_DARK) * fade - POOL_DARK_TIGHT) * burst
-            }
-        }
     }
 
     /** Djupet: väggen mörknar bort mot det som ligger längst från kameran. */
@@ -697,48 +698,44 @@ internal class PosterWall {
                 release(tile.previous, u)
                 tile.previous = -1
             }
-            // Medan omslagen flyger till startsidan klipper väggen inte längre.
-            if (cinematic && u < SLAM_MS + 200L && flyers.isEmpty()) {
+            // Klippen: allt tätare fram till toppen och sedan allt glesare medan
+            // väggen tonar bort. Omslag som ska flyga till startsidan klipps inte,
+            // och omslag som ännu tonas fram får tona klart.
+            if (rushAt != Long.MAX_VALUE && u >= rushAt) {
                 val passed = beatsPassed(tile, u)
                 if (passed > tile.beats) {
                     tile.beats = passed
-                    cut(tile, u, cutLength(passed - 1))
+                    if (!tile.reserved && u >= tile.igniteAt + IGNITE_MS.toLong()) cut(tile, u, cutLength(passed - 1))
                 }
             }
             // En plats som fylls på efter slutet tonas fram i sin egen takt: den håller inte väggen i gång.
             if (tile.previous >= 0 || (u < tile.igniteAt + IGNITE_MS.toLong() && !tile.refill)) moving = true
         }
-        // Efter slaget, om starten fortsätter: då och då byter ett omslag film.
-        if (!ambient && flyers.isEmpty() && u >= nextSwapAt) {
+        // Medan starten väntar på startsidan: då och då tonar ett omslag långsamt över i ett annat.
+        if (!ambient && flyers.isEmpty() && rushAt == Long.MAX_VALUE && u >= nextSwapAt) {
             nextSwapAt = u + (SWAP_EVERY_MS * (0.7f + 0.6f * hash(u.toInt(), 11))).toLong()
             pick(u)?.let { cut(it, u, SWAP_FADE_MS) }
         }
         busy = moving
     }
 
-    /** Hur många av klippens slag som nått omslaget vid tiden [u]. Slaget självt räknas som det sista. */
+    /** Hur många av klippens slag som nått omslaget vid tiden [u]: vågorna går ut från mitten. */
     private fun beatsPassed(tile: Tile, u: Long): Int {
-        if (!cinematic) return 0
+        if (rushAt == Long.MAX_VALUE || u < rushAt) return 0
+        val t = (u - rushAt).toFloat()
+        val beats = Rush.beats
         var n = 0
-        for (k in BEATS.indices) {
-            val at = if (k == BEATS.lastIndex) BEATS[k].toFloat() else BEATS[k] + tile.dist * beatSpread(k)
-            if (u >= at) n = k + 1 else break
+        for (k in beats.indices) {
+            if (t >= beats[k] + tile.dist * beatSpread(k)) n = k + 1 else break
         }
         return n
     }
 
-    /** Hur fort vågen går ut från mitten vid slag [k]: snabbare ju tätare slagen kommer. */
-    private fun beatSpread(k: Int): Float {
-        val gap = if (k + 1 < BEATS.size) (BEATS[k + 1] - BEATS[k]).toFloat() else 0f
-        return min(BEAT_SPREAD_MS, gap * 0.7f)
-    }
+    /** Hur långt efter mitten slaget [k] når kanten: vågen går fortare ju tätare klippen. */
+    private fun beatSpread(k: Int): Float = min(BEAT_SPREAD_MS, Rush.tempo[k] * 0.7f)
 
-    /** Övertoningen vid slag [k]: kortare ju tätare slagen kommer. Slaget självt är ett rent klipp. */
-    private fun cutLength(k: Int): Float {
-        if (k >= BEATS.lastIndex) return SLAM_CUT_MS
-        val gap = (BEATS[k + 1] - BEATS[k]).toFloat()
-        return (gap * 0.5f).coerceIn(60f, 170f)
-    }
+    /** Övertoningen i slaget [k]: lång och mjuk i början, kort vid toppen. */
+    private fun cutLength(k: Int): Float = (Rush.tempo[k] * BEAT_FADE).coerceIn(BEAT_FADE_MIN_MS, BEAT_FADE_MAX_MS)
 
     /**
      * Omslaget byter till en film som inte syns någon annanstans, och tonar
@@ -992,6 +989,7 @@ internal class PosterWall {
             }
             val flight = if (target.prominent) MORPH_HERO_FLIGHT_MS else MORPH_FLIGHT_MS
             val same = tile.poster < urls.size && urls[tile.poster] in target.urls
+            tile.reserved = true
             flyers.add(Flyer(tile, tile.poster, target, start.toLong(), flight, same))
             lands[i] = start.toLong() + flight
         }
@@ -1150,6 +1148,7 @@ internal class PosterWall {
         val u = clock.longValue
         for (i in flyers.indices) {
             val flyer = flyers[i]
+            flyer.tile.reserved = false
             if (!flyer.launched) continue
             val tile = flyer.tile
             if (tile.detached && tile.poster == flyer.poster && tiles.contains(tile)) {
@@ -1273,6 +1272,8 @@ private class Tile {
     var detached = false
     /** Fylls på efter starten: tonas fram när väggen rör sig, utan att hålla den i gång. */
     var refill = false
+    /** Ska flyga till startsidan: klipps inte medan det väntar på sin tur. */
+    var reserved = false
 
     fun reset(row: Int, col: Int) {
         this.row = row
@@ -1287,6 +1288,7 @@ private class Tile {
         dist = 0f
         detached = false
         refill = false
+        reserved = false
     }
 }
 
@@ -1511,20 +1513,40 @@ private fun hash(i: Int, k: Int): Float {
 }
 
 /**
- * Klippens slag, i väggens tid: först glest, sedan allt tätare, och sist
- * slaget självt. Räknas fram en gång.
+ * Klippen, räknat från att farten börjar öka: först glest och mjukt, sedan
+ * allt tätare fram till toppen — där väggen flyter över i startsidan — och
+ * därefter allt glesare medan väggen tonar bort. Inget stopp någonstans.
+ * [tempo]: tiden mellan klippen kring varje slag, som avgör hur fort vågen
+ * går och hur lång övertoningen är. Räknas fram en gång.
  */
-private val BEATS: LongArray = run {
-    val list = ArrayList<Long>()
-    var at = FLURRY_FROM_MS.toFloat()
-    var gap = BEAT_FIRST_GAP_MS
-    while (at < SLAM_MS - BEAT_MIN_GAP_MS) {
-        list += at.toLong()
-        at += gap
-        gap = max(BEAT_MIN_GAP_MS, gap * BEAT_SHRINK)
+private object Rush {
+    val beats: LongArray
+    val tempo: FloatArray
+    val peak: Long
+
+    init {
+        val at = ArrayList<Long>()
+        val gaps = ArrayList<Float>()
+        var time = 0f
+        var gap = BEAT_FIRST_GAP_MS
+        while (gap >= BEAT_MIN_GAP_MS) {
+            at += time.toLong()
+            gaps += gap
+            time += gap
+            gap *= BEAT_SHRINK
+        }
+        peak = time.toLong()
+        gap = BEAT_MIN_GAP_MS
+        while (true) {
+            gap *= BEAT_GROW
+            time += gap
+            if (time > peak + SETTLE_BEATS_MS) break
+            at += time.toLong()
+            gaps += gap
+        }
+        beats = at.toLongArray()
+        tempo = gaps.toFloatArray()
     }
-    list += SLAM_MS
-    list.toLongArray()
 }
 
 /** Bakgrunden: omslagen mörka och med hälften av färgen kvar. */
@@ -1570,13 +1592,13 @@ private const val CAMERA_DISTANCE = 1.5f
 private const val PITCH = -9f
 private const val YAW = -15f
 private const val ROLL = -11.5f
-private const val SETTLE_MS = 3_400f
-private const val ZOOM_FROM = 1.26f
+private const val GLIDE_MS = 3_200f
+private const val ZOOM_FROM = 1.22f
 private const val ZOOM_TO = 1.0f
 
 /** Radernas fart: del av skärmens höjd per sekund (väggens tid). Lite fartigare i början. */
 private val ROW_SPEEDS = floatArrayOf(0.025f, 0.020f, 0.029f, 0.022f, 0.027f, 0.019f)
-private const val KICK = 1.3f
+private const val KICK = 0.5f
 private const val KICK_MS = 1_500f
 
 /** Startens biofält (för vilka omslag som syns helt), och kanterna runt bilden (del av bredden). */
@@ -1584,35 +1606,42 @@ internal const val LETTERBOX = 2.39f
 private const val ENTER_MARGIN = 0.015f
 private const val KEEP_MARGIN = 0.05f
 
-/** När väggen tänds: omslagen tonas fram från mitten och utåt och växer lite in på plats. */
+/** När väggen tänds: omslagen tonas fram från mitten och utåt och växer lite in på plats — lugnt. */
 private const val IGNITE_DELAY_MS = 250f
-private const val IGNITE_SPREAD_MS = 1_250f
+private const val IGNITE_SPREAD_MS = 1_400f
 private const val IGNITE_JITTER_MS = 160f
-private const val IGNITE_MS = 900f
+private const val IGNITE_MS = 1_100f
 private const val IGNITE_GROW = 0.05f
 private const val BLOOM_UNTIL_MS = 2_800L
 
 /**
- * Klippen, som i en filmtrailer: väggen byter filmer i vågor från mitten,
- * allt tätare, och vid slaget byter alla på en gång och allt stannar.
+ * Klippen, som i en filmtrailer: väggen byter filmer i vågor från mitten.
+ * Först långt mellan klippen och långa, mjuka övertoningar, sedan allt
+ * tätare och kortare fram till toppen, och efter den allt glesare igen.
+ * Tidigast så här länge efter att väggen tänts börjar farten öka.
  */
-internal const val FLURRY_FROM_MS = 3_000L
-internal const val SLAM_MS = 4_700L
-private const val BEAT_FIRST_GAP_MS = 330f
-private const val BEAT_MIN_GAP_MS = 110f
-private const val BEAT_SHRINK = 0.82f
+private const val RUSH_EARLIEST_MS = 2_200L
+private const val BEAT_FIRST_GAP_MS = 640f
+private const val BEAT_MIN_GAP_MS = 105f
+private const val BEAT_SHRINK = 0.78f
+private const val BEAT_GROW = 1.35f
+private const val SETTLE_BEATS_MS = 1_400L
 private const val BEAT_SPREAD_MS = 320f
-/** Vid slaget: ett rent klipp för alla. Kortare övertoning än så räknas som rent klipp. */
-private const val SLAM_CUT_MS = 0f
+private const val BEAT_FADE = 0.6f
+private const val BEAT_FADE_MIN_MS = 60f
+private const val BEAT_FADE_MAX_MS = 420f
+/** Kortare övertoning än så räknas som rent klipp. */
 private const val HARD_CUT_MS = 30f
-private const val FLURRY_PUSH = 0.10f
-private const val DRIFT_RUSH = 1.8f
-private const val DRIFT_CALM_MS = 1_600f
+/** Kameran glider fram mot väggen medan klippen tar fart, och raderna glider fortare. */
+private const val PUSH = 0.06f
+private const val PUSH_EASE_MS = 900f
+private const val DRIFT_RUSH = 1.6f
+private const val DRIFT_EASE_MS = 1_500f
 
-/** Efter slaget, om starten fortsätter: ett omslag i taget byter film. */
-private const val SWAP_AFTER_SLAM_MS = 1_400L
-private const val SWAP_EVERY_MS = 1_100f
-private const val SWAP_FADE_MS = 650f
+/** Medan starten väntar på startsidan: ett omslag i taget tonar långsamt över i ett annat. */
+private const val SWAP_FROM_MS = 2_800L
+private const val SWAP_EVERY_MS = 1_300f
+private const val SWAP_FADE_MS = 900f
 
 /**
  * Slutet: när det stora omslaget lyfter, när de andra börjar, vågen över
@@ -1640,16 +1669,9 @@ internal const val VIGNETTE_FROM = 0.55f
 internal const val VIGNETTE_DARK = 0.55f
 internal const val VIGNETTE_REACH = 0.72f
 
-/** Ljuset som vandrar i starten: drar ihop sig under klippen och slår upp vid slaget. Och djupet. */
-private const val LIGHT_SWING_X = 0.55f
-private const val LIGHT_SWING_Y = 0.28f
-private const val POOL_RADIUS = 1.3f
-private const val POOL_DARK = 0.36f
-private const val POOL_TIGHT = 0.95f
-private const val POOL_DARK_TIGHT = 0.52f
-private const val POOL_WIDE = 2.6f
-private const val POOL_DARK_WIDE = 0.12f
-private const val POOL_SETTLE_MS = 1_100f
+/** Ljuset på väggen, stilla kring mitten, och djupet. */
+private const val POOL_RADIUS = 1.35f
+private const val POOL_DARK = 0.32f
 private const val INTRO_FOG = 0.50f
 private const val BACKDROP_FOG = 0.55f
 
