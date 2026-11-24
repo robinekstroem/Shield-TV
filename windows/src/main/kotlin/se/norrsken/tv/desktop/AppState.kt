@@ -1775,6 +1775,19 @@ class AppState {
         zapTarget = null
     }
 
+    /**
+     * Förhandsbilder (windows/src/preview): spelarens läge utan någon spelare —
+     * vad som spelas, en spolning eller ett kanalbyte på gång.
+     */
+    internal fun previewPlayer(item: NowPlaying?, scrubTo: Long = -1L, scrubFrom: Long = -1L, zapTo: LiveChannel? = null) {
+        nowPlaying = item
+        miniPlayer = false
+        scrubTarget = scrubTo
+        scrubOrigin = scrubFrom
+        zapTarget = zapTo
+        zapShownAt = if (zapTo != null) System.currentTimeMillis() else 0L
+    }
+
     /** Ett hopp framåt i början är introt; ett hopp förbi slutet är eftertexterna. */
     private fun learn(series: Series, from: Long, to: Long, length: Long) {
         if (from < 0L) return

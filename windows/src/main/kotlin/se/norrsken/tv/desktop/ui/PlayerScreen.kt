@@ -14,6 +14,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.Image
 import se.norrsken.tv.desktop.data.LiveChannel
 import kotlin.math.abs
 import kotlin.math.max
@@ -106,14 +109,25 @@ private val clockFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm"
  * står i Live TV:s stora ruta.
  */
 @Composable
-fun PlayerScreen(state: AppState, collapse: Float = 0f, highlighted: Boolean = false, staged: Boolean = false) {
+fun PlayerScreen(state: AppState, collapse: Float = 0f, highlighted: Boolean = false, staged: Boolean = false) =
+    PlayerLayers(state, collapse, highlighted, staged, still = null)
+
+/**
+ * Förhandsbilder (windows/src/preview): spelaren över en stillbild, med ett
+ * påhittat läge i stället för en spelare.
+ */
+internal class PlayerStill(val status: VideoPlayer.Status, val frame: ImageBitmap)
+
+@Composable
+internal fun PlayerLayers(state: AppState, collapse: Float, highlighted: Boolean, staged: Boolean, still: PlayerStill?) {
     val palette = LocalPalette.current
     val playing = state.nowPlaying ?: return
     val player = state.videoPlayer
     val rawStatus by (player?.status ?: idleStatus).collectAsState()
     // Status från förra strömmen räknas inte: den kan säga ENDED eller ERROR
     // i ögonblicket innan den nya har hunnit öppnas.
-    val status = if (rawStatus.session == state.playbackSession) rawStatus else VideoPlayer.Status(phase = Phase.OPENING)
+    val status = still?.status
+        ?: if (rawStatus.session == state.playbackSession) rawStatus else VideoPlayer.Status(phase = Phase.OPENING)
 
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
@@ -132,7 +146,8 @@ fun PlayerScreen(state: AppState, collapse: Float = 0f, highlighted: Boolean = f
     }
 
     val problem = problemFor(state, playing, status)
-    val waiting = problem == null && (player == null || status.phase == Phase.OPENING || status.phase == Phase.IDLE || status.stalled)
+    val waiting = problem == null &&
+        ((player == null && still == null) || status.phase == Phase.OPENING || status.phase == Phase.IDLE || status.stalled)
     val controlsVisible = problem != null || status.phase == Phase.PAUSED || state.trackPanelOpen ||
         now - state.lastActivity < 3_500 ||
         // Tv: medan man står på knapparna står de kvar en stund längre.
@@ -209,6 +224,8 @@ fun PlayerScreen(state: AppState, collapse: Float = 0f, highlighted: Boolean = f
                         )
                     },
             )
+        } else if (still != null) {
+            Image(still.frame, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }
 
         when {

@@ -267,16 +267,18 @@ fun AppRoot(state: AppState) {
     val saver = remember { SaverControl() }
     if (tvLayout) {
         LaunchedEffect(Unit) {
+            // Tiden räknas från senaste trycket, eller från när man senast kom till en
+            // meny: starten som tog slut, en film som stängdes, appen som kom fram igen,
+            // skärmsläckaren som just gick undan. Inte från när appen startade.
+            var calmSince = nowMs()
             while (true) {
                 delay(1_000)
-                // Appen syns inte: räknas som att någon är där när den kommer tillbaka.
-                if (!state.appVisible) {
-                    wall.lastInput = nowMs()
+                if (!state.appVisible || saver.shown || !state.introDone || state.nowPlaying != null || !wall.lit) {
+                    calmSince = nowMs()
                     continue
                 }
-                if (saver.shown || !state.introDone || state.nowPlaying != null || !wall.lit) continue
                 // Också tryck som tv:n tog hand om själv räknas (se AppState.noteInput).
-                val quiet = nowMs() - wall.lastInput >= SAVER_IDLE_MS &&
+                val quiet = nowMs() - maxOf(calmSince, wall.lastInput) >= SAVER_IDLE_MS &&
                     System.currentTimeMillis() - state.lastInputAt >= SAVER_IDLE_MS
                 if (quiet) saver.start()
             }

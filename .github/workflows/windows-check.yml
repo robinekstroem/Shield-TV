@@ -57,6 +57,37 @@ jobs:
           gradle compileKotlin --stacktrace 2>&1 | tee build.log || status=$?
           echo "status=$status" >> "$GITHUB_OUTPUT"
 
+      # Förhandsbilder: appen ritad som på tv:n, till bilder att granska innan
+      # något byggs till Shield. Ett fel här stoppar inte kontrollen.
+      - name: Typsnitt för förhandsbilderna
+        if: steps.build.outputs.status == '0'
+        continue-on-error: true
+        run: |
+          sudo apt-get update -qq >/dev/null 2>&1 || true
+          sudo apt-get install -y -qq fonts-roboto fonts-noto-color-emoji >/dev/null 2>&1 || true
+          mkdir -p ~/.config/fontconfig
+          printf '%s\n' '<?xml version="1.0"?>' '<!DOCTYPE fontconfig SYSTEM "fonts.dtd">' '<fontconfig>' \
+            '<alias><family>sans-serif</family><prefer><family>Roboto</family></prefer></alias>' \
+            '</fontconfig>' > ~/.config/fontconfig/fonts.conf
+          fc-cache -f >/dev/null 2>&1 || true
+
+      - name: Rita förhandsbilder
+        if: steps.build.outputs.status == '0'
+        continue-on-error: true
+        timeout-minutes: 12
+        working-directory: windows
+        run: gradle renderPreviews --stacktrace 2>&1 | grep -v '^\s*at org.gradle' | tail -n 120
+
+      - name: Spara förhandsbilderna
+        if: steps.build.outputs.status == '0'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: forhandsbilder
+          path: windows/build/previews/
+          retention-days: 5
+          if-no-files-found: ignore
+
       # Felet ska gå att läsa utan att gräva i tusen rader logg.
       - name: Sammanfatta felet
         if: steps.build.outputs.status != '0'

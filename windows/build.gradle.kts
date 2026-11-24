@@ -67,6 +67,54 @@ kotlin {
     }
 }
 
+/*
+ * Förhandsbilder, bara hos GitHub (Kontroll Windows): appen ritad som på
+ * tv:n, utan fönster, till bilder — spelaren, menyerna, fotbollen — så att
+ * utseendet går att granska innan något byggs till Shield. Samma kod som
+ * appen, med tv-läget påslaget: Platform.kt kopieras med tvLayout = true.
+ * Påverkar inte appen; uppgiften körs bara när den anropas.
+ */
+val previewPlatform by tasks.registering(Sync::class) {
+    description = "Platform.kt med tv-läget påslaget, för förhandsbilderna."
+    from("src/main/kotlin/se/norrsken/tv/desktop/ui/Platform.kt") {
+        rename { "PreviewPlatform.kt" }
+        filter { line -> line.replace("internal const val tvLayout = false", "internal const val tvLayout = true") }
+    }
+    into(layout.buildDirectory.dir("preview-platform/kotlin/se/norrsken/tv/desktop/ui"))
+    doLast {
+        val copied = layout.buildDirectory.file("preview-platform/kotlin/se/norrsken/tv/desktop/ui/PreviewPlatform.kt").get().asFile
+        if (!copied.readText().contains("internal const val tvLayout = true")) {
+            throw GradleException("Hittade inte raden \"internal const val tvLayout = false\" i Platform.kt.")
+        }
+    }
+}
+
+val preview: SourceSet = sourceSets.create("preview")
+
+kotlin {
+    sourceSets.named("preview") {
+        kotlin.srcDir("src/main/kotlin")
+        kotlin.srcDir(syncSharedSources)
+        kotlin.srcDir(previewPlatform.map { layout.buildDirectory.dir("preview-platform/kotlin").get() })
+        kotlin.srcDir("src/preview/kotlin")
+        // Den riktiga Platform.kt ersätts av kopian ovan.
+        kotlin.exclude("se/norrsken/tv/desktop/ui/Platform.kt")
+    }
+}
+
+configurations.named("previewImplementation") { extendsFrom(configurations.getByName("implementation")) }
+configurations.named("previewRuntimeOnly") { extendsFrom(configurations.getByName("runtimeOnly")) }
+
+tasks.named("compilePreviewKotlin") { dependsOn(previewPlatform, syncSharedSources) }
+
+val renderPreviews by tasks.registering(JavaExec::class) {
+    description = "Ritar förhandsbilderna till build/previews."
+    classpath = preview.runtimeClasspath
+    mainClass.set("se.norrsken.tv.desktop.preview.PreviewsKt")
+    args(layout.buildDirectory.dir("previews").get().asFile.absolutePath)
+    jvmArgs("-Djava.awt.headless=true", "-Dtv.version=$appVersion", "-Xmx3g")
+}
+
 dependencies {
     // Skia-renderaren för det operativsystem bygget körs på: Windows hos
     // "Installera Tv", Mac (Apple Silicon eller Intel) hos GitHub.
