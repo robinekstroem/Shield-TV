@@ -1776,6 +1776,56 @@ class AppState {
     }
 
     /**
+     * Det som spelas, för spelarens rubrik, laddningsbild och pausbild: TMDB:s
+     * id (för titelns logga), handlingen, genrerna, året, betyget och en
+     * bakgrundsbild. Null för kanaler och sådant som inte finns i biblioteket.
+     */
+    class PlayingFacts(
+        val kind: String,
+        val tmdbId: Int?,
+        val overview: String?,
+        val genres: String?,
+        val year: Int?,
+        val rating: Double?,
+        val backdrop: String?,
+    )
+
+    fun playingFacts(item: NowPlaying): PlayingFacts? {
+        val entry = item.entry ?: return null
+        return when (entry.kind) {
+            WatchKind.MOVIE -> {
+                val movie = library.movies.firstOrNull { it.sourceId == entry.sourceId && it.streamId.toString() == entry.itemId }
+                    ?: return null
+                val facts = tmdbFor(movie)
+                PlayingFacts(
+                    kind = "movie",
+                    tmdbId = facts?.id,
+                    overview = facts?.overview?.takeIf { it.isNotBlank() },
+                    genres = facts?.genres?.takeIf { it.isNotBlank() } ?: movieFacts[movie.key]?.genre,
+                    year = facts?.year ?: movie.year,
+                    rating = facts?.rating ?: movie.rating,
+                    backdrop = facts?.backdrop,
+                )
+            }
+            WatchKind.EPISODE -> {
+                val seriesId = entry.seriesId ?: return null
+                val series = library.series.firstOrNull { it.sourceId == entry.sourceId && it.seriesId == seriesId } ?: return null
+                val facts = tmdbFor(series)
+                PlayingFacts(
+                    kind = "tv",
+                    tmdbId = facts?.id,
+                    overview = (facts?.overview ?: series.plot)?.takeIf { it.isNotBlank() },
+                    genres = facts?.genres?.takeIf { it.isNotBlank() } ?: series.genre,
+                    year = facts?.year ?: series.year?.toIntOrNull(),
+                    rating = facts?.rating ?: series.rating,
+                    backdrop = facts?.backdrop ?: series.backdrop,
+                )
+            }
+            WatchKind.LIVE -> null
+        }
+    }
+
+    /**
      * Förhandsbilder (windows/src/preview): ett påhittat bibliotek och en tablå,
      * direkt i minnet. Utan DPAPI (som där) går biblioteket inte att spara på disken.
      */

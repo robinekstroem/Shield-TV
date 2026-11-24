@@ -78,7 +78,10 @@ val previewPlatform by tasks.registering(Sync::class) {
     description = "Platform.kt med tv-läget påslaget, för förhandsbilderna."
     from("src/main/kotlin/se/norrsken/tv/desktop/ui/Platform.kt") {
         rename { "PreviewPlatform.kt" }
-        filter { line -> line.replace("internal const val tvLayout = false", "internal const val tvLayout = true") }
+        filter { line ->
+            line.replace("internal const val tvLayout = false", "internal const val tvLayout = true")
+                .replace("internal val platformName: String = if (WindowsIntegration.isMac) \"Mac\" else \"Windows\"", "internal val platformName: String = \"Shield\"")
+        }
     }
     into(layout.buildDirectory.dir("preview-platform/kotlin/se/norrsken/tv/desktop/ui"))
     doLast {

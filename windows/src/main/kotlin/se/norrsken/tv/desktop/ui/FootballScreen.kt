@@ -70,6 +70,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -1297,7 +1298,6 @@ private fun SpotlightCard(
     val shape = RoundedCornerShape(if (big) 28.dp else 24.dp)
     val sheen = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
-    val crest = info.crest?.logo?.takeIf { mff }
     Pressable(
         onClick = onClick,
         modifier = modifier.onFocusChanged {
@@ -1325,22 +1325,6 @@ private fun SpotlightCard(
                     if (t > 0f && t < 1f) drawSheen(t)
                 },
         ) {
-            // Märket stort och svagt till höger, delvis utanför kanten.
-            if (crest != null) {
-                RemoteImage(
-                    url = crest,
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .offset(x = 54.dp)
-                        .size(if (big) 320.dp else 270.dp)
-                        .graphicsLayer {
-                            alpha = 0.15f
-                            compositingStrategy = CompositingStrategy.ModulateAlpha
-                        },
-                    maxSide = 512,
-                    contentScale = ContentScale.Fit,
-                )
-            }
             Column(
                 Modifier.fillMaxSize().padding(horizontal = if (big) 30.dp else 24.dp, vertical = if (big) 24.dp else 20.dp),
             ) {
@@ -1420,7 +1404,11 @@ private fun SpotChip(text: String) {
     }
 }
 
-/** Matchen som pågår, nästa match eller det senaste resultatet. */
+/**
+ * Matchen som pågår, nästa match eller det senaste resultatet: lagen mot
+ * varandra, och mellan dem en resultattavla som i tv-sändningarna — tiden
+ * före avspark, ställningen och minuten under matchen, resultatet efteråt.
+ */
 @Composable
 private fun SpotBody(state: AppState, team: League, info: TeamFocus, big: Boolean) {
     val live = info.live
@@ -1428,121 +1416,66 @@ private fun SpotBody(state: AppState, team: League, info: TeamFocus, big: Boolea
     val last = info.last
     when {
         live != null -> {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TeamLogo(live.home, if (big) 52.dp else 42.dp)
-                Spacer(Modifier.width(12.dp))
+            SpotLabel(listOfNotNull("PÅGÅR", competitionName(live.slug), live.venue).joinToString("  ·  "))
+            Spacer(Modifier.height(10.dp))
+            VersusRow(live.home, live.away, big) {
                 Text(
-                    live.home.short,
-                    style = MaterialTheme.typography.titleLarge,
+                    "${live.homeScore ?: 0}–${live.awayScore ?: 0}",
+                    style = scoreStyle(if (big) 50.sp else 42.sp),
                     color = Color.White,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.End,
-                    modifier = Modifier.weight(1f),
                 )
-                Text(
-                    "${live.homeScore ?: 0} – ${live.awayScore ?: 0}",
-                    style = scoreStyle(if (big) 54.sp else 44.sp),
-                    color = Color.White,
-                    maxLines = 1,
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                )
-                Text(
-                    live.away.short,
-                    style = MaterialTheme.typography.titleLarge,
-                    color = Color.White,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                Spacer(Modifier.width(12.dp))
-                TeamLogo(live.away, if (big) 52.dp else 42.dp)
-            }
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                LiveDot(LIVE_SOFT)
-                Spacer(Modifier.width(7.dp))
-                val goal = live.goals.lastOrNull()
-                Text(
-                    listOfNotNull(
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LiveDot(LIVE_SOFT)
+                    Spacer(Modifier.width(6.dp))
+                    Text(
                         live.status,
-                        competitionName(live.slug),
-                        goal?.let { "mål: " + goalLabel(it.player, it.minute, it.penalty, it.ownGoal) },
-                    ).joinToString("  ·  "),
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                        color = LIVE_SOFT,
+                        maxLines = 1,
+                    )
+                }
+            }
+            live.goals.lastOrNull()?.let { goal ->
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Senaste mål: " + goalLabel(goal.player, goal.minute, goal.penalty, goal.ownGoal),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.86f),
+                    color = Color.White.copy(alpha = 0.82f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
         }
         next != null -> {
-            val home = team.owns(next.home)
-            val opponent = if (home) next.away else next.home
-            Text(
-                "NÄSTA MATCH",
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.8.sp),
-                color = Color.White.copy(alpha = 0.70f),
-            )
-            Spacer(Modifier.height(6.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TeamLogo(opponent, if (big) 62.dp else 50.dp)
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        (if (home) "Hemma mot " else "Borta mot ") + opponent.short,
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        listOfNotNull(competitionName(next.slug), next.venue).joinToString(" · "),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(alpha = 0.72f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Spacer(Modifier.width(12.dp))
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        spotDay(next.kickoff, state.clock),
-                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                        color = Color.White.copy(alpha = 0.82f),
-                        maxLines = 1,
-                    )
-                    Text(clockOf(next.kickoff), style = scoreStyle(if (big) 48.sp else 40.sp), color = Color.White, maxLines = 1)
-                    Text(
-                        spotCountdown(next.kickoff, state.clock),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Color.White.copy(alpha = 0.72f),
-                        maxLines = 1,
-                    )
-                }
+            SpotLabel(listOfNotNull("NÄSTA MATCH", competitionName(next.slug), next.venue).joinToString("  ·  "))
+            Spacer(Modifier.height(10.dp))
+            VersusRow(next.home, next.away, big) {
+                Text(
+                    spotDay(next.kickoff, state.clock).uppercase(),
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp),
+                    color = Color.White.copy(alpha = 0.80f),
+                    maxLines = 1,
+                )
+                Text(clockOf(next.kickoff), style = scoreStyle(if (big) 44.sp else 38.sp), color = Color.White, maxLines = 1)
+                Text(
+                    spotCountdown(next.kickoff, state.clock),
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                    color = FLOODLIGHT,
+                    maxLines = 1,
+                )
             }
         }
         last != null -> {
-            Text(
-                "SENASTE MATCHEN",
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.8.sp),
-                color = Color.White.copy(alpha = 0.70f),
-            )
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TeamLogo(last.home, 40.dp)
-                Spacer(Modifier.width(10.dp))
+            SpotLabel(listOfNotNull("SENASTE MATCHEN", competitionName(last.slug)).joinToString("  ·  "))
+            Spacer(Modifier.height(10.dp))
+            VersusRow(last.home, last.away, big) {
                 Text(
-                    "${last.home.short}  ${last.homeScore ?: 0} – ${last.awayScore ?: 0}  ${last.away.short}",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    "${last.homeScore ?: 0}–${last.awayScore ?: 0}",
+                    style = scoreStyle(if (big) 46.sp else 40.sp),
                     color = Color.White,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
                 )
-                Spacer(Modifier.width(10.dp))
-                TeamLogo(last.away, 40.dp)
-                Spacer(Modifier.width(14.dp))
                 ResultChip(resultFor(last, if (team.owns(last.home)) last.home.id else last.away.id))
             }
         }
@@ -1551,6 +1484,61 @@ private fun SpotBody(state: AppState, team: League, info: TeamFocus, big: Boolea
             style = MaterialTheme.typography.bodyLarge,
             color = Color.White.copy(alpha = 0.80f),
         )
+    }
+}
+
+/** Liten rubrik i versaler över matchen: vad, i vilken tävling, var. */
+@Composable
+private fun SpotLabel(text: String) {
+    Text(
+        text.uppercase(),
+        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.6.sp),
+        color = Color.White.copy(alpha = 0.68f),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+/**
+ * Hemmalaget till vänster och bortalaget till höger, med märkena ytterst och
+ * [board] — resultattavlan — i mitten. Namnen får det som blir över.
+ */
+@Composable
+private fun VersusRow(home: FootballTeam, away: FootballTeam, big: Boolean, board: @Composable () -> Unit) {
+    val crest = if (big) 64.dp else 52.dp
+    val name = MaterialTheme.typography.titleLarge.copy(
+        fontWeight = FontWeight.Bold,
+        shadow = Shadow(Color.Black.copy(alpha = 0.35f), Offset(0f, 2f), 6f),
+    )
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        TeamLogo(home, crest)
+        Spacer(Modifier.width(12.dp))
+        Text(home.short, style = name, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Spacer(Modifier.width(12.dp))
+        val shape = RoundedCornerShape(16.dp)
+        Column(
+            Modifier
+                .widthIn(min = if (big) 150.dp else 130.dp)
+                .clip(shape)
+                .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.42f), Color.Black.copy(alpha = 0.26f))))
+                .border(1.dp, Color.White.copy(alpha = 0.16f), shape)
+                .padding(horizontal = 18.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            board()
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(
+            away.short,
+            style = name,
+            color = Color.White,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(12.dp))
+        TeamLogo(away, crest)
     }
 }
 
@@ -1800,10 +1788,28 @@ private fun DrawScope.drawStadium() {
             style = stroke,
         )
     }
-    // Strålkastarna: kallt ljus från hörnen uppe.
-    val flood = Color(0x26E6F2FF)
-    drawRect(Brush.radialGradient(listOf(flood, Color.Transparent), center = Offset(0f, 0f), radius = w * 0.55f))
-    drawRect(Brush.radialGradient(listOf(flood, Color.Transparent), center = Offset(w, 0f), radius = w * 0.55f))
+    // Strålkastarna: fyra master längs överkanten. Varje lampa lyser, och kallt
+    // ljus faller ner över planen i en kon som vidgas mot mitten.
+    for (fx in floatArrayOf(0.05f, 0.29f, 0.71f, 0.95f)) {
+        val lamp = Offset(w * fx, -h * 0.03f)
+        drawRect(
+            Brush.radialGradient(
+                listOf(Color(0x33E2FFF0), Color(0x0DE2FFF0), Color.Transparent),
+                center = lamp,
+                radius = w * 0.30f,
+            ),
+        )
+        val toward = (w / 2 - lamp.x) * 0.22f
+        val reach = h * 0.9f
+        val beam = Path().apply {
+            moveTo(lamp.x - w * 0.012f, lamp.y)
+            lineTo(lamp.x + w * 0.012f, lamp.y)
+            lineTo(lamp.x + toward + w * 0.15f, reach)
+            lineTo(lamp.x + toward - w * 0.15f, reach)
+            close()
+        }
+        drawPath(beam, Brush.verticalGradient(listOf(Color(0x16E8FFF2), Color(0x06E8FFF2), Color.Transparent), endY = reach))
+    }
     // Mörkare kanter, så att det man läser står i ljuset.
     drawRect(
         Brush.radialGradient(
@@ -3127,8 +3133,11 @@ private val SWE_YELLOW = Color(0xFFFECC02)
 private val CHALK = Color(0xFFF1F6EE)
 private val TICKER_BG = Color(0xFF07140D)
 /** Gräset i kvällsljus. */
-private val GRASS_TOP = Color(0xFF0F3321)
-private val GRASS_BOTTOM = Color(0xFF05130B)
+private val GRASS_TOP = Color(0xFF0A2116)
+private val GRASS_BOTTOM = Color(0xFF020805)
+
+/** Strålkastarnas kalla ljus: nedräkningar, rubrikernas streck. */
+private val FLOODLIGHT = Color(0xFF7DFFB0)
 private const val GOAL_FLASH_MS = 3400
 /** Så många gånger prövas det att gå från ligalistan in på sidan. */
 private const val ENTER_ATTEMPTS = 6

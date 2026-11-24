@@ -66,6 +66,10 @@ jobs:
         run: |
           sudo apt-get update -qq >/dev/null 2>&1 || true
           sudo apt-get install -y -qq fonts-roboto fonts-noto-color-emoji >/dev/null 2>&1 || true
+          # Compose väljer på Linux Noto Sans eller DejaVu Sans före allt annat. Utan
+          # dem blir texten Roboto, som på Shield.
+          sudo find /usr/share/fonts -iname 'DejaVuSans*.ttf' ! -iname '*Mono*' -delete 2>/dev/null || true
+          sudo find /usr/share/fonts -iname 'NotoSans-*.ttf' -delete 2>/dev/null || true
           mkdir -p ~/.config/fontconfig
           printf '%s\n' '<?xml version="1.0"?>' '<!DOCTYPE fontconfig SYSTEM "fonts.dtd">' '<fontconfig>' \
             '<alias><family>sans-serif</family><prefer><family>Roboto</family></prefer></alias>' \
