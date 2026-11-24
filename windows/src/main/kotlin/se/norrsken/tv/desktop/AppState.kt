@@ -20,6 +20,7 @@ import se.norrsken.tv.desktop.data.MatchDetail
 import se.norrsken.tv.desktop.data.MatchState
 import se.norrsken.tv.desktop.data.TableRow
 import se.norrsken.tv.desktop.data.findBroadcasts
+import se.norrsken.tv.desktop.data.isMalmoFF
 import kotlinx.coroutines.async
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitAll
@@ -1151,7 +1152,14 @@ class AppState {
         delay(FOOTBALL_START_DELAY_MS)
         while (true) {
             val now = System.currentTimeMillis()
-            if (!footballVisible && appVisible && !watching) {
+            // Malmö FF eller Sverige spelar: ställningen varje minut, också under en film
+            // eller kanal, så att ett mål syns i hörnet direkt (se matchNotice).
+            val oursOn = footballMatches.any {
+                it.isOurs() && (it.state == MatchState.LIVE || (it.shouldHaveStarted(now) && it.state != MatchState.FINISHED))
+            }
+            if (oursOn && !footballVisible && appVisible && now - footballUpdatedAt >= OURS_LIVE_MS) {
+                safely { refreshFootball(full = false, foreground = false) }
+            } else if (!footballVisible && appVisible && !watching) {
                 val ongoing = footballMatches.any { it.state == MatchState.LIVE || it.shouldHaveStarted(now) }
                 when {
                     now - footballFullAt > FOOTBALL_BACKGROUND_FULL_MS && now - footballTriedAt > FOOTBALL_RETRY_MS ->
@@ -1160,8 +1168,99 @@ class AppState {
                         safely { refreshFootball(full = false, foreground = false) }
                 }
             }
-            delay(60_000L)
+            remindKickoffs(System.currentTimeMillis())
+            delay(if (oursOn) 15_000L else 30_000L)
         }
+    }
+
+    // --- Rutan i hörnet: Malmö FF:s och landslagets matcher -------------------------
+
+    enum class MatchNoticeKind { GOAL, CONCEDED, KICKOFF_SOON, FULL_TIME }
+
+    /**
+     * Något som hände i Malmö FF:s eller landslagets match, i en ruta i hörnet
+     * var man än är i appen — också under en film eller kanal: mål för eller
+     * emot, att matchen börjar om en stund (med kanalen som visar den), och
+     * slutresultatet.
+     */
+    class MatchNotice(
+        val kind: MatchNoticeKind,
+        val match: FootballMatch,
+        val player: String?,
+        val minute: String?,
+        val channel: LiveChannel?,
+    )
+
+    var matchNotice by mutableStateOf<MatchNotice?>(null)
+        private set
+
+    private val knownScores = HashMap<String, Pair<Int, Int>>()
+    private val seenLive = HashSet<String>()
+    private val reminded = HashSet<String>()
+    private var noticeJob: Job? = null
+
+    /** Malmö FF eller herrlandslaget spelar. */
+    private fun FootballMatch.isOurs(): Boolean = isMalmoFF() || home.id == SWEDEN_TEAM || away.id == SWEDEN_TEAM
+
+    /** Malmö FF eller landslaget är hemmalaget. */
+    private fun FootballMatch.oursAtHome(): Boolean = home.isMalmoFF() || home.id == SWEDEN_TEAM
+
+    /** Efter varje hämtning: nya mål och matcher som just tagit slut. Första gången en match syns räknas inget. */
+    private fun noticeMatchEvents(matches: List<FootballMatch>) {
+        for (match in matches) {
+            if (!match.isOurs()) continue
+            val score = (match.homeScore ?: 0) to (match.awayScore ?: 0)
+            val before = knownScores.put(match.id, score)
+            if (match.state == MatchState.LIVE) {
+                seenLive += match.id
+                if (before != null) {
+                    val homeScored = score.first > before.first
+                    val awayScored = score.second > before.second
+                    if (homeScored || awayScored) {
+                        val ours = if (match.oursAtHome()) homeScored else awayScored
+                        val goal = match.goals.lastOrNull { it.home == homeScored }
+                        showNotice(
+                            MatchNotice(
+                                kind = if (ours) MatchNoticeKind.GOAL else MatchNoticeKind.CONCEDED,
+                                match = match,
+                                player = goal?.player?.takeIf { it.isNotBlank() },
+                                minute = goal?.minute ?: match.status,
+                                channel = null,
+                            ),
+                        )
+                    }
+                }
+            } else if (match.state == MatchState.FINISHED && seenLive.remove(match.id)) {
+                showNotice(MatchNotice(MatchNoticeKind.FULL_TIME, match, null, null, null))
+            }
+        }
+    }
+
+    /** En kvart före avspark: rutan säger att matchen börjar, och var den visas. */
+    private fun remindKickoffs(now: Long) {
+        for (match in footballMatches) {
+            if (!match.isOurs() || match.state != MatchState.UPCOMING || match.id in reminded) continue
+            val left = match.kickoff - now
+            if (left in 1L..KICKOFF_REMINDER_MS) {
+                reminded += match.id
+                showNotice(MatchNotice(MatchNoticeKind.KICKOFF_SOON, match, null, null, matchChannels[match.id]?.firstOrNull()))
+            }
+        }
+    }
+
+    private fun showNotice(notice: MatchNotice) {
+        matchNotice = notice
+        noticeJob?.cancel()
+        noticeJob = scope.launch {
+            delay(if (notice.kind == MatchNoticeKind.KICKOFF_SOON) NOTICE_LONG_MS else NOTICE_MS)
+            if (matchNotice === notice) matchNotice = null
+        }
+    }
+
+    /** Förhandsbilder (windows/src/preview): en ruta i hörnet utan någon match som pågår. */
+    internal fun previewNotice(notice: MatchNotice?) {
+        noticeJob?.cancel()
+        matchNotice = notice
     }
 
     /** Varför fotbollen inte gick att hämta, kort och på svenska. */
@@ -1293,6 +1392,7 @@ class AppState {
         for (match in leagueMatches) byId[match.id] = match
         for (list in teamMatches.values) for (match in list) byId.putIfAbsent(match.id, match)
         footballMatches = byId.values.sortedBy { it.kickoff }
+        noticeMatchEvents(footballMatches)
     }
 
     private fun dayOf(ms: Long): LocalDate = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()
@@ -3742,6 +3842,15 @@ private const val TEAM_AHEAD_DAYS = 150L
 /** Utan fliken: hela perioden var tredje timme, ställningen var femte minut medan matcher pågår. */
 private const val FOOTBALL_BACKGROUND_FULL_MS = 3 * 60 * 60_000L
 private const val FOOTBALL_BACKGROUND_LIVE_MS = 5 * 60_000L
+/** Malmö FF eller Sverige spelar: så ofta ställningen hämtas, också under en film. */
+private const val OURS_LIVE_MS = 55_000L
+/** Så långt före avspark rutan i hörnet påminner om matchen. */
+private const val KICKOFF_REMINDER_MS = 15 * 60_000L
+/** Så länge rutan i hörnet står kvar: ett mål, och en påminnelse som har en kanal att läsa. */
+private const val NOTICE_MS = 9_000L
+private const val NOTICE_LONG_MS = 14_000L
+/** Herrlandslaget hos ESPN. */
+private const val SWEDEN_TEAM = "466"
 private const val FOOTBALL_RETRY_MS = 10 * 60_000L
 private const val FOOTBALL_START_DELAY_MS = 25_000L
 /** En match räknas som pågående upp till tre timmar efter avspark. */

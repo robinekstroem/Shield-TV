@@ -1,5 +1,11 @@
 package se.norrsken.tv.desktop.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -632,11 +638,16 @@ private fun SectionTitle(
             LiveDot()
             Spacer(Modifier.width(10.dp))
         } else {
-            // Ett kritstreck, som linjerna på planen.
-            Box(Modifier.size(width = 4.dp, height = 20.dp).clip(RoundedCornerShape(2.dp)).background(CHALK.copy(alpha = 0.85f)))
+            // Ett streck i strålkastarnas gröna ljus.
+            Box(
+                Modifier
+                    .size(width = 4.dp, height = 22.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Brush.verticalGradient(listOf(FLOODLIGHT, FLOODLIGHT.copy(alpha = 0.45f)))),
+            )
             Spacer(Modifier.width(12.dp))
         }
-        Text(text, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
+        Text(text, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black, letterSpacing = 0.3.sp))
         if (trailing != null) {
             Spacer(Modifier.width(10.dp))
             Text(trailing, style = MaterialTheme.typography.bodyMedium, color = palette.textTertiary)
@@ -831,13 +842,27 @@ private fun LiveCard(state: AppState, match: FootballMatch, focus: FootballFocus
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .background(palette.surface)
-                    .background(
-                        Brush.horizontalGradient(
-                            listOf(homeColor.copy(alpha = 0.34f), Color.Transparent, awayColor.copy(alpha = 0.34f)),
-                        ),
-                    )
-                    .then(if (mark != null) Modifier.border(2.dp, mark.copy(alpha = 0.9f), shape) else Modifier)
+                    .background(NIGHT_CARD)
+                    // Lagens färger lyser bakom deras märken, som strålkastare i deras färg.
+                    .drawBehind {
+                        val glow = size.width * 0.46f
+                        drawRect(
+                            Brush.radialGradient(
+                                listOf(homeColor.copy(alpha = 0.42f), Color.Transparent),
+                                center = Offset(size.width * 0.17f, size.height * 0.36f),
+                                radius = glow,
+                            ),
+                        )
+                        drawRect(
+                            Brush.radialGradient(
+                                listOf(awayColor.copy(alpha = 0.42f), Color.Transparent),
+                                center = Offset(size.width * 0.83f, size.height * 0.36f),
+                                radius = glow,
+                            ),
+                        )
+                        drawRect(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.06f), Color.Transparent), endY = size.height * 0.35f))
+                    }
+                    .border(if (mark != null) 2.dp else 1.dp, mark?.copy(alpha = 0.9f) ?: Color.White.copy(alpha = 0.08f), shape)
                     .padding(18.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -850,7 +875,16 @@ private fun LiveCard(state: AppState, match: FootballMatch, focus: FootballFocus
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TeamColumn(match.home, Modifier.weight(1f))
-                    Text(scoreText(match), style = scoreStyle(36.sp), color = palette.textPrimary)
+                    val board = RoundedCornerShape(14.dp)
+                    Box(
+                        Modifier
+                            .clip(board)
+                            .background(Color.Black.copy(alpha = 0.46f))
+                            .border(1.dp, Color.White.copy(alpha = 0.12f), board)
+                            .padding(horizontal = 14.dp, vertical = 2.dp),
+                    ) {
+                        Text(scoreText(match), style = scoreStyle(36.sp), color = Color.White, maxLines = 1)
+                    }
                     TeamColumn(match.away, Modifier.weight(1f))
                 }
                 MinuteBar(match, homeColor, awayColor)
@@ -892,17 +926,31 @@ private fun LiveCard(state: AppState, match: FootballMatch, focus: FootballFocus
 @Composable
 private fun MinuteBar(match: FootballMatch, homeColor: Color, awayColor: Color) {
     val progress = matchProgress(match)
-    Box(Modifier.fillMaxWidth().height(4.dp)) {
+    BoxWithConstraints(Modifier.fillMaxWidth().height(12.dp), contentAlignment = Alignment.CenterStart) {
         if (progress != null) {
-            Box(Modifier.matchParentSize().clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.10f)))
+            val width = maxWidth
+            Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.10f)))
             Box(
                 Modifier
                     .fillMaxWidth(progress)
-                    .fillMaxHeight()
+                    .height(4.dp)
                     .clip(RoundedCornerShape(2.dp))
                     .background(Brush.horizontalGradient(listOf(homeColor, awayColor))),
             )
-            Box(Modifier.align(Alignment.Center).width(2.dp).fillMaxHeight().background(Color.White.copy(alpha = 0.45f)))
+            Box(Modifier.offset(x = width / 2 - 1.dp).width(2.dp).height(8.dp).background(Color.White.copy(alpha = 0.45f)))
+            // Målen där de kom, i målskyttens lags färg.
+            for (goal in match.goals) {
+                val minute = MINUTE.find(goal.minute.trim())?.groupValues?.get(1)?.toIntOrNull() ?: continue
+                val at = (minute / 90f).coerceIn(0f, 1f)
+                Box(
+                    Modifier
+                        .offset(x = (width * at - 5.dp).coerceIn(0.dp, width - 10.dp))
+                        .size(10.dp)
+                        .clip(CircleShape)
+                        .background(if (goal.home) homeColor else awayColor)
+                        .border(1.5.dp, Color.White.copy(alpha = 0.9f), CircleShape),
+                )
+            }
         }
     }
 }
@@ -3139,6 +3187,9 @@ private val GRASS_BOTTOM = Color(0xFF020805)
 
 /** Strålkastarnas kalla ljus: nedräkningar, rubrikernas streck. */
 private val FLOODLIGHT = Color(0xFF7DFFB0)
+
+/** Korten på kvällsplanen: nästan svarta, med en ton av gräs. */
+private val NIGHT_CARD = Color(0xFF0D1712)
 private const val GOAL_FLASH_MS = 3400
 /** Så många gånger prövas det att gå från ligalistan in på sidan. */
 private const val ENTER_ATTEMPTS = 6
@@ -3154,3 +3205,165 @@ private val INK = Color(0xFF101318)
 
 /** ESPN:s lagmärken, efter lagets id: Malmö FF 2720, Sverige 466. */
 private const val ESPN_TEAM_LOGOS = "https://a.espncdn.com/i/teamlogos/soccer/500"
+
+// --- Rutan i hörnet: mål, avspark och slutresultat ------------------------------------
+
+/**
+ * Rutan uppe till höger var man än är i appen, också under en film eller
+ * kanal (se AppState.matchNotice): mål för Malmö FF eller Sverige i lagets
+ * färger, mål emot, påminnelsen en kvart före avspark med kanalen som visar
+ * matchen, och slutresultatet. Glider in från höger och går undan av sig själv.
+ */
+@Composable
+internal fun BoxScope.MatchNoticeOverlay(state: AppState) {
+    val notice = state.matchNotice
+    // Det som visades står kvar medan rutan glider ut.
+    val last = remember { arrayOfNulls<AppState.MatchNotice>(1) }
+    if (notice != null) last[0] = notice
+    AnimatedVisibility(
+        visible = notice != null,
+        enter = slideInHorizontally(tween(460, easing = FastOutSlowInEasing)) { it + it / 4 } + fadeIn(tween(220)),
+        exit = slideOutHorizontally(tween(340)) { it + it / 4 } + fadeOut(tween(280)),
+        modifier = Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 28.dp),
+    ) {
+        last[0]?.let { NoticeCard(it) }
+    }
+}
+
+@Composable
+private fun NoticeCard(notice: AppState.MatchNotice) {
+    val match = notice.match
+    val mff = match.isMalmoFF()
+    val kind = notice.kind
+    val goal = kind == AppState.MatchNoticeKind.GOAL
+    val shape = RoundedCornerShape(26.dp)
+    val colors = when {
+        goal && mff -> listOf(MFF_SKY, MFF_DEEP, MFF_NIGHT)
+        goal -> listOf(SWE_BLUE, SWE_DEEP, SWE_NIGHT)
+        else -> listOf(Color(0xFF1B2721), NIGHT_CARD, Color(0xFF070C09))
+    }
+    // Ett mål: rutan blixtrar till när den kommer.
+    val flash = remember(notice) { Animatable(if (goal) 1f else 0f) }
+    LaunchedEffect(notice) { if (goal) flash.animateTo(0f, tween(1_100, easing = FastOutSlowInEasing)) }
+    Box(
+        Modifier
+            .width(560.dp)
+            .shadow(32.dp, shape)
+            .clip(shape)
+            .background(Brush.linearGradient(colors, start = Offset.Zero, end = Offset(900f, 600f)))
+            .border(1.dp, Color.White.copy(alpha = if (goal) 0.30f else 0.14f), shape),
+    ) {
+        Column(Modifier.padding(horizontal = 26.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val scorer = if (match.goals.lastOrNull()?.home == true) match.home else match.away
+                val headline = when (kind) {
+                    AppState.MatchNoticeKind.GOAL -> "MÅÅÅL!"
+                    AppState.MatchNoticeKind.CONCEDED -> "Mål för ${scorer.short}"
+                    AppState.MatchNoticeKind.KICKOFF_SOON -> {
+                        val minutes = ((match.kickoff - System.currentTimeMillis()) / 60_000L).coerceAtLeast(1L)
+                        "Avspark om $minutes min"
+                    }
+                    AppState.MatchNoticeKind.FULL_TIME -> "Slut"
+                }
+                Text(
+                    if (goal) headline else headline.uppercase(),
+                    style = if (goal) {
+                        scoreStyle(46.sp).copy(letterSpacing = 2.sp, shadow = Shadow(Color.Black.copy(alpha = 0.45f), Offset(0f, 3f), 12f))
+                    } else {
+                        MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black, letterSpacing = 1.4.sp)
+                    },
+                    color = when (kind) {
+                        AppState.MatchNoticeKind.CONCEDED -> LIVE_SOFT
+                        AppState.MatchNoticeKind.KICKOFF_SOON -> FLOODLIGHT
+                        else -> Color.White
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    when (kind) {
+                        AppState.MatchNoticeKind.GOAL, AppState.MatchNoticeKind.CONCEDED -> notice.minute ?: match.status
+                        else -> competitionName(match.slug)
+                    },
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White.copy(alpha = 0.78f),
+                    maxLines = 1,
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TeamLogo(match.home, 46.dp)
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    match.home.short,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                val board = RoundedCornerShape(12.dp)
+                Box(
+                    Modifier
+                        .padding(horizontal = 10.dp)
+                        .clip(board)
+                        .background(Color.Black.copy(alpha = 0.40f))
+                        .border(1.dp, Color.White.copy(alpha = 0.14f), board)
+                        .padding(horizontal = 14.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        if (kind == AppState.MatchNoticeKind.KICKOFF_SOON) clockOf(match.kickoff) else "${match.homeScore ?: 0}–${match.awayScore ?: 0}",
+                        style = scoreStyle(30.sp),
+                        color = Color.White,
+                        maxLines = 1,
+                    )
+                }
+                Text(
+                    match.away.short,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(12.dp))
+                TeamLogo(match.away, 46.dp)
+            }
+            val line: String? = when (kind) {
+                AppState.MatchNoticeKind.GOAL, AppState.MatchNoticeKind.CONCEDED -> notice.player
+                AppState.MatchNoticeKind.KICKOFF_SOON -> notice.channel?.let { "Visas på ${it.name}" } ?: match.venue
+                AppState.MatchNoticeKind.FULL_TIME -> null
+            }
+            if (kind == AppState.MatchNoticeKind.FULL_TIME) {
+                val ours = if (match.home.isMalmoFF() || match.home.id == League.SWEDEN.teamId) match.home.id else match.away.id
+                ResultChip(resultFor(match, ours))
+            } else if (line != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        if (kind == AppState.MatchNoticeKind.KICKOFF_SOON && notice.channel != null) Glyphs.Live else Glyphs.Football,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.85f),
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        line,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = Color.White.copy(alpha = 0.9f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+        if (goal) {
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .graphicsLayer { alpha = flash.value * 0.55f }
+                    .background(Color.White),
+            )
+        }
+    }
+}

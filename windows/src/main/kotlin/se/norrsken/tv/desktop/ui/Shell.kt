@@ -430,6 +430,9 @@ fun AppRoot(state: AppState) {
         if (saver.shown) {
             ScreenSaver(state, wall, morph, saver)
         }
+        // Malmö FF:s och landslagets matcher: mål, avspark och slutresultat i hörnet,
+        // var man än är — också över en film eller kanal.
+        if (state.introDone) MatchNoticeOverlay(state)
     }
 }
 

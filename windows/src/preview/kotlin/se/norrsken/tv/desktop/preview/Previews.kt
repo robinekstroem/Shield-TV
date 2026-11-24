@@ -27,7 +27,13 @@ import se.norrsken.tv.desktop.data.TmdbStore
 import se.norrsken.tv.desktop.data.WatchEntry
 import se.norrsken.tv.desktop.data.WatchKind
 import se.norrsken.tv.desktop.player.VideoPlayer
+import androidx.compose.foundation.layout.fillMaxSize
+import se.norrsken.tv.desktop.data.FootballMatch
+import se.norrsken.tv.desktop.data.MatchGoal
+import se.norrsken.tv.desktop.data.MatchState
+import se.norrsken.tv.desktop.data.isMalmoFF
 import se.norrsken.tv.desktop.ui.AppRoot
+import se.norrsken.tv.desktop.ui.MatchNoticeOverlay
 import se.norrsken.tv.desktop.ui.PlayerLayers
 import se.norrsken.tv.desktop.ui.PlayerStill
 import se.norrsken.tv.desktop.ui.TvNav
@@ -199,7 +205,29 @@ private fun scenes(state: AppState, data: PreviewData): List<Scene> {
     val app: @Composable () -> Unit = { TvTheme(state.theme) { AppRoot(state) } }
     fun screen(target: Screen): () -> Unit = {
         state.previewPlayer(null)
+        state.previewNotice(null)
         state.screen = target
+    }
+    // Malmö FF:s nästa match, som om den pågick: för rutan i hörnet.
+    fun mffMatch(live: Boolean): FootballMatch? {
+        val next = state.footballMatches.firstOrNull { it.isMalmoFF() && it.state == MatchState.UPCOMING }
+            ?: state.footballMatches.lastOrNull { it.isMalmoFF() }
+            ?: return null
+        val home = next.home.isMalmoFF()
+        return FootballMatch(
+            id = next.id,
+            league = next.league,
+            kickoff = if (live) System.currentTimeMillis() - 67 * 60_000L else System.currentTimeMillis() + 14 * 60_000L,
+            state = if (live) MatchState.LIVE else MatchState.UPCOMING,
+            status = if (live) "67'" else "",
+            home = next.home,
+            away = next.away,
+            homeScore = if (live) (if (home) 2 else 1) else null,
+            awayScore = if (live) (if (home) 1 else 2) else null,
+            venue = next.venue,
+            goals = if (live) listOf(MatchGoal("67'", home, "I. Kiese Thelin", penalty = false, ownGoal = false)) else emptyList(),
+            slug = next.slug,
+        )
     }
 
     return listOf(
@@ -291,6 +319,33 @@ private fun scenes(state: AppState, data: PreviewData): List<Scene> {
             },
             settleMs = 6_000L,
             content = app,
+        ),
+        Scene(
+            "notis-mal",
+            before = {
+                screen(Screen.HOME)()
+                mffMatch(live = true)?.let { state.previewNotice(AppState.MatchNotice(AppState.MatchNoticeKind.GOAL, it, "I. Kiese Thelin", "67'", null)) }
+            },
+            settleMs = 3_000L,
+            content = app,
+        ),
+        Scene(
+            "notis-avspark",
+            before = {
+                state.previewPlayer(live)
+                mffMatch(live = false)?.let {
+                    state.previewNotice(AppState.MatchNotice(AppState.MatchNoticeKind.KICKOFF_SOON, it, null, null, data.channels[17]))
+                }
+            },
+            settleMs = 3_000L,
+            content = {
+                TvTheme(state.theme) {
+                    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()) {
+                        PlayerLayers(state, collapse = 0f, highlighted = false, staged = false, still = PlayerStill(liveStatus, frame))
+                        MatchNoticeOverlay(state)
+                    }
+                }
+            },
         ),
         Scene(
             "fotboll-match",
