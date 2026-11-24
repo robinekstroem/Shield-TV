@@ -4,6 +4,11 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.border
+import androidx.compose.ui.layout.ContentScale
+import se.norrsken.tv.desktop.data.WatchKind
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
@@ -449,6 +454,9 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
     // ett mjukt sken i den markerade radens färg följer den.
     val trail = remember(tv) { if (tv) FocusTrail() else null }
     val aura = if (tv) rememberMenuAura() else null
+    // Tv: raden som har markeringen, för glimten nederst i menyn.
+    var peek by remember { mutableIntStateOf(-1) }
+    val onFocused: ((Int) -> Unit)? = if (tv) ({ peek = it }) else null
     // Den valda fliken tar emot markeringen när menyn kommer fram.
     val current = remember { FocusRequester() }
     if (tv) {
@@ -574,31 +582,31 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
                 .padding(vertical = NAV_AIR),
             verticalArrangement = Arrangement.spacedBy(if (tv) 6.dp else 4.dp),
         ) {
-            NavItem(Glyphs.Home, "Hem", "Fortsätt titta & tips", null, state.screen == Screen.HOME, docked, tv = tv, accent = MenuAccents.home, trail = trail, aura = aura, index = 0, modifier = navModifier(Screen.HOME)) {
+            NavItem(Glyphs.Home, "Hem", "Fortsätt titta & tips", null, state.screen == Screen.HOME, docked, tv = tv, accent = MenuAccents.home, trail = trail, aura = aura, index = 0, onFocused = onFocused, modifier = navModifier(Screen.HOME)) {
                 go(Screen.HOME)
             }
-            NavItem(Glyphs.Live, "Live TV", "Direktsändning", null, state.screen == Screen.LIVE, docked, tv = tv, accent = MenuAccents.live, trail = trail, aura = aura, index = 1, modifier = navModifier(Screen.LIVE)) {
+            NavItem(Glyphs.Live, "Live TV", "Direktsändning", null, state.screen == Screen.LIVE, docked, tv = tv, accent = MenuAccents.live, trail = trail, aura = aura, index = 1, onFocused = onFocused, modifier = navModifier(Screen.LIVE)) {
                 go(Screen.LIVE)
             }
-            NavItem(Glyphs.Guide, "Tablå", "Vad som sänds", null, state.screen == Screen.GUIDE, docked, tv = tv, accent = MenuAccents.guide, trail = trail, aura = aura, index = 2, modifier = navModifier(Screen.GUIDE)) {
+            NavItem(Glyphs.Guide, "Tablå", "Vad som sänds", null, state.screen == Screen.GUIDE, docked, tv = tv, accent = MenuAccents.guide, trail = trail, aura = aura, index = 2, onFocused = onFocused, modifier = navModifier(Screen.GUIDE)) {
                 go(Screen.GUIDE)
             }
             // Antalet matcher som pågår just nu.
             val liveMatches = state.footballMatches.count { it.state == MatchState.LIVE }
-            NavItem(Glyphs.Football, "Fotboll", "Matcher & tabeller", liveMatches.takeIf { it > 0 }, state.screen == Screen.FOOTBALL, docked, tv = tv, accent = MenuAccents.football, live = true, trail = trail, aura = aura, index = 3, modifier = navModifier(Screen.FOOTBALL)) {
+            NavItem(Glyphs.Football, "Fotboll", "Matcher & tabeller", liveMatches.takeIf { it > 0 }, state.screen == Screen.FOOTBALL, docked, tv = tv, accent = MenuAccents.football, live = true, trail = trail, aura = aura, index = 3, onFocused = onFocused, modifier = navModifier(Screen.FOOTBALL)) {
                 go(Screen.FOOTBALL)
             }
             NavDivider(tv)
-            NavItem(Glyphs.Movies, "Filmer", "Filmbiblioteket", null, state.screen == Screen.MOVIES, docked, tv = tv, accent = MenuAccents.movies, trail = trail, aura = aura, index = 4, modifier = navModifier(Screen.MOVIES)) {
+            NavItem(Glyphs.Movies, "Filmer", "Filmbiblioteket", null, state.screen == Screen.MOVIES, docked, tv = tv, accent = MenuAccents.movies, trail = trail, aura = aura, index = 4, onFocused = onFocused, modifier = navModifier(Screen.MOVIES)) {
                 go(Screen.MOVIES)
             }
-            NavItem(Glyphs.Series, "Serier", "Säsonger & avsnitt", null, state.screen == Screen.SERIES, docked, tv = tv, accent = MenuAccents.series, trail = trail, aura = aura, index = 5, modifier = navModifier(Screen.SERIES)) {
+            NavItem(Glyphs.Series, "Serier", "Säsonger & avsnitt", null, state.screen == Screen.SERIES, docked, tv = tv, accent = MenuAccents.series, trail = trail, aura = aura, index = 5, onFocused = onFocused, modifier = navModifier(Screen.SERIES)) {
                 go(Screen.SERIES)
             }
-            NavItem(Glyphs.Genres, "Genrer", "Topplistor efter betyg", null, state.screen == Screen.GENRES, docked, tv = tv, accent = MenuAccents.genres, trail = trail, aura = aura, index = 6, modifier = navModifier(Screen.GENRES)) {
+            NavItem(Glyphs.Genres, "Genrer", "Topplistor efter betyg", null, state.screen == Screen.GENRES, docked, tv = tv, accent = MenuAccents.genres, trail = trail, aura = aura, index = 6, onFocused = onFocused, modifier = navModifier(Screen.GENRES)) {
                 go(Screen.GENRES)
             }
-            NavItem(Glyphs.History, "Historik", "Fortsätt där du slutade", null, state.screen == Screen.HISTORY, docked, tv = tv, accent = MenuAccents.history, trail = trail, aura = aura, index = 7, modifier = navModifier(Screen.HISTORY)) {
+            NavItem(Glyphs.History, "Historik", "Fortsätt där du slutade", null, state.screen == Screen.HISTORY, docked, tv = tv, accent = MenuAccents.history, trail = trail, aura = aura, index = 7, onFocused = onFocused, modifier = navModifier(Screen.HISTORY)) {
                 go(Screen.HISTORY)
             }
         }
@@ -608,7 +616,12 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
             Spacer(Modifier.height(8.dp))
         }
 
-        NavItem(Glyphs.Settings, "Inställningar", "Källor & uppspelning", null, state.screen == Screen.SETTINGS, docked, tv = tv, accent = MenuAccents.settings, trail = trail, aura = aura, index = 8, modifier = navModifier(Screen.SETTINGS)) {
+        // Tv: en glimt av det som finns bakom raden man står på.
+        if (tv && !docked && focused) {
+            MenuPeek(state, peek, Modifier.fillMaxWidth().padding(bottom = 10.dp))
+        }
+
+        NavItem(Glyphs.Settings, "Inställningar", "Källor & uppspelning", null, state.screen == Screen.SETTINGS, docked, tv = tv, accent = MenuAccents.settings, trail = trail, aura = aura, index = 8, onFocused = onFocused, modifier = navModifier(Screen.SETTINGS)) {
             go(Screen.SETTINGS)
         }
     }
@@ -791,6 +804,8 @@ private fun NavItem(
     aura: MenuAura? = null,
     /** Radens plats i menyn, uppifrån. */
     index: Int = 0,
+    /** Tv: raden fick markeringen (för glimten nederst i menyn). */
+    onFocused: ((Int) -> Unit)? = null,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
@@ -815,7 +830,12 @@ private fun NavItem(
                     Modifier
                         .onGloballyPositioned { place.center = it.boundsInWindow().center.y }
                         .trailMark(trail, index)
-                        .onFocusChanged { if (it.isFocused) aura?.follow(place.center, accent) }
+                        .onFocusChanged {
+                            if (it.isFocused) {
+                                aura?.follow(place.center, accent)
+                                onFocused?.invoke(index)
+                            }
+                        }
                 } else {
                     Modifier
                 },
@@ -978,3 +998,158 @@ fun ImportState.describe(): String = when (this) {
 
 /** Samma röda som LIVE i fliken Fotboll. */
 private val LIVE_COUNT = Color(0xFFFF453A)
+
+// --- Tv: glimten nederst i menyn ------------------------------------------------------
+
+/**
+ * Tv: nederst i menyn en glimt av det som finns bakom raden man står på —
+ * det man kan fortsätta titta på för Hem, kanalen man senast såg med vad som
+ * sänds nu för Live TV och Tablå, Malmö FF:s nästa match (eller ställningen)
+ * för Fotboll, det senaste i Filmer och Serier, och det man såg sist för
+ * Historik. Byts mjukt när markeringen flyttas.
+ */
+@Composable
+private fun MenuPeek(state: AppState, index: Int, modifier: Modifier) {
+    val history = state.history
+    val library = state.library
+    val lastChannel = remember(history, library) {
+        history.firstOrNull { it.kind == WatchKind.LIVE }?.let { entry ->
+            library.channels.firstOrNull {
+                it.sourceId == entry.sourceId && (it.streamId?.toString() ?: "namn:${it.name}") == entry.itemId
+            }
+        }
+    }
+    val newestMovie = remember(library) { library.movies.maxByOrNull { it.addedUtc } }
+    val newestSeries = remember(library) { library.series.maxByOrNull { it.addedUtc } }
+    AnimatedContent(
+        targetState = index,
+        transitionSpec = { fadeIn(tween(240)) togetherWith fadeOut(tween(140)) },
+        modifier = modifier,
+        label = "menyglimt",
+    ) { at ->
+        when (at) {
+            0 -> history.firstOrNull { it.resumable }?.let { entry ->
+                PeekCard(
+                    label = "FORTSÄTT TITTA",
+                    accent = MenuAccents.home,
+                    title = entry.title,
+                    line = entry.subtitle,
+                    image = entry.image,
+                    poster = true,
+                    progress = entry.progress,
+                )
+            }
+            1, 2 -> lastChannel?.let { channel ->
+                val onAir = state.guide.current(channel, state.clock)
+                PeekCard(
+                    label = if (at == 1) "SENAST SEDD" else "SÄNDS NU",
+                    accent = if (at == 1) MenuAccents.live else MenuAccents.guide,
+                    title = channel.name,
+                    line = onAir?.title,
+                    image = channel.logo,
+                    poster = false,
+                    progress = onAir?.progress(state.clock),
+                )
+            }
+            3 -> FootballPeek(state)
+            4 -> newestMovie?.let { movie ->
+                PeekCard(
+                    label = "NYTT I FILMER",
+                    accent = MenuAccents.movies,
+                    title = state.titleOf(movie),
+                    line = listOfNotNull(movie.year?.toString(), movie.group.takeIf { it.isNotBlank() }).joinToString(" · "),
+                    image = movie.poster,
+                    poster = true,
+                )
+            }
+            5 -> newestSeries?.let { series ->
+                PeekCard(
+                    label = "NYTT I SERIER",
+                    accent = MenuAccents.series,
+                    title = state.titleOf(series),
+                    line = listOfNotNull(series.year, series.genre?.takeIf { it.isNotBlank() }).joinToString(" · "),
+                    image = series.cover,
+                    poster = true,
+                )
+            }
+            7 -> history.firstOrNull()?.let { entry ->
+                PeekCard(
+                    label = "SÅG SIST",
+                    accent = MenuAccents.history,
+                    title = entry.title,
+                    line = entry.subtitle,
+                    image = entry.image,
+                    poster = entry.kind != WatchKind.LIVE,
+                    progress = entry.progress.takeIf { entry.kind != WatchKind.LIVE && it > 0f },
+                )
+            }
+            else -> Spacer(Modifier.height(0.dp))
+        }
+    }
+}
+
+/** Glimtens kort: en liten bild, en rubrik i delens färg, titeln och en rad till. */
+@Composable
+internal fun PeekCard(
+    label: String,
+    accent: Color,
+    title: String,
+    line: String?,
+    image: String?,
+    poster: Boolean,
+    progress: Float? = null,
+) {
+    val palette = LocalPalette.current
+    val shape = RoundedCornerShape(16.dp)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Brush.horizontalGradient(listOf(accent.copy(alpha = 0.16f), Color.White.copy(alpha = 0.04f))))
+            .border(1.dp, accent.copy(alpha = 0.22f), shape)
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (image != null) {
+            val imageShape = RoundedCornerShape(8.dp)
+            Box(
+                Modifier
+                    .size(width = if (poster) 52.dp else 84.dp, height = if (poster) 78.dp else 48.dp)
+                    .clip(imageShape)
+                    .background(Color.White.copy(alpha = 0.06f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                RemoteImage(
+                    url = image,
+                    modifier = Modifier.matchParentSize(),
+                    maxSide = 240,
+                    contentScale = if (poster) ContentScale.Crop else ContentScale.Fit,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black, letterSpacing = 1.2.sp),
+                color = accent,
+                maxLines = 1,
+            )
+            Text(
+                title,
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                color = palette.textPrimary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            line?.takeIf { it.isNotBlank() }?.let {
+                Text(it, style = MaterialTheme.typography.labelMedium, color = palette.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (progress != null) {
+                Box(Modifier.padding(top = 3.dp).fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.14f))) {
+                    Box(Modifier.fillMaxHeight().fillMaxWidth(progress.coerceIn(0f, 1f)).background(accent))
+                }
+            }
+        }
+    }
+}

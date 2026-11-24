@@ -3247,7 +3247,7 @@ private fun NoticeCard(notice: AppState.MatchNotice) {
     LaunchedEffect(notice) { if (goal) flash.animateTo(0f, tween(1_100, easing = FastOutSlowInEasing)) }
     Box(
         Modifier
-            .width(560.dp)
+            .width(600.dp)
             .shadow(32.dp, shape)
             .clip(shape)
             .background(Brush.linearGradient(colors, start = Offset.Zero, end = Offset(900f, 600f)))
@@ -3363,6 +3363,83 @@ private fun NoticeCard(notice: AppState.MatchNotice) {
                     .matchParentSize()
                     .graphicsLayer { alpha = flash.value * 0.55f }
                     .background(Color.White),
+            )
+        }
+    }
+}
+
+// --- Tv-menyn: glimten vid Fotboll ------------------------------------------------------
+
+/**
+ * Tv-menyn, vid Fotboll: Malmö FF:s match som pågår med ställningen, annars
+ * nästa match med tiden och nedräkningen — lagen med sina märken.
+ */
+@Composable
+internal fun FootballPeek(state: AppState) {
+    val match = remember(state.footballMatches) {
+        state.footballMatches.firstOrNull { it.isMalmoFF() && it.state == MatchState.LIVE }
+            ?: state.footballMatches.firstOrNull { it.isMalmoFF() && it.state == MatchState.UPCOMING }
+    } ?: return
+    val live = match.state == MatchState.LIVE
+    val shape = RoundedCornerShape(16.dp)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Brush.horizontalGradient(listOf(MFF_SKY.copy(alpha = 0.22f), Color.White.copy(alpha = 0.04f))))
+            .border(1.dp, MFF_SKY.copy(alpha = 0.30f), shape)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (live) {
+                LiveDot()
+                Spacer(Modifier.width(6.dp))
+            }
+            Text(
+                if (live) "MALMÖ FF · ${match.status}" else "MALMÖ FF · NÄSTA MATCH",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black, letterSpacing = 1.2.sp),
+                color = if (live) LIVE_SOFT else MFF_SKY,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TeamLogo(match.home, 30.dp)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                match.home.short,
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                if (live) "${match.homeScore ?: 0}–${match.awayScore ?: 0}" else clockOf(match.kickoff),
+                style = scoreStyle(20.sp),
+                color = Color.White,
+                maxLines = 1,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            )
+            Text(
+                match.away.short,
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.End,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            TeamLogo(match.away, 30.dp)
+        }
+        if (!live) {
+            Text(
+                spotDay(match.kickoff, state.clock) + "  ·  " + spotCountdown(match.kickoff, state.clock),
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White.copy(alpha = 0.72f),
+                maxLines = 1,
             )
         }
     }

@@ -321,6 +321,13 @@ private fun scenes(state: AppState, data: PreviewData): List<Scene> {
             content = app,
         ),
         Scene(
+            "meny-fotboll",
+            before = screen(Screen.FOOTBALL),
+            after = { TvNav.openMenu() },
+            settleMs = 3_500L,
+            content = app,
+        ),
+        Scene(
             "notis-mal",
             before = {
                 screen(Screen.HOME)()
