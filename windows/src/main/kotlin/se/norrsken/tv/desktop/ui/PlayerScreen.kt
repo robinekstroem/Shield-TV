@@ -8,6 +8,16 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.ui.graphics.vector.ImageVector
+import se.norrsken.tv.desktop.data.LiveChannel
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.onKeyEvent
@@ -60,6 +70,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -133,6 +144,13 @@ fun PlayerScreen(state: AppState, collapse: Float = 0f, highlighted: Boolean = f
     val mini = collapse > 0.5f
     val hoverSource = remember { MutableInteractionSource() }
     val hovered by hoverSource.collectIsHoveredAsState()
+
+    // Tv: felrutan försvann (kanalen kom igång efter Försök igen): markeringen
+    // tillbaka till bilden, i stället för ingenstans.
+    if (tvLayout && !mini) {
+        val hasProblem = problem != null
+        LaunchedEffect(hasProblem) { if (!hasProblem) state.focusPlayer() }
+    }
 
     // Tv: spelarens knappar och vart pilarna går mellan dem.
     val keys = remember { PlayerKeys() }
@@ -218,23 +236,54 @@ fun PlayerScreen(state: AppState, collapse: Float = 0f, highlighted: Boolean = f
         }
 
         AnimatedVisibility(
-            visible = controlsVisible && !mini,
-            enter = fadeIn(),
-            exit = fadeOut(),
+            // Tv: kanallistan ligger över bilden; då går knapparna undan.
+            visible = controlsVisible && !mini && !(tvLayout && state.channelListOpen),
+            enter = fadeIn(tween(CONTROLS_IN_MS)),
+            exit = fadeOut(tween(CONTROLS_OUT_MS)),
             // Kontrollerna tonar bort redan i början av krympningen.
             modifier = Modifier.fillMaxSize().graphicsLayer { alpha = (1f - collapse * 3f).coerceIn(0f, 1f) },
         ) {
             Box(Modifier.fillMaxSize()) {
-                TopBar(state, playing, status, now, keys, Modifier.align(Alignment.TopCenter))
-                BottomBar(state, playing, status, keys, Modifier.align(Alignment.BottomCenter))
+                if (tvLayout) {
+                    TvTopBar(state, playing, status, now, Modifier.align(Alignment.TopCenter))
+                    TvBottomBar(state, playing, status, keys, Modifier.align(Alignment.BottomCenter))
+                } else {
+                    TopBar(state, playing, status, now, keys, Modifier.align(Alignment.TopCenter))
+                    BottomBar(state, playing, status, keys, Modifier.align(Alignment.BottomCenter))
+                }
             }
         }
 
+        // Tv: kanalrutan nederst när en kanal startar eller byts med pil upp och ner.
+        if (tvLayout && playing.live && !mini) {
+            val zapping = state.zapTarget
+            val banner = problem == null && !controlsVisible && !state.trackPanelOpen && !state.channelListOpen &&
+                (zapping != null || now - state.zapShownAt < ZAP_BANNER_MS)
+            AnimatedVisibility(
+                visible = banner,
+                enter = fadeIn(tween(CONTROLS_IN_MS)) + slideInVertically(tween(260)) { it / 4 },
+                exit = fadeOut(tween(CONTROLS_OUT_MS)),
+                modifier = Modifier.align(Alignment.BottomStart),
+            ) {
+                val channel = zapping ?: playing.channel
+                if (channel != null) ZapBanner(state, channel, now, pending = zapping != null)
+            }
+        }
+
+        // Tv: tidslinjen och knapparna nederst är högre än på datorn.
+        val timeline = !playing.live && status.lengthMs > 0L
         if (state.trackPanelOpen && !mini) {
             TracksPanel(
                 state = state,
                 status = status,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = 104.dp),
+                modifier = Modifier.align(Alignment.BottomEnd).padding(
+                    end = if (tvLayout) TV_EDGE else 20.dp,
+                    bottom = when {
+                        !tvLayout -> 104.dp
+                        timeline -> 182.dp
+                        else -> 118.dp
+                    },
+                ),
             )
         }
 
@@ -244,6 +293,11 @@ fun PlayerScreen(state: AppState, collapse: Float = 0f, highlighted: Boolean = f
                 state = state,
                 status = status,
                 lifted = controlsVisible,
+                liftedBottom = when {
+                    !tvLayout -> 128.dp
+                    timeline -> 236.dp
+                    else -> 172.dp
+                },
                 modifier = Modifier.align(Alignment.BottomEnd),
             )
         }
@@ -340,6 +394,9 @@ private class PlayerKeys {
     val play = FocusRequester()
     val third = FocusRequester()
     val tracks = FocusRequester()
+    /** Tv: tidslinjen i en film, och kanallistan i direktsänt. */
+    val timeline = FocusRequester()
+    val channels = FocusRequester()
 }
 
 /** En av spelarens knappar ([self]), med grannarna åt varje håll. Saknas en granne stannar markeringen. */
@@ -384,7 +441,7 @@ private fun BottomBar(state: AppState, playing: NowPlaying, status: VideoPlayer.
         if (!playing.live && status.lengthMs > 0) {
             // Tv: tidslinjen visar bara var man är. Man spolar med pil vänster och
             // höger på bilden, eller knapparna — ett reglage fångar markeringen.
-            if (tvLayout) TvTimeline(status) else SeekBar(status, onSeek = { fraction -> state.seekTo(fraction) })
+            SeekBar(status, onSeek = { fraction -> state.seekTo(fraction) })
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             val playPause = if (paused) Glyphs.Play else Glyphs.Pause
@@ -566,23 +623,6 @@ private fun TrackList(
     }
 }
 
-/** Tv: var i filmen man är, som en tunn linje utan reglage. */
-@Composable
-private fun TvTimeline(status: VideoPlayer.Status) {
-    val palette = LocalPalette.current
-    val position = (status.timeMs.toFloat() / status.lengthMs).coerceIn(0f, 1f)
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(start = 6.dp, end = 6.dp, top = 12.dp, bottom = 16.dp)
-            .height(5.dp)
-            .clip(RoundedCornerShape(3.dp))
-            .background(palette.focus.copy(alpha = 0.22f)),
-    ) {
-        Box(Modifier.fillMaxHeight().fillMaxWidth(position).background(palette.focus))
-    }
-}
-
 @Composable
 private fun SeekBar(status: VideoPlayer.Status, onSeek: (Float) -> Unit) {
     var dragging by remember { mutableStateOf<Float?>(null) }
@@ -682,7 +722,8 @@ private fun ProblemPanel(
         val target = if (first) Modifier.focusRequester(focus) else Modifier
         if (!tvLayout) return target
         return target.focusProperties {
-            up = keys.minimize
+            // Tv: knapparna står i en rad nederst; uppåt finns inget.
+            up = FocusRequester.Cancel
             down = keys.play
             if (first) left = FocusRequester.Cancel
             if (last) right = FocusRequester.Cancel
@@ -748,9 +789,11 @@ fun PlayerHost(state: AppState, collapse: () -> Float) {
     val requester = remember { FocusRequester() }
     if (tvLayout) {
         LaunchedEffect(state.nowPlaying, state.miniPlayer, state.trackPanelOpen, state.playerFocusTick) {
+            // Byts kanalen medan man står på spelarens knappar (Nästa kanal) stannar
+            // markeringen där; den hoppar bara till bilden när den inte redan är i spelaren.
             if (!state.miniPlayer && !state.trackPanelOpen) {
                 withFrameNanos { }
-                runCatching { requester.requestFocus() }
+                if (!state.playerControlsFocused) runCatching { requester.requestFocus() }
             }
         }
         // Den lilla bilden i hörnet ska få markeringen (pil höger eller ner förbi innehållets kant).
@@ -1127,3 +1170,498 @@ private fun remainingText(ms: Long): String {
         else -> "$hours tim $rest min kvar"
     }
 }
+
+// --- Tv: spelarens kontroller ------------------------------------------------------
+
+/** Tv: knapparna tonar fram fort och bort lite långsammare. */
+private const val CONTROLS_IN_MS = 160
+private const val CONTROLS_OUT_MS = 280
+
+/** Tv: så länge kanalrutan står kvar efter att kanalen startat. */
+private const val ZAP_BANNER_MS = 4_000L
+
+/** Tv: luften vid bildens kanter, innanför det tv:n kan skära bort. */
+private val TV_EDGE = 56.dp
+
+/** Mörk text på det vita: markerad knapp, bubblan över tidslinjen. */
+private val PLAYER_INK = Color(0xFF0B0D12)
+
+/**
+ * Tv: överst vad som spelas — kanalen med programmet som sänds och vad som
+ * kommer sedan, eller filmens titel och avsnittet — och klockan, med när
+ * filmen slutar. Under ett kanalbyte: kanalen man är på väg till.
+ */
+@Composable
+private fun TvTopBar(state: AppState, playing: NowPlaying, status: VideoPlayer.Status, now: Long, modifier: Modifier) {
+    val accent = menuFill(LocalPalette.current)
+    val channel = state.zapTarget ?: playing.channel
+    Row(
+        modifier
+            .fillMaxWidth()
+            .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.82f), Color.Black.copy(alpha = 0.32f), Color.Transparent)))
+            .padding(start = TV_EDGE, end = TV_EDGE, top = 30.dp, bottom = 56.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (playing.live) LiveBadge()
+                Text(
+                    channel?.name ?: playing.title,
+                    style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                qualityLabel(status.videoHeight)?.let { QualityBadge(it) }
+            }
+            val onAir = channel?.let { state.guide.current(it, now) }
+            if (playing.live && channel != null && onAir != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text(
+                        clockText(onAir.start) + "–" + clockText(onAir.stop),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White.copy(alpha = 0.7f),
+                        maxLines = 1,
+                    )
+                    Text(
+                        onAir.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    ProgressPill(onAir.progress(now), accent, Modifier.width(140.dp))
+                    Text(timeLeft(onAir, now), style = MaterialTheme.typography.labelLarge, color = Color.White.copy(alpha = 0.7f), maxLines = 1)
+                }
+                state.guide.next(channel, now)?.let { next ->
+                    Text(
+                        "Sedan " + clockText(next.start) + "  " + next.title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = Color.White.copy(alpha = 0.62f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            } else if (!playing.live) {
+                playing.subtitle?.takeIf { it.isNotBlank() }?.let {
+                    Text(it, style = MaterialTheme.typography.titleMedium, color = Color.White.copy(alpha = 0.75f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        Spacer(Modifier.width(24.dp))
+        // Ritas om varannan halvsekund eftersom `now` ändras — klockan följer med.
+        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(LocalTime.now().format(clockFormat), style = MaterialTheme.typography.headlineSmall, color = Color.White, maxLines = 1)
+            if (!playing.live && status.lengthMs > 0L) {
+                val left = (status.lengthMs - status.timeMs).coerceAtLeast(0L)
+                Text(
+                    "Slutar " + LocalTime.now().plusSeconds(left / 1000L).format(clockFormat),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color.White.copy(alpha = 0.7f),
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Tv: nederst tidslinjen (i en film) och spelarens knappar i en rad. Den
+ * markerade knappen blir vit och lite större, med namnet under, så att det
+ * syns från soffan var man är.
+ */
+@Composable
+private fun TvBottomBar(state: AppState, playing: NowPlaying, status: VideoPlayer.Status, keys: PlayerKeys, modifier: Modifier) {
+    val paused = status.phase == Phase.PAUSED
+    val timeline = !playing.live && status.lengthMs > 0L
+    // Pil upp eller ner i en film tar fram knapparna med markeringen på tidslinjen,
+    // där pil vänster och höger spolar som förut; pil höger i direktsänt på Spela/Paus.
+    LaunchedEffect(state.controlsFocusTick) {
+        if (state.takeControlsFocus()) {
+            repeat(2) { withFrameNanos { } }
+            runCatching { (if (timeline) keys.timeline else keys.play).requestFocus() }
+        }
+    }
+    Column(
+        modifier
+            .fillMaxWidth()
+            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.5f), Color.Black.copy(alpha = 0.86f))))
+            .padding(start = TV_EDGE, end = TV_EDGE, top = 56.dp, bottom = 16.dp),
+    ) {
+        if (timeline) {
+            TvTimeline(state, status, keys)
+            Spacer(Modifier.height(12.dp))
+        }
+        Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val up = if (timeline) keys.timeline else null
+            val playPause = if (paused) Glyphs.Play else Glyphs.Pause
+            val playLabel = if (paused) "Spela" else "Paus"
+            if (playing.live) {
+                TvPlayerButton(
+                    Glyphs.SkipPrevious, "Föregående kanal",
+                    onClick = { state.zap(-1, keepControls = true) },
+                    modifier = Modifier.playerKey(keys.first, toUp = up, toRight = keys.play),
+                )
+                TvPlayerButton(
+                    playPause, playLabel, big = true,
+                    onClick = { state.togglePause() },
+                    modifier = Modifier.playerKey(keys.play, toUp = up, toLeft = keys.first, toRight = keys.third),
+                )
+                TvPlayerButton(
+                    Glyphs.SkipNext, "Nästa kanal",
+                    onClick = { state.zap(1, keepControls = true) },
+                    modifier = Modifier.playerKey(keys.third, toUp = up, toLeft = keys.play, toRight = keys.channels),
+                )
+                TvPlayerButton(
+                    Glyphs.Live, "Kanaler",
+                    onClick = { state.openChannelList() },
+                    modifier = Modifier.playerKey(keys.channels, toUp = up, toLeft = keys.third, toRight = keys.tracks),
+                )
+            } else {
+                TvPlayerButton(
+                    Glyphs.Replay10, "10 s bakåt",
+                    onClick = { state.scrub(-1) },
+                    modifier = Modifier.playerKey(keys.first, toUp = up, toRight = keys.play),
+                )
+                TvPlayerButton(
+                    playPause, playLabel, big = true,
+                    onClick = { if (!state.commitScrub()) state.togglePause() },
+                    modifier = Modifier.playerKey(keys.play, toUp = up, toLeft = keys.first, toRight = keys.third),
+                )
+                TvPlayerButton(
+                    Glyphs.Forward10, "10 s framåt",
+                    onClick = { state.scrub(1) },
+                    modifier = Modifier.playerKey(keys.third, toUp = up, toLeft = keys.play, toRight = keys.tracks),
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            TvPlayerButton(
+                Glyphs.Subtitles, "Ljud och undertext",
+                active = state.trackPanelOpen,
+                onClick = { state.trackPanelOpen = !state.trackPanelOpen },
+                modifier = Modifier.playerKey(
+                    keys.tracks,
+                    toUp = up,
+                    toLeft = if (playing.live) keys.channels else keys.third,
+                    toRight = keys.minimize,
+                ),
+            )
+            TvPlayerButton(
+                Glyphs.ChevronDown, "Minimera",
+                onClick = {
+                    state.minimizePlayer()
+                    TvNav.restoreFocus()
+                },
+                modifier = Modifier.playerKey(keys.minimize, toUp = up, toLeft = keys.tracks, toRight = keys.close),
+            )
+            TvPlayerButton(
+                Glyphs.Close, "Stäng",
+                onClick = {
+                    state.closePlayer()
+                    TvNav.restoreFocus()
+                },
+                modifier = Modifier.playerKey(keys.close, toUp = up, toLeft = keys.minimize),
+            )
+        }
+    }
+}
+
+/**
+ * Tv: tidslinjen i en film. Markerad blir den tjockare och får en tumme;
+ * där spolar pil vänster och höger (se MainActivity) och OK pausar. Under
+ * spolningen står målets tid i en bubbla över tummen, med hur långt hoppet
+ * blir, och sträckan dit lyser.
+ */
+@Composable
+@OptIn(ExperimentalComposeUiApi::class)
+private fun TvTimeline(state: AppState, status: VideoPlayer.Status, keys: PlayerKeys) {
+    val accent = menuFill(LocalPalette.current)
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val length = status.lengthMs.coerceAtLeast(1L)
+    val target = state.scrubTarget
+    val shown = if (target >= 0L) target else status.timeMs
+    val position = (shown.toFloat() / length).coerceIn(0f, 1f)
+    val played = (status.timeMs.toFloat() / length).coerceIn(0f, 1f)
+    val lit = focused || target >= 0L
+    val thickness by animateDpAsState(if (lit) 8.dp else 5.dp, tween(160), label = "tidslinje")
+    // Tonar knapparna bort medan tidslinjen är markerad gäller pilarna bilden igen.
+    DisposableEffect(Unit) { onDispose { state.playerTimelineFocused = false } }
+    Column(Modifier.fillMaxWidth()) {
+        BoxWithConstraints(
+            Modifier
+                .fillMaxWidth()
+                .height(22.dp)
+                .focusRequester(keys.timeline)
+                .focusProperties {
+                    up = FocusRequester.Cancel
+                    down = keys.play
+                    left = FocusRequester.Cancel
+                    right = FocusRequester.Cancel
+                }
+                .onFocusChanged { state.playerTimelineFocused = it.isFocused }
+                .focusable(interactionSource = interaction),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            val track = RoundedCornerShape(50)
+            val width = maxWidth
+            Box(Modifier.fillMaxWidth().height(thickness).clip(track).background(Color.White.copy(alpha = 0.24f)))
+            Box(Modifier.fillMaxWidth(played).height(thickness).clip(track).background(accent))
+            if (target >= 0L) {
+                // Sträckan bilden hoppar, fram eller tillbaka.
+                val from = min(played, position)
+                val to = max(played, position)
+                Box(
+                    Modifier
+                        .offset(x = width * from)
+                        .width(width * (to - from))
+                        .height(thickness)
+                        .clip(track)
+                        .background(Color.White.copy(alpha = 0.6f)),
+                )
+            }
+            if (lit) {
+                val thumb = 20.dp
+                Box(
+                    Modifier
+                        .offset(x = (width * position - thumb / 2).coerceIn(0.dp, (width - thumb).coerceAtLeast(0.dp)))
+                        .size(thumb)
+                        .shadow(6.dp, CircleShape)
+                        .clip(CircleShape)
+                        .background(Color.White),
+                )
+            }
+            if (target >= 0L) {
+                // Bubblan över tummen: vart bilden hoppar, och hur långt. Den tar ingen plats.
+                val bubble = 172.dp
+                val origin = state.scrubOrigin
+                Column(
+                    Modifier
+                        .align(Alignment.TopStart)
+                        .offset(
+                            x = (width * position - bubble / 2).coerceIn(0.dp, (width - bubble).coerceAtLeast(0.dp)),
+                            y = (-64).dp,
+                        )
+                        .width(bubble)
+                        .shadow(10.dp, RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.White)
+                        .padding(vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        formatTime(target),
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = PLAYER_INK,
+                        maxLines = 1,
+                    )
+                    if (origin >= 0L) {
+                        Text(signedTime(target - origin), style = MaterialTheme.typography.labelLarge, color = PLAYER_INK.copy(alpha = 0.65f), maxLines = 1)
+                    }
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+            Text(formatTime(shown), style = MaterialTheme.typography.titleSmall, color = Color.White, maxLines = 1)
+            Spacer(Modifier.weight(1f))
+            Text(
+                "−" + formatTime((length - shown).coerceAtLeast(0L)),
+                style = MaterialTheme.typography.titleSmall,
+                color = Color.White.copy(alpha = 0.7f),
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+/**
+ * Tv: en av spelarens knappar. Rund och dämpad; markerad blir den vit med
+ * mörk symbol och lite större, och namnet står under. [active]: det knappen
+ * öppnar är öppet.
+ */
+@Composable
+private fun TvPlayerButton(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    big: Boolean = false,
+    active: Boolean = false,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val scale by animateFloatAsState(if (focused) 1.1f else 1f, tween(140), label = "spelarknapp")
+    val side = if (big) 60.dp else 50.dp
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            modifier
+                .size(side)
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                }
+                .clip(CircleShape)
+                .background(
+                    when {
+                        focused -> Color.White
+                        active -> Color.White.copy(alpha = 0.32f)
+                        else -> Color.White.copy(alpha = 0.14f)
+                    },
+                )
+                .clickable(interactionSource = interaction, indication = null, onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                icon,
+                contentDescription = label,
+                tint = if (focused) PLAYER_INK else Color.White,
+                modifier = Modifier.size(if (big) 32.dp else 26.dp),
+            )
+        }
+        // Namnet under den markerade knappen. Raden har alltid plats för det, så att inget hoppar.
+        Box(Modifier.width(side).height(26.dp), contentAlignment = Alignment.BottomCenter) {
+            if (focused) {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color.White,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.wrapContentWidth(unbounded = true),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Tv: kanalrutan nederst — numret, loggan och namnet, vad som sänds nu och
+ * hur långt det kommit, och vad som kommer sedan. Under ett kanalbyte visar
+ * den kanalen man är på väg till ([pending]), med en liten snurra.
+ */
+@Composable
+private fun ZapBanner(state: AppState, channel: LiveChannel, now: Long, pending: Boolean) {
+    val accent = menuFill(LocalPalette.current)
+    val onAir = state.guide.current(channel, now)
+    val next = state.guide.next(channel, now)
+    val shape = RoundedCornerShape(22.dp)
+    Row(
+        Modifier
+            .padding(start = TV_EDGE, end = TV_EDGE, bottom = 40.dp)
+            .widthIn(min = 620.dp, max = 1040.dp)
+            .shadow(24.dp, shape)
+            .clip(shape)
+            .background(Color(0xF20B0D12))
+            .border(1.dp, Color.White.copy(alpha = 0.10f), shape)
+            .padding(start = 20.dp, end = 26.dp, top = 16.dp, bottom = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        channel.number?.let { number ->
+            Text(
+                number.toString(),
+                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                color = Color.White.copy(alpha = 0.55f),
+                maxLines = 1,
+                modifier = Modifier.widthIn(min = 48.dp),
+            )
+            Spacer(Modifier.width(12.dp))
+        }
+        Box(
+            Modifier.size(width = 124.dp, height = 70.dp).clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.06f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            ChannelLogo(channel.logo, channel.name, width = 112.dp, height = 62.dp, initialsStyle = MaterialTheme.typography.titleLarge)
+        }
+        Spacer(Modifier.width(20.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    channel.name,
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (pending) Spinner(size = 18.dp) else LiveBadge()
+            }
+            if (onAir != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        clockText(onAir.start) + "–" + clockText(onAir.stop),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Color.White.copy(alpha = 0.65f),
+                        maxLines = 1,
+                    )
+                    Text(
+                        onAir.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(timeLeft(onAir, now), style = MaterialTheme.typography.labelLarge, color = Color.White.copy(alpha = 0.65f), maxLines = 1)
+                }
+                ProgressPill(onAir.progress(now), accent, Modifier.fillMaxWidth())
+                next?.let {
+                    Text(
+                        "Sedan " + clockText(it.start) + "  " + it.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White.copy(alpha = 0.6f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            } else {
+                Text(
+                    channel.group.takeIf { it.isNotBlank() } ?: "Direktsändning",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.6f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** Tv: LIVE i rött, som på tv-kanalerna. */
+@Composable
+private fun LiveBadge() {
+    Box(Modifier.clip(RoundedCornerShape(6.dp)).background(MINI_LIVE).padding(horizontal = 8.dp, vertical = 2.dp)) {
+        Text(
+            "LIVE",
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Black),
+            color = Color.White,
+            maxLines = 1,
+        )
+    }
+}
+
+/** Tv: bildens kvalitet, inom en tunn ram. */
+@Composable
+private fun QualityBadge(text: String) {
+    val shape = RoundedCornerShape(6.dp)
+    Box(Modifier.border(1.dp, Color.White.copy(alpha = 0.5f), shape).padding(horizontal = 7.dp, vertical = 1.dp)) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+            color = Color.White.copy(alpha = 0.85f),
+            maxLines = 1,
+        )
+    }
+}
+
+/** Hur långt programmet kommit, som en tunn linje. */
+@Composable
+private fun ProgressPill(progress: Float, color: Color, modifier: Modifier) {
+    Box(modifier.height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.18f))) {
+        Box(Modifier.fillMaxHeight().fillMaxWidth(progress.coerceIn(0f, 1f)).background(color))
+    }
+}
+
+/** "+2:30", "−0:40": hur långt spolningen hoppar. */
+private fun signedTime(ms: Long): String = (if (ms < 0L) "−" else "+") + formatTime(abs(ms))

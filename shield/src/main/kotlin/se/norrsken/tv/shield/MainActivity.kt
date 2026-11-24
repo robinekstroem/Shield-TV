@@ -5,6 +5,12 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
@@ -43,10 +49,15 @@ import se.norrsken.tv.desktop.ui.TvTheme
  *
  * I spelaren:
  * - OK eller vänster (live-tv): kanallistan ovanpå bilden. OK (film): paus.
- * - Upp och ner (live-tv), kanal upp och ner: byter kanal.
+ * - Upp och ner (live-tv), kanal upp och ner: byter kanal. Kanalrutan visar
+ *   kanalen direkt; den startar när man slutat trycka, eller med OK.
  * - Höger (live-tv), upp och ner (film): knapparna fram — paus, kanalbyte
- *   eller spolning, ljud och undertext, minimera och stäng.
- * - Vänster och höger (film): spolar tio sekunder; snabbspolning trettio.
+ *   eller spolning, kanallistan, ljud och undertext, minimera och stäng. I
+ *   en film står markeringen först på tidslinjen.
+ * - Vänster och höger (film, och på tidslinjen): spolar tio sekunder,
+ *   snabbspolningen trettio. Hålls knappen nere går det allt fortare. Målet
+ *   syns på tidslinjen, och bilden hoppar dit när man slutat trycka, eller
+ *   med OK.
  * - Play/paus: paus. I minispelaren: tillbaka till helskärm.
  * - ≡: ljud och undertext, och stänger panelen igen.
  *
@@ -55,16 +66,14 @@ import se.norrsken.tv.desktop.ui.TvTheme
  * förbi innehållets kant markerar den; då förstorar OK den och Tillbaka
  * stänger den. I Fotboll kan en match som pågår visas där utan ljud.
  *
- * Tillbaka, ett steg i taget: listan eller panelen i spelaren, knapparna,
+ * Tillbaka, ett steg i taget: listan eller panelen i spelaren, en spolning
+ * eller ett kanalbyte som inte hunnit ske (bilden stannar där den var), knapparna,
  * bilden krymper till hörnet (den lilla bilden stängs när den är markerad),
  * kategorierna, film-, serie- och matchsidan, och sist menyn. I menyn leder
  * Tillbaka till startsidan; där stängs först den lilla bilden, sedan appen.
  */
 class MainActivity : ComponentActivity() {
     private lateinit var state: AppState
-
-    /** Kanallistan ovanpå bilden. */
-    private var channelsOpen by mutableStateOf(false)
 
     /** Felet från förra gången, visas före allt annat. */
     private var crashReport by mutableStateOf<String?>(null)
@@ -127,9 +136,14 @@ class MainActivity : ComponentActivity() {
                         ) {
                             AppRoot(state)
                             val playing = state.nowPlaying
-                            if (channelsOpen && playing != null && playing.live && !state.miniPlayer) {
+                            // Kanallistan glider in från vänster, ovanpå bilden.
+                            AnimatedVisibility(
+                                visible = state.channelListOpen && playing != null && playing.live && !state.miniPlayer,
+                                enter = fadeIn(tween(160)) + slideInHorizontally(tween(220)) { -it / 5 },
+                                exit = fadeOut(tween(180)) + slideOutHorizontally(tween(220)) { -it / 5 },
+                            ) {
                                 ChannelOverlay(state, onClose = {
-                                    channelsOpen = false
+                                    state.channelListOpen = false
                                     state.focusPlayer()
                                 })
                             }
@@ -154,11 +168,13 @@ class MainActivity : ComponentActivity() {
             }
             val playing = state.nowPlaying
             when {
-                channelsOpen -> {
-                    channelsOpen = false
+                state.channelListOpen -> {
+                    state.channelListOpen = false
                     state.focusPlayer()
                 }
                 state.trackPanelOpen -> state.trackPanelOpen = false
+                // En spolning eller ett kanalbyte som inte hunnit ske: bilden stannar där den var.
+                playing != null && !state.miniPlayer && (state.cancelScrub() || state.cancelZap()) -> Unit
                 // Rutan Nästa avsnitt: Tillbaka betyder "titta klart".
                 playing != null && !state.miniPlayer && state.dismissPlayerPrompt() -> Unit
                 // Knapparna i spelaren: tillbaka till bilden först.
@@ -263,7 +279,8 @@ class MainActivity : ComponentActivity() {
         }
 
         // ≡ öppnar panelen för ljud och undertext, och stänger den igen.
-        if (event.key == Key.Menu && !channelsOpen) {
+        if (event.key == Key.Menu && !state.channelListOpen) {
+            state.commitZap()
             state.trackPanelOpen = !state.trackPanelOpen
             if (!state.trackPanelOpen) state.focusPlayer()
             state.touchPlayer(force = true)
@@ -271,42 +288,87 @@ class MainActivity : ComponentActivity() {
         }
 
         // Kanallistan och panelen för ljud och undertext styrs med pilarna som resten av appen.
-        if (channelsOpen || state.trackPanelOpen) return false
+        if (state.channelListOpen || state.trackPanelOpen) return false
+
+        val live = playing.live
+        // Knappen hålls nere: spolningen går allt fortare.
+        val held = event.nativeKeyEvent.repeatCount > 0
+        val ok = event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.NumPadEnter
+
+        if (live) {
+            // Pil upp och ner byter alltid kanal — också från knapparna och felrutan.
+            when (event.key) {
+                Key.DirectionUp, Key.ChannelUp, Key.MediaRewind -> {
+                    state.zap(-1)
+                    return true
+                }
+                Key.DirectionDown, Key.ChannelDown, Key.MediaFastForward -> {
+                    state.zap(1)
+                    return true
+                }
+            }
+            // Ett kanalbyte med pilarna på gång: det görs nu, och OK gör inget mer.
+            // Från spelarens knappar (Nästa kanal) väntar bytet, så att OK kan trycka igen.
+            if (!state.playerControlsFocused && state.commitZap() && ok) return true
+        }
+
+        // Tidslinjen i en film: pil vänster och höger spolar, OK pausar — eller
+        // hoppar direkt dit spolningen kommit. Upp och ner flyttar markeringen.
+        if (!live && state.playerTimelineFocused) {
+            state.touchPlayer(force = true)
+            when {
+                event.key == Key.DirectionLeft -> state.scrub(-1, held)
+                event.key == Key.DirectionRight -> state.scrub(1, held)
+                event.key == Key.MediaRewind -> state.scrub(-1, held, big = true)
+                event.key == Key.MediaFastForward -> state.scrub(1, held, big = true)
+                ok || event.key == Key.MediaPlayPause || event.key == Key.MediaPlay || event.key == Key.MediaPause ->
+                    if (!state.commitScrub()) state.togglePause()
+                else -> return false
+            }
+            return true
+        }
 
         // Spelarens knappar har markeringen: pilarna flyttar mellan dem och OK
         // trycker på den man står på. Knapparna står kvar så länge man använder dem.
         if (state.playerControlsFocused) {
             state.touchPlayer(force = true)
-            if (event.key == Key.MediaPlayPause || event.key == Key.MediaPlay || event.key == Key.MediaPause) {
-                state.togglePause()
-                return true
+            when (event.key) {
+                Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> state.togglePause()
+                Key.MediaRewind -> state.scrub(-1, held, big = true)
+                Key.MediaFastForward -> state.scrub(1, held, big = true)
+                else -> return false
             }
-            return false
+            return true
         }
 
-        val live = playing.live
         when (event.key) {
             Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                // En spolning på gång: OK hoppar dit direkt.
+                if (state.commitScrub()) return true
                 // Hoppa över intro eller Nästa avsnitt syns: OK väljer den.
                 if (state.acceptPlayerPrompt()) return true
-                if (live) channelsOpen = true else state.togglePause()
-                state.touchPlayer(force = true)
+                if (live) {
+                    state.openChannelList()
+                } else {
+                    state.togglePause()
+                    state.touchPlayer(force = true)
+                }
                 return true
             }
-            Key.DirectionLeft -> if (live) {
-                channelsOpen = true
+            Key.DirectionLeft -> {
+                if (live) state.openChannelList() else state.scrub(-1, held)
                 return true
             }
-            // Pil höger i direktsänt: knapparna fram (paus, ljud och undertext, minimera,
-            // stäng), med markeringen på Spela/Paus. Utan play- och menyknappar på
-            // fjärrkontrollen är det vägen dit.
-            Key.DirectionRight -> if (live) {
-                state.focusPlayerControls()
+            // Pil höger i direktsänt: knapparna fram (paus, kanalbyte, kanallistan, ljud och
+            // undertext, minimera, stäng), med markeringen på Spela/Paus. Utan play- och
+            // menyknappar på fjärrkontrollen är det vägen dit. I en film: spola framåt.
+            Key.DirectionRight -> {
+                if (live) state.focusPlayerControls() else state.scrub(1, held)
                 return true
             }
-            // Pil upp eller ner i en film: knapparna fram, med markeringen på Spela/Paus.
-            // (Ljudet sköts med tv:ns egen fjärrkontroll.) I direktsänt byter de kanal.
-            Key.DirectionUp, Key.DirectionDown -> if (!live) {
+            // Pil upp eller ner i en film: knapparna fram, med markeringen på tidslinjen.
+            // (Ljudet sköts med tv:ns egen fjärrkontroll.)
+            Key.DirectionUp, Key.DirectionDown -> {
                 state.focusPlayerControls()
                 return true
             }
@@ -315,22 +377,12 @@ class MainActivity : ComponentActivity() {
                 state.touchPlayer(force = true)
                 return true
             }
-            Key.ChannelUp -> {
-                state.switchChannel(-1)
-                return true
-            }
-            Key.ChannelDown -> {
-                state.switchChannel(1)
-                return true
-            }
             Key.MediaFastForward -> {
-                if (live) state.switchChannel(1) else state.seekBy(30_000)
-                state.touchPlayer(force = true)
+                state.scrub(1, held, big = true)
                 return true
             }
             Key.MediaRewind -> {
-                if (live) state.switchChannel(-1) else state.seekBy(-30_000)
-                state.touchPlayer(force = true)
+                state.scrub(-1, held, big = true)
                 return true
             }
         }

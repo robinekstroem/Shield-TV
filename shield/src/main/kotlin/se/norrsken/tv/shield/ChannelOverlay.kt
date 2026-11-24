@@ -35,6 +35,11 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import se.norrsken.tv.desktop.AppState
@@ -46,9 +51,9 @@ import se.norrsken.tv.desktop.ui.tvEdges
 
 /**
  * Kanallistan ovanpå bilden, som på en tv-box: OK eller vänster medan man
- * tittar tar fram den, pilarna bläddrar, OK byter kanal och Tillbaka
- * stänger. Visar kanalerna i samma lista som kanalen man tittar på, med vad
- * som sänds nu.
+ * tittar tar fram den, pilarna bläddrar, OK byter kanal, och Tillbaka eller
+ * pil höger stänger. Visar kanalerna i samma lista som kanalen man tittar
+ * på, med vad som sänds nu.
  */
 @Composable
 fun ChannelOverlay(state: AppState, onClose: () -> Unit) {
@@ -70,6 +75,15 @@ fun ChannelOverlay(state: AppState, onClose: () -> Unit) {
             Modifier
                 .fillMaxHeight()
                 .width(460.dp)
+                // Pil höger skjuter undan listan, tillbaka till bilden.
+                .onKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight) {
+                        onClose()
+                        true
+                    } else {
+                        false
+                    }
+                }
                 .background(
                     Brush.horizontalGradient(
                         listOf(palette.background.copy(alpha = 0.97f), palette.background.copy(alpha = 0.90f)),
@@ -86,7 +100,7 @@ fun ChannelOverlay(state: AppState, onClose: () -> Unit) {
                 modifier = Modifier.padding(horizontal = 24.dp),
             )
             Text(
-                "${channels.size} kanaler  ·  OK byter, Tillbaka stänger",
+                "${channels.size} kanaler  ·  OK byter, pil höger eller Tillbaka stänger",
                 style = MaterialTheme.typography.bodyMedium,
                 color = palette.textTertiary,
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),

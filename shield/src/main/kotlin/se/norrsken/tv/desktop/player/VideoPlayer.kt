@@ -232,14 +232,21 @@ class VideoPlayer(@Suppress("UNUSED_PARAMETER") engine: PlayerEngine) {
     }
 
     fun seekBy(deltaMs: Long) = onMain {
-        exo?.let { if (it.isCurrentMediaItemSeekable) it.seekTo((it.currentPosition + deltaMs).coerceAtLeast(0L)) }
+        exo?.let {
+            if (it.isCurrentMediaItemSeekable) {
+                it.seekTo((it.currentPosition + deltaMs).coerceAtLeast(0L))
+                // Tidslinjen visar den nya platsen direkt, inte den gamla en kvarts sekund till.
+                publish()
+            }
+        }
     }
 
     fun seekTo(fraction: Float) = onMain {
         exo?.let {
             val duration = it.duration
             if (it.isCurrentMediaItemSeekable && duration != C.TIME_UNSET && duration > 0) {
-                it.seekTo((duration * fraction.coerceIn(0f, 1f)).toLong())
+                it.seekTo((duration * fraction.coerceIn(0f, 1f).toDouble()).toLong())
+                publish()
             }
         }
     }

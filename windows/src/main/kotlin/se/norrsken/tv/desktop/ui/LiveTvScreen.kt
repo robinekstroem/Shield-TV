@@ -157,7 +157,13 @@ fun LiveTvScreen(state: AppState) {
                                                 now = guide.current(channel, clock),
                                                 next = guide.next(channel, clock),
                                                 clock = clock,
-                                                onClick = { state.playChannel(channel, channels) },
+                                                onClick = {
+                                                    // Bilden står i den stora rutan: en annan kanal byts där, och
+                                                    // kanalen som redan spelas går till helskärm.
+                                                    val inStage = withStage && state.miniPlayer &&
+                                                        state.nowPlaying?.live == true && state.footballPreview == null
+                                                    state.playChannel(channel, channels, docked = inStage)
+                                                },
                                                 onActive = { if (!tvLayout) activeKey = channel.key },
                                                 modifier = Modifier
                                                     .weight(1f)
@@ -239,8 +245,13 @@ private fun LiveStage(state: AppState, channel: LiveChannel?, modifier: Modifier
         }
         if (tvLayout) {
             Spacer(Modifier.height(16.dp))
+            val docked = state.miniPlayer && state.nowPlaying?.live == true
             Text(
-                "OK tittar  ·  pil höger: favorit  ·  pil vänster: kategorier",
+                if (docked) {
+                    "OK byter kanal i rutan  ·  OK igen eller Play: helskärm"
+                } else {
+                    "OK tittar  ·  pil höger: favorit  ·  pil vänster: kategorier"
+                },
                 style = MaterialTheme.typography.labelMedium,
                 color = palette.textTertiary,
                 maxLines = 1,
@@ -384,7 +395,7 @@ private fun ChannelRow(
 }
 
 /** "32 min kvar", "1 h 5 min kvar". */
-private fun timeLeft(programme: Programme, clock: Long): String {
+internal fun timeLeft(programme: Programme, clock: Long): String {
     val minutes = ((programme.stop - clock) / 60_000L).coerceAtLeast(0L)
     return if (minutes >= 60) "${minutes / 60} h ${minutes % 60} min kvar" else "$minutes min kvar"
 }

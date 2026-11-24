@@ -57,6 +57,8 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.pow
+import se.norrsken.tv.desktop.ui.tvLayout
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -497,6 +499,19 @@ class AppState {
     /** Tv: markeringen står på en av spelarens knappar, inte på bilden. */
     var playerControlsFocused by mutableStateOf(false)
 
+    /** Tv: markeringen står på tidslinjen; där spolar pil vänster och höger. */
+    var playerTimelineFocused by mutableStateOf(false)
+
+    /** Tv: kanallistan ovanpå bilden (OK eller pil vänster i direktsänt). */
+    var channelListOpen by mutableStateOf(false)
+
+    /** Tv: kanallistan fram. Ett kanalbyte på gång görs först, och knapparna går undan. */
+    fun openChannelList() {
+        commitZap()
+        lastActivity = 0L
+        channelListOpen = true
+    }
+
     /** Ökar när spelarens knappar ska få markeringen (pil upp eller ner på tv:n). */
     var controlsFocusTick by mutableStateOf(0)
         private set
@@ -520,6 +535,7 @@ class AppState {
     fun leavePlayerControls(): Boolean {
         if (!playerControlsFocused) return false
         playerControlsFocused = false
+        playerTimelineFocused = false
         playerFocusTick++
         return true
     }
@@ -1595,6 +1611,170 @@ class AppState {
         }
     }
 
+    // --- Tv: spola och byta kanal med fjärren --------------------------------------
+
+    /**
+     * Tv: spolningen samlas ihop. Varje tryck flyttar målet direkt — det syns
+     * på tidslinjen — och bilden hoppar dit först när trycken slutat: ett hopp
+     * i stället för ett per tryck, så att strömmen inte laddar om för var
+     * tionde sekund. -1: ingen spolning på gång.
+     */
+    var scrubTarget by mutableStateOf(-1L)
+        private set
+
+    /** Var bilden var när spolningen började; tidslinjen visar hur långt hoppet blir. */
+    var scrubOrigin by mutableStateOf(-1L)
+        private set
+
+    private var scrubJob: Job? = null
+    private var scrubHeldSince = 0L
+    private var scrubLastPress = 0L
+
+    /** En spolning är på gång. */
+    val scrubbing: Boolean get() = scrubTarget >= 0L
+
+    /**
+     * Tv: pil vänster ([direction] −1) eller höger (1). Ett tryck flyttar tio
+     * sekunder, [big] trettio (snabbspolningsknapparna). Hålls knappen nere
+     * ([held]) går det allt fortare: från tjugo sekunder i sekunden till som
+     * mest hela filmen på en kvarts minut.
+     */
+    fun scrub(direction: Int, held: Boolean = false, big: Boolean = false) {
+        val status = currentStatus() ?: return
+        val length = status.lengthMs
+        if (length <= 0L || !status.seekable) return
+        val now = System.currentTimeMillis()
+        val step = if (held && scrubTarget >= 0L) {
+            if (scrubHeldSince == 0L) scrubHeldSince = now
+            val elapsed = (now - scrubLastPress).coerceIn(16L, 250L)
+            (scrubSpeed(now - scrubHeldSince, length) * elapsed).toLong().coerceAtLeast(1_000L)
+        } else {
+            scrubHeldSince = 0L
+            if (big) 30_000L else 10_000L
+        }
+        scrubLastPress = now
+        if (scrubTarget < 0L) scrubOrigin = status.timeMs
+        val from = if (scrubTarget >= 0L) scrubTarget else status.timeMs
+        // Aldrig ända fram till slutet: då tar filmen slut och spelaren stängs.
+        val last = (length - SCRUB_END_GUARD_MS).coerceAtLeast(0L)
+        scrubTarget = (from + direction * step).coerceIn(0L, last)
+        touchPlayer(force = true)
+        scrubJob?.cancel()
+        scrubJob = scope.launch {
+            delay(SCRUB_SETTLE_MS)
+            commitScrub()
+        }
+    }
+
+    /** Hur fort målet flyttas medan knappen hålls nere, i filmens sekunder per sekund. */
+    private fun scrubSpeed(heldFor: Long, length: Long): Float {
+        val top = maxOf(SCRUB_TOP_SPEED, length / SCRUB_WHOLE_FILM_MS.toFloat())
+        val speed = SCRUB_START_SPEED * 2.0.pow(heldFor / SCRUB_DOUBLING_MS.toDouble()).toFloat()
+        return speed.coerceAtMost(top)
+    }
+
+    /** Spolningen klar: bilden hoppar till målet. Falskt om ingen spolning var på gång. */
+    fun commitScrub(): Boolean {
+        val target = scrubTarget
+        if (target < 0L) return false
+        val origin = scrubOrigin
+        clearScrub()
+        touchPlayer(force = true)
+        val status = currentStatus() ?: return true
+        val player = videoPlayer ?: return true
+        if (status.lengthMs <= 0L) return true
+        player.seekTo(target.toFloat() / status.lengthMs)
+        noteSeek(if (origin >= 0L) origin else status.timeMs, target, status.lengthMs)
+        return true
+    }
+
+    /** Tillbaka under spolningen: bilden stannar där den var. Falskt om ingen spolning var på gång. */
+    fun cancelScrub(): Boolean {
+        if (scrubTarget < 0L) return false
+        clearScrub()
+        touchPlayer(force = true)
+        return true
+    }
+
+    private fun clearScrub() {
+        scrubJob?.cancel()
+        scrubJob = null
+        scrubTarget = -1L
+        scrubOrigin = -1L
+        scrubHeldSince = 0L
+    }
+
+    /**
+     * Tv: kanalen man bläddrat fram till med pil upp och ner, innan den
+     * startats. Kanalrutan visar den direkt; bytet görs först när trycken
+     * slutat, så att snabba tryck går förbi kanaler utan att starta var och
+     * en. Null: inget byte på gång.
+     */
+    var zapTarget by mutableStateOf<LiveChannel?>(null)
+        private set
+
+    /** När kanalrutan senast visades, så att den står kvar en stund efter bytet. */
+    var zapShownAt by mutableStateOf(0L)
+        private set
+
+    private var zapJob: Job? = null
+
+    /**
+     * Tv: ett steg upp (−1) eller ner (1) i listan kanalen startades från.
+     * Med pilarna går knapparna undan för kanalrutan; från knapparna
+     * ([keepControls]) står de kvar och visar kanalen man är på väg till.
+     */
+    fun zap(delta: Int, keepControls: Boolean = false) {
+        val current = nowPlaying ?: return
+        val channel = current.channel ?: return
+        val queue = current.queue
+        if (queue.size < 2) {
+            // Ingen annan kanal i listan: rutan visar ändå vad som sänds.
+            zapShownAt = System.currentTimeMillis()
+            return
+        }
+        val from = zapTarget ?: channel
+        val index = queue.indexOfFirst { it.key == from.key }.coerceAtLeast(0)
+        zapTarget = queue[(index + delta).mod(queue.size)]
+        zapShownAt = System.currentTimeMillis()
+        if (keepControls) {
+            touchPlayer(force = true)
+        } else {
+            lastActivity = 0L
+        }
+        zapJob?.cancel()
+        zapJob = scope.launch {
+            delay(ZAP_SETTLE_MS)
+            commitZap()
+        }
+    }
+
+    /** Bytet görs nu: OK, eller en stund efter sista trycket. Falskt om inget byte var på gång. */
+    fun commitZap(): Boolean {
+        val target = zapTarget ?: return false
+        zapJob?.cancel()
+        zapJob = null
+        zapTarget = null
+        zapShownAt = System.currentTimeMillis()
+        val current = nowPlaying ?: return true
+        if (target.key != current.channel?.key) playChannel(target, current.queue)
+        return true
+    }
+
+    /** Tillbaka innan bytet: kanalen som spelas står kvar. Falskt om inget byte var på gång. */
+    fun cancelZap(): Boolean {
+        if (zapTarget == null) return false
+        clearZap()
+        zapShownAt = 0L
+        return true
+    }
+
+    private fun clearZap() {
+        zapJob?.cancel()
+        zapJob = null
+        zapTarget = null
+    }
+
     /** Ett hopp framåt i början är introt; ett hopp förbi slutet är eftertexterna. */
     private fun learn(series: Series, from: Long, to: Long, length: Long) {
         if (from < 0L) return
@@ -1664,6 +1844,7 @@ class AppState {
     fun skipIntro() {
         val mark = introMark ?: return
         val status = currentStatus() ?: return
+        clearScrub()
         videoPlayer?.seekBy(mark.introToMs - status.timeMs)
         touchPlayer(force = true)
     }
@@ -2266,9 +2447,10 @@ class AppState {
 
     /**
      * [preview]: Fotbollens lilla ruta — kanalen startar i hörnet utan ljud och
-     * räknas inte som sedd förrän man förstorar den.
+     * räknas inte som sedd förrän man förstorar den. [docked]: Live TV:s stora
+     * ruta — kanalen byts i rutan, och bilden stannar där.
      */
-    fun playChannel(channel: LiveChannel, queue: List<LiveChannel>, preview: Boolean = false) {
+    fun playChannel(channel: LiveChannel, queue: List<LiveChannel>, preview: Boolean = false, docked: Boolean = false) {
         val entry = WatchEntry(
             kind = WatchKind.LIVE,
             sourceId = channel.sourceId,
@@ -2279,7 +2461,7 @@ class AppState {
             watchedAtUtc = System.currentTimeMillis(),
         )
         val item = NowPlaying(title = channel.name, subtitle = channel.group, live = true, channel = channel, queue = queue, entry = entry, name = channel.name)
-        launchPlayback(item, preview) {
+        launchPlayback(item, preview, docked) {
             channel.url ?: run {
                 val streamId = channel.streamId ?: return@run null
                 val (source, account) = credentials(channel.sourceId) ?: return@run null
@@ -2359,7 +2541,7 @@ class AppState {
         launchPlayback(item, resolve = resolve)
     }
 
-    private fun launchPlayback(item: NowPlaying, preview: Boolean = false, resolve: suspend () -> String?) {
+    private fun launchPlayback(item: NowPlaying, preview: Boolean = false, docked: Boolean = false, resolve: suspend () -> String?) {
         // Samma sak spelas redan i hörnet (Spela på filmens sida, kanalen i listan):
         // bilden växer upp i stället för att börja om.
         val current = nowPlaying
@@ -2380,12 +2562,20 @@ class AppState {
         previewMuted = preview
         if (!preview) footballPreview = null
         // Något nytt att titta på: spelaren växer upp igen om den låg i hörnet.
-        // Fotbollens förhandsvisning börjar i stället i hörnet.
-        miniPlayer = preview
+        // Fotbollens förhandsvisning börjar i stället i hörnet, och i Live TV:s
+        // stora ruta byts kanalen där bilden står.
+        miniPlayer = preview || (docked && miniPlayer)
         playerError = null
         trackPanelOpen = false
         playbackSession = -1L
-        touchPlayer(force = true)
+        clearScrub()
+        clearZap()
+        // Tv: en kanal börjar med kanalrutan nederst, en film med tidslinjen.
+        if (tvLayout && item.live) {
+            zapShownAt = System.currentTimeMillis()
+        } else {
+            touchPlayer(force = true)
+        }
         playbackJob?.cancel()
         playbackJob = scope.launch {
             val url = resolve()
@@ -2458,6 +2648,11 @@ class AppState {
         trackPanelOpen = false
         playerBoxFocused = false
         playerControlsFocused = false
+        playerTimelineFocused = false
+        channelListOpen = false
+        clearScrub()
+        clearZap()
+        zapShownAt = 0L
         resetSeriesExtras()
         WindowsIntegration.keepAwake(false)
         saveSettings()
@@ -2535,6 +2730,11 @@ class AppState {
         fullscreen = false
         trackPanelOpen = false
         playerControlsFocused = false
+        playerTimelineFocused = false
+        channelListOpen = false
+        clearScrub()
+        clearZap()
+        zapShownAt = 0L
         miniPlayer = true
         miniSince = System.currentTimeMillis()
     }
@@ -3490,6 +3690,23 @@ private const val TRENDING_MAX_AGE_MS = 6 * 60 * 60_000L
 private const val TRENDING_CHECK_MS = 60 * 60_000L
 /** Spoltryck med kortare mellanrum än så räknas som ett hopp. */
 private const val SEEK_GROUP_MS = 4_000L
+
+/** Tv: så länge efter sista trycket bilden hoppar dit spolningen kommit. */
+private const val SCRUB_SETTLE_MS = 700L
+
+/** Spolningen stannar så här långt före slutet, så att filmen inte tar slut av den. */
+private const val SCRUB_END_GUARD_MS = 2_000L
+
+/** Hållen knapp: filmens sekunder per sekund från början, tiden till dubbel fart, och högsta farten. */
+private const val SCRUB_START_SPEED = 20f
+private const val SCRUB_DOUBLING_MS = 750L
+private const val SCRUB_TOP_SPEED = 120f
+
+/** Som fortast går hela filmen på så här lång tid. */
+private const val SCRUB_WHOLE_FILM_MS = 15_000L
+
+/** Tv: så länge efter sista trycket på pil upp eller ner kanalen byts. */
+private const val ZAP_SETTLE_MS = 380L
 private const val INTRO_LATEST_START_MS = 6 * 60_000L
 private const val INTRO_LATEST_END_MS = 10 * 60_000L
 private const val INTRO_MIN_MS = 15_000L

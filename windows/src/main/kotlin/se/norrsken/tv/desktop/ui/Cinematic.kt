@@ -196,12 +196,19 @@ internal fun TitleLogo(
  * väljer OK den som visas, och Tillbaka stänger Nästa avsnitt.
  */
 @Composable
-internal fun PlayerPrompts(state: AppState, status: VideoPlayer.Status, lifted: Boolean, modifier: Modifier = Modifier) {
+internal fun PlayerPrompts(
+    state: AppState,
+    status: VideoPlayer.Status,
+    lifted: Boolean,
+    modifier: Modifier = Modifier,
+    /** Hur högt rutorna står när spelarens knappar syns under dem. */
+    liftedBottom: Dp = 128.dp,
+) {
     val intro = state.showsIntroSkip(status)
     val upcoming = state.nextUp
     val next = upcoming != null && state.showsNextUp(status)
-    val bottom by animateDpAsState(if (lifted) 128.dp else 48.dp, tween(260), label = "rutor i spelaren")
-    Box(modifier.padding(end = 40.dp, bottom = bottom), contentAlignment = Alignment.BottomEnd) {
+    val bottom by animateDpAsState(if (lifted) liftedBottom else 48.dp, tween(260), label = "rutor i spelaren")
+    Box(modifier.padding(end = if (tvLayout) 56.dp else 40.dp, bottom = bottom), contentAlignment = Alignment.BottomEnd) {
         AnimatedVisibility(
             visible = intro,
             enter = fadeIn(tween(300)) + slideInHorizontally(tween(300)) { it / 3 },
