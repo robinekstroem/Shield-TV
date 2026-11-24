@@ -21,6 +21,11 @@ import se.norrsken.tv.desktop.data.SourceContent
 import se.norrsken.tv.desktop.data.SourceGuide
 import se.norrsken.tv.desktop.data.SourceType
 import se.norrsken.tv.desktop.data.Storage
+import se.norrsken.tv.desktop.data.TitleCleaner
+import se.norrsken.tv.desktop.data.TmdbFacts
+import se.norrsken.tv.desktop.data.TmdbStore
+import se.norrsken.tv.desktop.data.WatchEntry
+import se.norrsken.tv.desktop.data.WatchKind
 import se.norrsken.tv.desktop.player.VideoPlayer
 import se.norrsken.tv.desktop.ui.AppRoot
 import se.norrsken.tv.desktop.ui.PlayerLayers
@@ -79,7 +84,22 @@ fun main(args: Array<String>) {
     val state = AppState()
     waitFor("starten", 30_000) { !state.loading }
     // Biblioteket och tablån direkt i minnet: utan Windows DPAPI sparas inget bibliotek på disken.
-    kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.Main) { state.previewLibrary(data.source, data.content, data.guide) }
+    // En film med fakta från "TMDB", för spelarens rubrik och pausbild.
+    val featured = data.movies[3]
+    val tmdb = TitleCleaner.searchTitle(featured.name).let { (title, year) ->
+        mapOf(
+            TmdbStore.keyOf("movie", title, year) to TmdbFacts(
+                id = 1,
+                genres = "Drama, Thriller",
+                rating = 7.8,
+                votes = 1200,
+                overview = "När en storm slår ut all kontakt med fastlandet måste fyrvaktaren och en främling överleva natten — " +
+                    "och förstå vad som egentligen hände ombord på skeppet som drev in i viken.",
+                year = year,
+            ),
+        )
+    }
+    kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.Main) { state.previewLibrary(data.source, data.content, data.guide, tmdb) }
     waitFor("biblioteket", 10_000) { state.library.movies.isNotEmpty() }
     println(
         "Läge: laddar=${state.loading}, källor=${state.sources.size}, filmer=${state.library.movies.size}, " +
@@ -143,7 +163,21 @@ private class Scene(
 private fun scenes(state: AppState, data: PreviewData): List<Scene> {
     val frame = PreviewImages.still().toComposeImageBitmap()
     val movie = data.movies[3]
-    val film = NowPlaying(title = movie.name, subtitle = "Drama · 2024", live = false, name = movie.name)
+    val film = NowPlaying(
+        title = movie.name,
+        subtitle = movie.group,
+        live = false,
+        name = movie.name,
+        entry = WatchEntry(
+            kind = WatchKind.MOVIE,
+            sourceId = movie.sourceId,
+            itemId = movie.streamId.toString(),
+            title = movie.name,
+            subtitle = movie.group,
+            image = movie.poster,
+            watchedAtUtc = System.currentTimeMillis(),
+        ),
+    )
     val filmStatus = VideoPlayer.Status(
         phase = VideoPlayer.Phase.PLAYING,
         timeMs = 47 * 60_000L + 12_000L,
@@ -185,7 +219,23 @@ private fun scenes(state: AppState, data: PreviewData): List<Scene> {
         Scene(
             "spelare-film-paus",
             before = { state.previewPlayer(film) },
+            settleMs = 4_600L,
             content = player(filmStatus.copy(phase = VideoPlayer.Phase.PAUSED)),
+        ),
+        Scene(
+            "spelare-film-tidslinje",
+            before = { state.previewPlayer(film) },
+            after = {
+                state.focusPlayerControls()
+            },
+            each = { state.touchPlayer(force = true) },
+            settleMs = 1_200L,
+            content = player(filmStatus),
+        ),
+        Scene(
+            "spelare-live-laddar",
+            before = { state.previewPlayer(live) },
+            content = player(VideoPlayer.Status(phase = VideoPlayer.Phase.OPENING)),
         ),
         Scene(
             "spelare-live-kanalruta",

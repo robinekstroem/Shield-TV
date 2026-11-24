@@ -1829,7 +1829,8 @@ class AppState {
      * Förhandsbilder (windows/src/preview): ett påhittat bibliotek och en tablå,
      * direkt i minnet. Utan DPAPI (som där) går biblioteket inte att spara på disken.
      */
-    internal fun previewLibrary(source: Source, content: SourceContent, guide: SourceGuide) {
+    internal fun previewLibrary(source: Source, content: SourceContent, guide: SourceGuide, tmdb: Map<String, TmdbFacts> = emptyMap()) {
+        if (tmdb.isNotEmpty()) tmdbFacts = tmdbFacts + tmdb
         if (sources.none { it.id == source.id }) sources = sources + source
         refreshQueue.remove(source.id)
         channelsFetchedAt[source.id] = System.currentTimeMillis()

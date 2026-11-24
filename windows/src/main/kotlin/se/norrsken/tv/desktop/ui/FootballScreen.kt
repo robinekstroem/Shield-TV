@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -1316,7 +1317,7 @@ private fun SpotlightCard(
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(if (big) 292.dp else 250.dp)
+                .height(if (big) 316.dp else 296.dp)
                 .drawBehind { if (mff) drawMalmoFF() else drawSweden() }
                 .drawWithContent {
                     drawContent()
@@ -1329,7 +1330,7 @@ private fun SpotlightCard(
                 Modifier.fillMaxSize().padding(horizontal = if (big) 30.dp else 24.dp, vertical = if (big) 24.dp else 20.dp),
             ) {
                 SpotHeader(state, team, info, big)
-                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.weight(1f).heightIn(min = 10.dp))
                 SpotBody(state, team, info, big)
                 Spacer(Modifier.height(if (big) 16.dp else 12.dp))
                 SpotFooter(state, info, big)
@@ -1808,7 +1809,7 @@ private fun DrawScope.drawStadium() {
             lineTo(lamp.x + toward - w * 0.15f, reach)
             close()
         }
-        drawPath(beam, Brush.verticalGradient(listOf(Color(0x16E8FFF2), Color(0x06E8FFF2), Color.Transparent), endY = reach))
+        drawPath(beam, Brush.verticalGradient(listOf(Color(0x12E8FFF2), Color(0x05E8FFF2), Color.Transparent), endY = reach))
     }
     // Mörkare kanter, så att det man läser står i ljuset.
     drawRect(
