@@ -23,7 +23,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  # Förhandsbilderna läggs som ett dolt utkast under Releases.
+  contents: write
 
 # Två pushar tätt efter varandra: den senaste vinner.
 concurrency:
@@ -78,15 +79,25 @@ jobs:
         working-directory: windows
         run: gradle renderPreviews --stacktrace 2>&1 | grep -v '^\s*at org.gradle' | tail -n 120
 
-      - name: Spara förhandsbilderna
-        if: steps.build.outputs.status == '0'
+      # Som ett dolt utkast under Releases ("forhandsbilder"), som byts ut vid
+      # varje körning. Utkast syns bara för den som äger projektet.
+      - name: Lägg förhandsbilderna som dolt utkast
+        if: steps.build.outputs.status == '0' && github.ref == 'refs/heads/main'
         continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: forhandsbilder
-          path: windows/build/previews/
-          retention-days: 5
-          if-no-files-found: ignore
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ls windows/build/previews/*.png >/dev/null 2>&1 || exit 0
+          (cd windows/build/previews && zip -q -r ../forhandsbilder.zip .)
+          for id in $(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq '.[] | select(.tag_name == "forhandsbilder") | .id'); do
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${id}" >/dev/null
+          done
+          gh release create forhandsbilder windows/build/forhandsbilder.zip \
+            --draft \
+            --title "Förhandsbilder ${GITHUB_SHA::7}" \
+            --notes "Appen ritad som på tv:n, från ${GITHUB_SHA::7}." \
+            --target "$GITHUB_SHA"
 
       # Felet ska gå att läsa utan att gräva i tusen rader logg.
       - name: Sammanfatta felet

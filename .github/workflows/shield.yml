@@ -13,6 +13,8 @@ on:
     paths:
       - 'shield/**'
       - 'windows/src/**'
+      # Förhandsbilderna (Kontroll Windows) hör inte till appen.
+      - '!windows/src/preview/**'
       - '.github/workflows/shield.yml'
       - 'gradle/libs.versions.toml'
       - 'app/src/main/java/se/norrsken/tv/data/playlist/M3uParser.kt'

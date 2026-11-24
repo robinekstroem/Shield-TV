@@ -70,8 +70,19 @@ fun main(args: Array<String>) {
     val images = PreviewImages.start()
     val data = PreviewData.seed(images.base)
 
+    // Appens jobb går på Swing-tråden, som i Windows-appen.
+    val mainWorks = runCatching {
+        kotlinx.coroutines.runBlocking {
+            kotlinx.coroutines.withTimeout(5_000) { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { true } }
+        }
+    }.getOrElse { println("Swing-tråden svarar inte: $it"); false }
+    println("Swing-tråden: $mainWorks. Mappar: ${se.norrsken.tv.desktop.data.AppDirs.config} och ${se.norrsken.tv.desktop.data.AppDirs.cache}")
     val state = AppState()
     waitFor("biblioteket", 40_000) { !state.loading && state.library.movies.isNotEmpty() }
+    println(
+        "Läge: laddar=${state.loading}, källor=${state.sources.size}, filmer=${state.library.movies.size}, " +
+            "serier=${state.library.series.size}, kanaler=${state.library.channels.size}, sparat=${Storage().loadSources().size}",
+    )
     state.introDone = true
     // Tablån läses från disken en stund efter starten.
     waitFor("tablån", 20_000) { !state.guide.isEmpty }
