@@ -11,7 +11,6 @@ import se.norrsken.tv.desktop.AppState
 import se.norrsken.tv.desktop.NowPlaying
 import se.norrsken.tv.desktop.Screen
 import se.norrsken.tv.desktop.data.GuideChannel
-import se.norrsken.tv.desktop.data.GuideStore
 import se.norrsken.tv.desktop.data.League
 import se.norrsken.tv.desktop.data.LiveChannel
 import se.norrsken.tv.desktop.data.Movie
@@ -78,7 +77,10 @@ fun main(args: Array<String>) {
     }.getOrElse { println("Swing-tråden svarar inte: $it"); false }
     println("Swing-tråden: $mainWorks. Mappar: ${se.norrsken.tv.desktop.data.AppDirs.config} och ${se.norrsken.tv.desktop.data.AppDirs.cache}")
     val state = AppState()
-    waitFor("biblioteket", 40_000) { !state.loading && state.library.movies.isNotEmpty() }
+    waitFor("starten", 30_000) { !state.loading }
+    // Biblioteket och tablån direkt i minnet: utan Windows DPAPI sparas inget bibliotek på disken.
+    kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.Main) { state.previewLibrary(data.source, data.content, data.guide) }
+    waitFor("biblioteket", 10_000) { state.library.movies.isNotEmpty() }
     println(
         "Läge: laddar=${state.loading}, källor=${state.sources.size}, filmer=${state.library.movies.size}, " +
             "serier=${state.library.series.size}, kanaler=${state.library.channels.size}, sparat=${Storage().loadSources().size}",
@@ -269,7 +271,14 @@ private fun waitFor(what: String, timeoutMs: Long, done: () -> Boolean) {
 }
 
 /** Det påhittade biblioteket, sparat där appen läser sitt. */
-private class PreviewData(val channels: List<LiveChannel>, val movies: List<Movie>, val series: List<Series>) {
+private class PreviewData(
+    val source: Source,
+    val content: SourceContent,
+    val guide: SourceGuide,
+) {
+    val channels: List<LiveChannel> get() = content.channels
+    val movies: List<Movie> get() = content.movies
+
     companion object {
         private const val SOURCE = "forhandsvisning"
 
@@ -363,9 +372,6 @@ private class PreviewData(val channels: List<LiveChannel>, val movies: List<Movi
                 seriesGroups = seriesGroups,
                 epgUrl = null,
             )
-            val storage = Storage()
-            storage.saveSources(listOf(source))
-            storage.saveContent(SOURCE, content)
 
             // Tablån: program runt nu, olika långa, så att något alltid pågår.
             val hour = 3_600_000L
@@ -389,15 +395,12 @@ private class PreviewData(val channels: List<LiveChannel>, val movies: List<Movi
                 }
                 programmes[channel.epgId!!] = list
             }
-            GuideStore().save(
-                SOURCE,
-                SourceGuide(
-                    channels = channels.map { GuideChannel(it.epgId!!, listOf(it.name)) },
-                    programmes = programmes,
-                    fetchedAt = now,
-                ),
+            val guide = SourceGuide(
+                channels = channels.map { GuideChannel(it.epgId!!, listOf(it.name)) },
+                programmes = programmes,
+                fetchedAt = now,
             )
-            return PreviewData(channels, movies, series)
+            return PreviewData(source, content, guide)
         }
     }
 }

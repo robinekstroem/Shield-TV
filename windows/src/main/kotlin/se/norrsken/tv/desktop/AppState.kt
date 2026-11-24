@@ -1776,6 +1776,20 @@ class AppState {
     }
 
     /**
+     * Förhandsbilder (windows/src/preview): ett påhittat bibliotek och en tablå,
+     * direkt i minnet. Utan DPAPI (som där) går biblioteket inte att spara på disken.
+     */
+    internal fun previewLibrary(source: Source, content: SourceContent, guide: SourceGuide) {
+        if (sources.none { it.id == source.id }) sources = sources + source
+        refreshQueue.remove(source.id)
+        channelsFetchedAt[source.id] = System.currentTimeMillis()
+        contents[source.id] = content
+        guides[source.id] = guide
+        rebuildLibrary()
+        loading = false
+    }
+
+    /**
      * Förhandsbilder (windows/src/preview): spelarens läge utan någon spelare —
      * vad som spelas, en spolning eller ett kanalbyte på gång.
      */

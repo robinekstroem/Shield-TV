@@ -93,6 +93,11 @@ android {
             // ovanpå den gamla. Namnen behålls, så att felrapporten går att läsa.
             isMinifyEnabled = true
             isShrinkResources = true
+            // src/main/baseline-prof.txt: appens egen kod förkompileras i stället
+            // för att tolkas medan man använder appen, så att menyerna, spelarens
+            // knappar och fotbollen flyter från början. Compose och Media3 har egna
+            // profiler som följer med. ProfileInstaller lägger profilen på plats när
+            // appen startar; Shield kompilerar efter den i bakgrunden.
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("debug")
         }
