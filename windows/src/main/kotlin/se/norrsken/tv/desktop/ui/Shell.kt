@@ -105,6 +105,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import se.norrsken.tv.data.playlist.ImportState
 import se.norrsken.tv.desktop.AppState
@@ -135,6 +136,9 @@ private val TV_MENU_WIDTH = 300.dp
 
 /** Hur fort markeringen i menyn tonar mellan raderna. */
 private const val MENU_MS = 170
+
+/** Tv: skärmsläckaren kommer när ingen rört fjärrkontrollen så här länge, och inget spelas. */
+private const val SAVER_IDLE_MS = 2 * 60_000L
 
 /** Vad som syns till vänster om innehållet på tv:n. */
 internal enum class TvDrawer { NONE, CATEGORIES, MENU }
@@ -257,8 +261,27 @@ fun AppRoot(state: AppState) {
     // Filmväggen: starten visar den, och sedan blir den kvar som bakgrund bakom sidorna.
     val wall = remember { PosterWall() }
     PosterWallDriver(state, wall)
-    // Startens slut: omslagen flyger från väggen till startsidans kort.
-    val morph = remember { IntroMorph() }
+    // Omslagen som flyger mellan väggen och korten: i startens slut och i skärmsläckaren.
+    val morph = remember { CardMorph() }
+    // Tv: skärmsläckaren, när ingen rört fjärrkontrollen på två minuter.
+    val saver = remember { SaverControl() }
+    if (tvLayout) {
+        LaunchedEffect(Unit) {
+            while (true) {
+                delay(1_000)
+                // Appen syns inte: räknas som att någon är där när den kommer tillbaka.
+                if (!state.appVisible) {
+                    wall.lastInput = nowMs()
+                    continue
+                }
+                if (saver.shown || !state.introDone || state.nowPlaying != null || !wall.lit) continue
+                // Också tryck som tv:n tog hand om själv räknas (se AppState.noteInput).
+                val quiet = nowMs() - wall.lastInput >= SAVER_IDLE_MS &&
+                    System.currentTimeMillis() - state.lastInputAt >= SAVER_IDLE_MS
+                if (quiet) saver.start()
+            }
+        }
+    }
     Box(
         Modifier
             .fillMaxSize()
@@ -266,6 +289,11 @@ fun AppRoot(state: AppState) {
             .onPreviewKeyEvent { event ->
                 // Väggen står still medan man trycker på fjärren.
                 wall.lastInput = nowMs()
+                // Skärmsläckaren: en knapptryckning flyter tillbaka, och gör inget annat.
+                if (saver.shown) {
+                    if (event.type == KeyEventType.KeyDown) saver.wake = true
+                    return@onPreviewKeyEvent true
+                }
                 // Medan starten visas hoppar en knapptryckning över den, och går inte vidare till sidan bakom.
                 if (state.introDone) return@onPreviewKeyEvent false
                 if (event.type == KeyEventType.KeyDown) introSkip = true
@@ -281,8 +309,8 @@ fun AppRoot(state: AppState) {
                 }
             },
     ) {
-        // Temats dekor rör sig bara när spelaren inte täcker allt.
-        val decorated = state.nowPlaying == null || state.miniPlayer
+        // Temats dekor rör sig bara när spelaren eller skärmsläckaren inte täcker allt.
+        val decorated = (state.nowPlaying == null || state.miniPlayer) && !saver.covering
         // Egna lager: det som rör sig i bakgrunden ritas om för sig, inte hela skärmen
         // med listor och text varje gång snön faller en bit.
         CustomBackdrop(state.backgrounds, running = decorated, modifier = Modifier.fillMaxSize().graphicsLayer())
@@ -291,7 +319,8 @@ fun AppRoot(state: AppState) {
         if (state.backgrounds.isEmpty()) {
             PosterWallBackdrop(
                 wall,
-                shown = state.introDone || state.introRevealing,
+                // Skärmsläckaren täcker allt: väggen bakom behöver inte ritas.
+                shown = (state.introDone || state.introRevealing) && !saver.covering,
                 quiet = state.screen == Screen.GUIDE || state.screen == Screen.LIVE || state.screen == Screen.SETTINGS,
                 modifier = Modifier.fillMaxSize().graphicsLayer(),
             )
@@ -334,7 +363,7 @@ fun AppRoot(state: AppState) {
                 CompositionLocalProvider(
                     LocalTvDocked provides (!drawers && tvLayout && docked),
                     LocalCoverEntrance provides entrance,
-                    LocalIntroMorph provides morph,
+                    LocalCardMorph provides morph,
                 ) {
                     if (state.loading) {
                         Spinner(Modifier.align(Alignment.Center))
@@ -394,6 +423,10 @@ fun AppRoot(state: AppState) {
             val nothing = library.movies.isEmpty() && library.series.isEmpty() && library.channels.isEmpty()
             val ready = state.homeShown || (!state.loading && (state.screen != Screen.HOME || nothing)) || state.nowPlaying != null
             StartIntro(state = state, wall = wall, morph = morph, ready = ready, skip = introSkip, onFinished = { state.introDone = true })
+        }
+        // Skärmsläckaren, överst.
+        if (saver.shown) {
+            ScreenSaver(state, wall, morph, saver)
         }
     }
 }

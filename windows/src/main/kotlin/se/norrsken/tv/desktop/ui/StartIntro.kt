@@ -1,5 +1,7 @@
 package se.norrsken.tv.desktop.ui
 
+import androidx.compose.runtime.Stable
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
@@ -59,7 +61,7 @@ import kotlin.math.sin
 internal fun StartIntro(
     state: AppState,
     wall: PosterWall,
-    morph: IntroMorph,
+    morph: CardMorph,
     ready: Boolean,
     skip: Boolean,
     onFinished: () -> Unit,
@@ -79,22 +81,11 @@ internal fun StartIntro(
         ending.started = true
         ending.rate = if (fast) SKIP_RATE else 1f
         ending.plain = !wall.lit
-        val spots = morph.close()
+        val spots = morph.visibleSpots()
         var lastLanding = 0L
         if (!ending.plain) {
             val chosen = targetsOf(spots, frame)
-            val targets = chosen.map { spot ->
-                val urls = spot.images.map { it.trim() }.filter { it.startsWith("http", ignoreCase = true) }
-                MorphTarget(
-                    left = spot.left - frame.x,
-                    top = spot.top - frame.y,
-                    right = spot.right - frame.x,
-                    bottom = spot.bottom - frame.y,
-                    urls = urls,
-                    image = urls.firstNotNullOfOrNull { Images.cached(it, spot.maxSide) },
-                    prominent = spot.prominent,
-                )
-            }
+            val targets = chosen.map { it.toTarget(frame) }
             val lands = runCatching { wall.planMorph(targets) }.getOrElse { LongArray(targets.size) { -1L } }
             chosen.forEachIndexed { i, spot ->
                 spot.landAt = lands[i]
@@ -102,7 +93,7 @@ internal fun StartIntro(
             }
         }
         ending.total = if (ending.plain) EXIT_PLAIN_MS else max(WALL_FADE_TO_MS, lastLanding + MORPH_DISSOLVE_MS) + 40L
-        morph.clock.longValue = 0L
+        morph.start(MorphPhase.SCATTER)
         state.introRevealing = true
     }
 
@@ -130,7 +121,7 @@ internal fun StartIntro(
             if (over) break
         }
         wall.endMorph()
-        morph.finish()
+        morph.finish(intro = true)
         finished.value()
     }
     LaunchedEffect(ready, skipping) {
@@ -325,95 +316,147 @@ private class IntroLooks {
     }
 }
 
-// --- Startsidans kort i slutet --------------------------------------------------------
+// --- Korten som omslagen flyger till och från ------------------------------------------
+
+/** En flygning mellan väggen och korten: ingen, på väg in på väggen, väggen täcker allt, eller på väg ut till korten. */
+internal enum class MorphPhase { NONE, GATHER, COVERED, SCATTER }
 
 /**
- * Slutet på starten, sett från startsidan: korten anmäler här var de står
- * ([MorphSpot]). När slutet börjar väljs de som syns helt, och ett kort
- * visar sig först när omslaget som flyger dit är framme — då ligger
+ * Korten som omslagen från filmväggen flyger till och från — i slutet på
+ * starten, och när skärmsläckaren kommer och går. Korten anmäler här var
+ * de står ([MorphSpot]). När en flygning börjar väljs de som syns helt. På
+ * väg in på väggen tonar ett kort bort när dess omslag lyfter; på väg ut
+ * visar det sig först när omslaget som flyger dit är framme — då ligger
  * omslaget precis över kortet, med samma bild, och tonar bort.
  */
-internal class IntroMorph {
+internal class CardMorph {
     private val spots = ArrayList<MorphSpot>()
 
-    /** Korten anmäler sig tills slutet börjar. */
-    var accepting = true
+    /** Starten är slut. På datorn, utan skärmsläckare, behöver korten inte längre anmäla sig. */
+    var introDone = false
         private set
 
-    /** Starten är slut: korten behöver inte längre tänka på den. */
-    var done = false
-        private set
-
-    /** Ms sedan slutet började, eller -1 innan dess. Läses i ritningen. */
+    /** Flygningen just nu, och ms sedan den började. Läses i ritningen. */
+    val phase = mutableStateOf(MorphPhase.NONE)
     val clock = mutableLongStateOf(-1L)
 
     fun add(spot: MorphSpot) {
-        if (accepting && spot !in spots) spots.add(spot)
+        if (spot !in spots) spots.add(spot)
     }
 
     fun remove(spot: MorphSpot) {
         spots.remove(spot)
     }
 
-    /** Slutet börjar: korten som syns helt, uppifrån och från vänster. */
-    fun close(): List<MorphSpot> {
-        accepting = false
-        return spots.filter { it.whole }.sortedWith(compareBy<MorphSpot>({ it.top }, { it.left }))
+    /** Korten som syns helt just nu, uppifrån och från vänster, med var de står. Ingen flygning bestämd än. */
+    fun visibleSpots(): List<MorphSpot> {
+        val seen = ArrayList<MorphSpot>()
+        for (spot in spots) {
+            spot.liftAt = -1L
+            spot.landAt = -1L
+            if (spot.measure()) seen.add(spot)
+        }
+        return seen.sortedWith(compareBy<MorphSpot>({ it.top }, { it.left }))
     }
 
-    fun finish() {
-        done = true
-        spots.clear()
+    /** Flygningen [next] börjar nu. */
+    fun start(next: MorphPhase) {
+        clock.longValue = 0L
+        phase.value = next
     }
 
-    /** Kortet tonas in under omslaget strax innan det landar. */
+    /** Väggen täcker allt: korten som flög dit förblir dolda, utan att klockan behöver gå. */
+    fun cover() {
+        phase.value = MorphPhase.COVERED
+    }
+
+    fun finish(intro: Boolean = false) {
+        phase.value = MorphPhase.NONE
+        clock.longValue = -1L
+        for (spot in spots) {
+            spot.liftAt = -1L
+            spot.landAt = -1L
+        }
+        if (intro) introDone = true
+    }
+
+    /** Hur synligt kortet är: borta när dess omslag lyft, tillbaka när omslaget som flyger dit landar. */
     fun cardAlpha(spot: MorphSpot): Float {
-        val m = clock.longValue
-        if (m < 0L) return 0f
-        return smoothstep((spot.landAt - CARD_LEAD_MS).toFloat(), spot.landAt.toFloat(), m.toFloat())
+        val m = clock.longValue.toFloat()
+        return when (phase.value) {
+            MorphPhase.NONE -> 1f
+            MorphPhase.GATHER, MorphPhase.COVERED ->
+                if (spot.liftAt < 0L) 1f else 1f - smoothstep(spot.liftAt.toFloat(), (spot.liftAt + CARD_HIDE_MS).toFloat(), m)
+            MorphPhase.SCATTER ->
+                if (spot.landAt < 0L) 1f else smoothstep((spot.landAt - CARD_LEAD_MS).toFloat(), spot.landAt.toFloat(), m)
+        }
     }
 }
 
-internal val LocalIntroMorph = staticCompositionLocalOf<IntroMorph?> { null }
+internal val LocalCardMorph = staticCompositionLocalOf<CardMorph?> { null }
 
-/** Ett kort på startsidan som ett omslag från väggen kan landa på. */
-internal class MorphSpot(val morph: IntroMorph) {
+/** Ett kort som ett omslag från väggen kan landa på, eller lyfta från. */
+internal class MorphSpot(val morph: CardMorph) {
     /** Kortets bildadresser i den ordning det provar dem, och hur skarpt det laddar dem. */
     var images: List<String> = emptyList()
     var maxSide = 480
     /** Det stora omslaget överst på startsidan. */
     var prominent = false
-    /** Var bilden står, i fönstrets bildpunkter. */
+    /** Bilden på kortet, som den placerats. Mäts först när en flygning börjar. */
+    var coordinates: LayoutCoordinates? = null
+    /** Var bilden står, i fönstrets bildpunkter (se [measure]). */
     var left = 0f
     var top = 0f
     var right = 0f
     var bottom = 0f
-    /** Hela bilden syns: inget av den är utanför sin lista eller sidan. */
-    var whole = false
-    /** När omslaget som flyger hit landar, i ms efter att slutet började; -1 om inget gör det. */
+    /** När omslaget lyfter härifrån och när det som flyger hit landar, i ms efter att flygningen började; -1 annars. */
+    var liftAt = -1L
     var landAt = -1L
 
-    fun place(coordinates: LayoutCoordinates) {
-        if (!morph.accepting) return
-        val bounds = coordinates.boundsInWindow()
+    /**
+     * Var bilden står just nu. Falskt om den inte syns helt: utanför sin
+     * lista, sidan eller fönstret. Ett markerat kort som växt räknas som helt.
+     */
+    fun measure(): Boolean {
+        val placed = coordinates ?: return false
+        if (!placed.isAttached) return false
+        val size = placed.size
+        if (size.width <= 0 || size.height <= 0) return false
+        val bounds = placed.boundsInWindow()
         left = bounds.left
         top = bounds.top
         right = bounds.right
         bottom = bounds.bottom
-        val size = coordinates.size
-        whole = size.width > 0 && size.height > 0 &&
-            abs(bounds.width - size.width) < 1.5f && abs(bounds.height - size.height) < 1.5f
+        val scaleX = bounds.width / size.width
+        val scaleY = bounds.height / size.height
+        return scaleX > 0.5f && abs(scaleX - scaleY) < 0.01f
     }
+
+}
+
+/** Kortet som mål för en flygning, i överlagrets bildpunkter. */
+private fun MorphSpot.toTarget(frame: OverlayFrame): MorphTarget {
+    val urls = images.map { it.trim() }.filter { it.startsWith("http", ignoreCase = true) }
+    return MorphTarget(
+        left = left - frame.x,
+        top = top - frame.y,
+        right = right - frame.x,
+        bottom = bottom - frame.y,
+        urls = urls,
+        image = urls.firstNotNullOfOrNull { Images.cached(it, maxSide) },
+        prominent = prominent,
+    )
 }
 
 /**
- * Kortets plats för startens slut, så länge starten pågår; null sedan.
- * [images]: bildadresserna kortet visar, [maxSide] hur skarpt de laddas.
+ * Kortets plats för flygningarna: på tv:n alltid (skärmsläckaren), på
+ * datorn bara medan starten pågår; annars null. [images]: bildadresserna
+ * kortet visar, [maxSide] hur skarpt de laddas.
  */
 @Composable
 internal fun rememberMorphSpot(images: List<String>, maxSide: Int, prominent: Boolean = false): MorphSpot? {
-    val morph = LocalIntroMorph.current ?: return null
-    if (morph.done) return null
+    val morph = LocalCardMorph.current ?: return null
+    if (morph.introDone && !tvLayout) return null
     val spot = remember(morph) { MorphSpot(morph) }
     spot.images = images
     spot.maxSide = maxSide
@@ -425,20 +468,188 @@ internal fun rememberMorphSpot(images: List<String>, maxSide: Int, prominent: Bo
     return spot
 }
 
-/** Mäter var kortets bild står, medan starten pågår. Läggs på själva bilden. */
+/** Minns var kortets bild placerats; den mäts först när en flygning börjar. Läggs på själva bilden. */
 internal fun Modifier.morphSpot(spot: MorphSpot?): Modifier =
-    if (spot == null || !spot.morph.accepting) this else onGloballyPositioned { spot.place(it) }
+    if (spot == null) this else onPlaced { spot.coordinates = it }
 
 /**
- * Ett kort som ett omslag landar på: osynligt tills omslaget är framme.
- * Genomskinligheten läggs direkt på det som ritas, utan mellanlager.
+ * Kortet döljs medan dess omslag flyger: borta när det lyft, tillbaka när
+ * omslaget som flyger hit landat. Annars helt synligt. Genomskinligheten
+ * läggs direkt på det som ritas, utan mellanlager.
  */
 internal fun Modifier.morphReveal(spot: MorphSpot?): Modifier {
-    if (spot == null || spot.landAt < 0L) return this
+    if (spot == null) return this
     val morph = spot.morph
     return graphicsLayer {
         alpha = morph.cardAlpha(spot)
         compositingStrategy = CompositingStrategy.ModulateAlpha
+    }
+}
+
+// --- Skärmsläckaren ------------------------------------------------------------------
+
+/** Skärmsläckaren: om den syns, om någon tryckt på en knapp, och om väggen täcker allt. */
+@Stable
+internal class SaverControl {
+    var shown by mutableStateOf(false)
+        private set
+    var wake by mutableStateOf(false)
+    var covering by mutableStateOf(false)
+
+    fun start() {
+        wake = false
+        covering = false
+        shown = true
+    }
+
+    fun stop() {
+        shown = false
+        covering = false
+        wake = false
+    }
+}
+
+/**
+ * Skärmsläckarens läge, för ritningen: väggens och biofältens styrka, 0–1.
+ * På väg in tonas de fram när alla omslag lyft ([coverFrom] till [coverAt]).
+ */
+private class SaverLook {
+    var phase = MorphPhase.GATHER
+    var coverFrom = 0f
+    var coverAt = 1f
+
+    fun wall(m: Long): Float = when (phase) {
+        MorphPhase.GATHER -> smoothstep(coverFrom, coverAt, m.toFloat())
+        MorphPhase.SCATTER -> 1f - smoothstep(WALL_FADE_FROM_MS, WALL_FADE_TO_MS.toFloat(), m.toFloat())
+        else -> 1f
+    }
+
+    fun bars(m: Long): Float = when (phase) {
+        MorphPhase.GATHER -> smoothstep(coverFrom, coverAt, m.toFloat())
+        MorphPhase.SCATTER -> 1f - smoothstep(0f, BARS_MS, m.toFloat())
+        else -> 1f
+    }
+}
+
+/**
+ * Skärmsläckaren på tv:n, när ingen rört fjärrkontrollen på en stund (se
+ * AppRoot). Sidan flyter över i filmväggen: omslagen på sidan lyfter och
+ * flyger in på väggen medan den tonas fram i full styrka och biofälten
+ * glider in. Där glider väggen sakta, omslag tonar över i nya, och då och
+ * då går en mjuk våg av nya filmer ut från mitten. En knapptryckning flyter
+ * tillbaka, som slutet på starten: omslag flyger från väggen till sidans
+ * omslag och lägger sig på dem. Trycker man redan på vägen in går allt
+ * tillbaka samma väg. Knappen gör inget annat. Lämnas appen försvinner
+ * skärmsläckaren direkt.
+ */
+@Composable
+internal fun ScreenSaver(state: AppState, wall: PosterWall, morph: CardMorph, saver: SaverControl) {
+    val looks = remember { IntroLooks() }
+    val frame = remember { OverlayFrame() }
+    val look = remember { SaverLook() }
+
+    LaunchedEffect(Unit) {
+        // Varje tryck på fjärren väcker, också ett som tv:n tog hand om själv (se AppState.noteInput).
+        val quietSince = state.lastInputAt
+        fun awake() = saver.wake || state.lastInputAt != quietSince
+        wall.startSaver()
+        try {
+            // Var skärmsläckaren ligger är känt först efter första bilden.
+            var last = withFrameMillis { it }
+            // In: sidans omslag flyger in på väggen.
+            val chosen = targetsOf(morph.visibleSpots(), frame)
+            val times = wall.planGather(chosen.map { it.toTarget(frame) })
+            chosen.forEachIndexed { i, spot -> spot.liftAt = times.lift[i] }
+            look.coverFrom = (times.coveredAt - GATHER_COVER_MS).toFloat().coerceAtLeast(0f)
+            look.coverAt = times.coveredAt.toFloat().coerceAtLeast(look.coverFrom + 1f)
+            look.phase = MorphPhase.GATHER
+            val inTotal = max(times.coveredAt, times.land.maxOrNull() ?: 0L) + 40L
+            morph.start(MorphPhase.GATHER)
+            var time = 0.0
+            while (time < inTotal && !awake() && state.appVisible) {
+                withFrameMillis { now ->
+                    time += (now - last).coerceIn(0L, 50L)
+                    last = now
+                    morph.clock.longValue = time.toLong()
+                }
+            }
+            // Appen lämnades: ingen väg tillbaka att visa.
+            if (!state.appVisible) return@LaunchedEffect
+            if (awake()) {
+                // En knapp innan väggen hunnit täcka allt: allt går tillbaka samma
+                // väg — omslagen flyger hem till sina kort och väggen tonar bort.
+                while (time > 0.0 && state.appVisible) {
+                    withFrameMillis { now ->
+                        time -= (now - last).coerceIn(0L, 50L) * SAVER_EXIT_RATE
+                        last = now
+                        morph.clock.longValue = max(0L, time.toLong())
+                    }
+                }
+                return@LaunchedEffect
+            }
+            wall.endGather()
+            // Väggen täcker allt, tills någon trycker på en knapp.
+            look.phase = MorphPhase.COVERED
+            morph.cover()
+            saver.covering = true
+            while (!awake() && state.appVisible) delay(50)
+            saver.covering = false
+            if (!state.appVisible) return@LaunchedEffect
+            // Ut: omslag flyger från väggen till sidans omslag.
+            val back = targetsOf(morph.visibleSpots(), frame)
+            val lands = wall.planMorph(back.map { it.toTarget(frame) })
+            back.forEachIndexed { i, spot -> spot.landAt = lands[i] }
+            val outTotal = max(WALL_FADE_TO_MS, (lands.maxOrNull() ?: 0L) + MORPH_DISSOLVE_MS) + 40L
+            look.phase = MorphPhase.SCATTER
+            morph.start(MorphPhase.SCATTER)
+            time = 0.0
+            last = withFrameMillis { it }
+            while (time < outTotal) {
+                withFrameMillis { now ->
+                    time += (now - last).coerceIn(0L, 50L) * SAVER_EXIT_RATE
+                    last = now
+                    morph.clock.longValue = time.toLong()
+                }
+            }
+        } finally {
+            wall.endFlights()
+            wall.stopSaver()
+            morph.finish()
+            saver.stop()
+        }
+    }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .onGloballyPositioned { frame.place(it) },
+    ) {
+        // Väggen i full styrka, med färgtonen och hörnen.
+        Spacer(
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    alpha = look.wall(morph.clock.longValue)
+                    compositingStrategy = CompositingStrategy.ModulateAlpha
+                }
+                .drawBehind {
+                    if (look.wall(morph.clock.longValue) <= 0.002f) return@drawBehind
+                    drawRect(INTRO_BLACK)
+                    wall.drawIntro(this)
+                    looks.drawWall(this)
+                },
+        )
+        // Omslagen på väg, och biofälten överst. Eget lager: sidan under ritas inte om för varje bild.
+        Spacer(
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer()
+                .drawBehind {
+                    val m = morph.clock.longValue
+                    if (m >= 0L) wall.drawFlyers(this, m)
+                    looks.drawBars(this, 1f - look.bars(m))
+                },
+        )
     }
 }
 
@@ -459,7 +670,10 @@ private const val SKIP_RATE = 1.8f
 /** Högst så många omslag flyger, och inget till kort mindre än så (bildpunkter). */
 private const val MAX_FLYERS = 18
 private const val MIN_TARGET_PX = 24f
-/** Korten tonas in under omslaget så här länge innan det landar. */
+/** Korten tonas in under omslaget så här länge innan det landar, och ut så här länge när det lyfter. */
 private const val CARD_LEAD_MS = 160L
+private const val CARD_HIDE_MS = 200L
+/** Skärmsläckaren: tillbaka går lite fortare än starten. */
+private const val SAVER_EXIT_RATE = 1.3f
 /** Längre än så väntar den inte, även om inget blivit klart. */
 private const val MAX_SHOW_MS = 20_000L

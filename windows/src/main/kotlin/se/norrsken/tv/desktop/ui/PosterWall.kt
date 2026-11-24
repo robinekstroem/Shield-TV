@@ -112,6 +112,14 @@ internal class PosterWall {
     /** När klippen börjar ta fart, i väggens tid (se [startRush]); Long.MAX_VALUE tills dess. */
     private var rushAt = Long.MAX_VALUE
 
+    /** Skärmsläckaren visas: väggen går i full fart, omslag tonar över i nya och vågor går ut från mitten. */
+    var saver = false
+        private set
+    /** Skärmsläckarens vågor: hur många som gått, när den senaste gick och när nästa går (väggens tid). */
+    private var wave = 0
+    private var waveAt = 0L
+    private var nextWaveAt = Long.MAX_VALUE
+
     /** Efter starten: väggen är bakgrund, och omslagen byts inte längre. */
     var ambient = false
 
@@ -249,6 +257,19 @@ internal class PosterWall {
     fun startRush() {
         if (!lit || !cinematic || rushAt != Long.MAX_VALUE) return
         rushAt = max(elapsed.toLong() + 16L, RUSH_EARLIEST_MS)
+    }
+
+    /** Skärmsläckaren kommer fram: väggen vaknar, med enstaka byten och snart en första våg. */
+    fun startSaver() {
+        saver = true
+        val u = clock.longValue
+        nextSwapAt = u + SAVER_SWAP_FROM_MS
+        nextWaveAt = u + SAVER_WAVE_FIRST_MS
+    }
+
+    fun stopSaver() {
+        saver = false
+        nextWaveAt = Long.MAX_VALUE
     }
 
     /** Toppen, i väggens tid: klippen går som fortast. Long.MAX_VALUE innan farten börjat. */
@@ -671,6 +692,7 @@ internal class PosterWall {
                 }
                 // Mitt i klippen: med från det slag som är nu, inte alla som redan varit.
                 tile.beats = beatsPassed(tile, u)
+                tile.wave = wave
                 // Närmast mitten först: de får de bästa filmerna.
                 var at = fresh.size
                 while (at > 0 && fresh[at - 1].dist > tile.dist) at--
@@ -688,8 +710,13 @@ internal class PosterWall {
             tile.poster = poster
             if (tile.createdAt < u && tile.igniteAt < u) tile.igniteAt = u
         }
+        // Skärmsläckaren: då och då en mjuk våg av nya filmer ut från mitten.
+        if (saver && flyers.isEmpty() && u >= nextWaveAt) {
+            wave++
+            waveAt = nextWaveAt
+            nextWaveAt = waveAt + SAVER_WAVE_EVERY_MS
+        }
         // Klippen: vid varje slag byter omslagen film, i en våg från mitten.
-        // Vid själva slaget byter alla på en gång.
         var moving = false
         for (k in tiles.indices) {
             val tile = tiles[k]
@@ -697,6 +724,12 @@ internal class PosterWall {
             if (tile.previous >= 0 && u >= tile.cutAt + tile.cutMs) {
                 release(tile.previous, u)
                 tile.previous = -1
+            }
+            if (saver && tile.wave < wave && u >= waveAt + tile.dist * SAVER_WAVE_SPREAD_MS) {
+                tile.wave = wave
+                if (!tile.reserved && tile.previous < 0 && u >= tile.igniteAt + IGNITE_MS.toLong()) {
+                    cut(tile, u, SAVER_WAVE_FADE_MS)
+                }
             }
             // Klippen: allt tätare fram till toppen och sedan allt glesare medan
             // väggen tonar bort. Omslag som ska flyga till startsidan klipps inte,
@@ -711,10 +744,12 @@ internal class PosterWall {
             // En plats som fylls på efter slutet tonas fram i sin egen takt: den håller inte väggen i gång.
             if (tile.previous >= 0 || (u < tile.igniteAt + IGNITE_MS.toLong() && !tile.refill)) moving = true
         }
-        // Medan starten väntar på startsidan: då och då tonar ett omslag långsamt över i ett annat.
-        if (!ambient && flyers.isEmpty() && rushAt == Long.MAX_VALUE && u >= nextSwapAt) {
-            nextSwapAt = u + (SWAP_EVERY_MS * (0.7f + 0.6f * hash(u.toInt(), 11))).toLong()
-            pick(u)?.let { cut(it, u, SWAP_FADE_MS) }
+        // Medan starten väntar på startsidan, och i skärmsläckaren: då och då tonar
+        // ett omslag långsamt över i ett annat.
+        if ((saver || (!ambient && rushAt == Long.MAX_VALUE)) && flyers.isEmpty() && u >= nextSwapAt) {
+            val every = if (saver) SAVER_SWAP_EVERY_MS else SWAP_EVERY_MS
+            nextSwapAt = u + (every * (0.7f + 0.6f * hash(u.toInt(), 11))).toLong()
+            pick(u)?.let { cut(it, u, if (saver) SAVER_SWAP_FADE_MS else SWAP_FADE_MS) }
         }
         busy = moving
     }
@@ -914,13 +949,25 @@ internal class PosterWall {
      * rad för rad. Ger när vart och ett landar, i ms efter att slutet
      * började, eller -1 där det inte fanns något omslag att skicka.
      */
-    fun planMorph(targets: List<MorphTarget>): LongArray {
+    fun planMorph(targets: List<MorphTarget>): LongArray = planFlights(targets, gather = false).land
+
+    /**
+     * Skärmsläckaren kommer: omslaget på varje kort i [targets] lyfter och
+     * flyger in på en plats på väggen — samma film om den finns där — och
+     * tonar över i väggens film på vägen. Platserna står tomma tills omslagen
+     * är framme. Ger när de lyfter och landar, och när väggen täcker allt.
+     */
+    fun planGather(targets: List<MorphTarget>): FlightTimes = planFlights(targets, gather = true)
+
+    private fun planFlights(targets: List<MorphTarget>, gather: Boolean): FlightTimes {
+        val lifts = LongArray(targets.size) { -1L }
         val lands = LongArray(targets.size) { -1L }
+        val none = FlightTimes(lifts, lands, GATHER_COVER_MS)
         flyers.clear()
-        if (!lit || targets.isEmpty() || width <= 0f) return lands
+        if (!lit || targets.isEmpty() || width <= 0f) return none
         val u = clock.longValue
         prepare(u)
-        if (!ready) return lands
+        if (!ready) return none
         // Omslagen som står i bild och inte håller på att bytas. De får sticka ut
         // en bit under biofälten eller kanten: de flyger ändå in mot mitten.
         val inset = width * 0.01f
@@ -990,11 +1037,32 @@ internal class PosterWall {
             val flight = if (target.prominent) MORPH_HERO_FLIGHT_MS else MORPH_FLIGHT_MS
             val same = tile.poster < urls.size && urls[tile.poster] in target.urls
             tile.reserved = true
-            flyers.add(Flyer(tile, tile.poster, target, start.toLong(), flight, same))
+            val flyer = Flyer(tile, tile.poster, target, start.toLong(), flight, same, gather)
+            if (gather) {
+                // Från kortet: platsen på väggen står tom tills omslaget är framme.
+                flyer.xs[0] = target.left
+                flyer.ys[0] = target.top
+                flyer.xs[1] = target.right
+                flyer.ys[1] = target.top
+                flyer.xs[2] = target.right
+                flyer.ys[2] = target.bottom
+                flyer.xs[3] = target.left
+                flyer.ys[3] = target.bottom
+                flyer.launched = true
+                tile.detached = true
+            }
+            flyers.add(flyer)
+            lifts[i] = start.toLong()
             lands[i] = start.toLong() + flight
         }
-        return lands
+        // Väggen tonas fram över sidan när alla omslag har lyft (skärmsläckaren).
+        val covered = (lifts.maxOrNull() ?: 0L).coerceAtLeast(0L) + GATHER_COVER_MS
+        coveredAt = covered
+        return FlightTimes(lifts, lands, covered)
     }
+
+    /** Skärmsläckaren: när väggen täcker allt, så att omslagen som landat kan lämna över till den. */
+    private var coveredAt = 0L
 
     /**
      * Omslagen på väg till startsidan, [m] ms efter att slutet började: i
@@ -1008,9 +1076,110 @@ internal class PosterWall {
         for (i in flyers.indices) {
             val flyer = flyers[i]
             if (flyer.canceled || m < flyer.start) continue
+            if (flyer.gather) {
+                scope.drawGatherer(flyer, m, u)
+                continue
+            }
             if (!flyer.launched && !liftOff(flyer, u)) continue
             scope.drawFlyer(flyer, m)
         }
+    }
+
+    /**
+     * Ett omslag på väg från ett kort in på väggen: i en båge, lite lyft mot
+     * en på vägen, från kortets ram till platsens perspektiv och från kortets
+     * bild till väggens film — mot platsen där den står just nu, eftersom
+     * väggen glider. Framme lämnar det över till väggen, med samma bild på
+     * samma ställe; tills väggen täcker allt ritas det kvar ovanpå.
+     */
+    private fun DrawScope.drawGatherer(flyer: Flyer, m: Long, u: Long) {
+        val tile = flyer.tile
+        val target = flyer.target
+        val alive = tile.poster == flyer.poster && tiles.contains(tile)
+        if (alive) {
+            val left = tileLeft(tile, u)
+            val top = tileTop(tile)
+            for (k in 0 until 4) {
+                project(if (k == 0 || k == 3) left else left + tileW, if (k < 2) top else top + tileH)
+                flyer.endX[k] = projX
+                flyer.endY[k] = projY
+            }
+            flyer.shade = shadeAt(left + tileW / 2f, top + tileH / 2f)
+            flyer.reached = true
+        }
+        if (!flyer.reached) return
+        val raw = ((m - flyer.start).toFloat() / flyer.flight).coerceIn(0f, 1f)
+        if (alive) {
+            // Framme: väggen tar över platsen. Omslaget ritas kvar tills väggen täcker allt.
+            // Går flygningen tillbaka (en knapp på vägen in) lämnar väggen platsen igen.
+            val home = raw >= 1f
+            tile.detached = !home
+            tile.reserved = !home
+            flyer.handed = home
+            if (home && m >= coveredAt) return
+        }
+        // Platsen försvann ur bilden under färden: omslaget tonar bort där.
+        val alpha = if (alive || raw < 1f) 1f else 1f - smoothstep(0f, MORPH_DISSOLVE_MS.toFloat(), (m - flyer.start - flyer.flight).toFloat())
+        if (alpha <= 0.002f) return
+        val p = FLIGHT_EASING.transform(raw)
+        val xs = flyer.xs
+        val ys = flyer.ys
+        val sx = (xs[0] + xs[1] + xs[2] + xs[3]) / 4f
+        val sy = (ys[0] + ys[1] + ys[2] + ys[3]) / 4f
+        val ex = flyer.endX
+        val ey = flyer.endY
+        val tx = (ex[0] + ex[1] + ex[2] + ex[3]) / 4f
+        val ty = (ey[0] + ey[1] + ey[2] + ey[3]) / 4f
+        val midX = (sx + tx) / 2f
+        val midY = (sy + ty) / 2f - MORPH_ARC * hypot(tx - sx, ty - sy)
+        val q = 1f - p
+        val cx = q * q * sx + 2f * q * p * midX + p * p * tx
+        val cy = q * q * sy + 2f * q * p * midY + p * p * ty
+        val lift = 1f + MORPH_LIFT * sin(p * PI_F)
+        for (k in 0 until 4) {
+            val fromX = xs[k] - sx
+            val fromY = ys[k] - sy
+            flightX[k] = cx + (fromX + (ex[k] - tx - fromX) * p) * lift
+            flightY[k] = cy + (fromY + (ey[k] - ty - fromY) * p) * lift
+        }
+        quadMatrix(flightX, flightY, FLIGHT_SIZE.toFloat(), flightMatrix)
+        val aspect = target.aspect + (POSTER_ASPECT - target.aspect) * p
+        val card = target.image
+        // Kortets bild först; den tonar över i väggens film på vägen.
+        val blend = if (card == null || flyer.same) 1f else smoothstep(0.22f, 0.78f, p)
+        val shade = flyer.shade * smoothstep(0.5f, 1f, p)
+        projected(flightMatrix) {
+            if (card != null && blend < 0.999f) cropped(card, aspect, alpha)
+            if (blend > 0.001f) wallPoster(flyer.poster, aspect, alpha * blend)
+            if (shade > 0.003f) {
+                drawRect(Color.Black, size = Size(FLIGHT_SIZE.toFloat(), FLIGHT_SIZE.toFloat()), alpha = shade * alpha)
+            }
+        }
+    }
+
+    /** Skärmsläckaren är framme, eller avbröts på vägen: platserna på väggen tar över. */
+    fun endGather() {
+        val u = clock.longValue
+        for (i in flyers.indices) {
+            val flyer = flyers[i]
+            if (!flyer.gather) continue
+            val tile = flyer.tile
+            tile.reserved = false
+            if (tile.poster == flyer.poster && tiles.contains(tile)) {
+                tile.detached = false
+            } else if (!flyer.handed) {
+                // Platsen lämnade bilden innan omslaget var framme: filmen blir ledig först nu.
+                release(flyer.poster, u)
+            }
+        }
+        flyers.removeAll { it.gather }
+        dirty = true
+    }
+
+    /** Alla flygningar avslutas: de till väggen lämnar över till den, de från den landar. */
+    fun endFlights() {
+        endGather()
+        endMorph()
     }
 
     /** Omslaget lämnar väggen: hörnen där det står just nu, och hur mörkt det är där. */
@@ -1189,7 +1358,13 @@ internal class MorphTarget(
     val aspect: Float get() = (right - left) / (bottom - top).coerceAtLeast(1f)
 }
 
-/** Ett omslag på väg från väggen till ett kort på startsidan. */
+/**
+ * När omslagen lyfter och landar, i ms efter att flygningen började, per kort
+ * (-1 där inget flyger), och när väggen täcker allt (skärmsläckaren).
+ */
+internal class FlightTimes(val lift: LongArray, val land: LongArray, val coveredAt: Long)
+
+/** Ett omslag på väg mellan väggen och ett kort. */
 private class Flyer(
     val tile: Tile,
     val poster: Int,
@@ -1199,9 +1374,16 @@ private class Flyer(
     val flight: Long,
     /** Samma film som kortet: ingen övertoning på vägen. */
     val same: Boolean,
+    /** Från kortet in på väggen (skärmsläckaren), i stället för från väggen till kortet. */
+    val gather: Boolean = false,
 ) {
     var launched = false
     var canceled = false
+    /** In på väggen: platsens hörn just nu, om den har setts, och om väggen tagit över den. */
+    val endX = FloatArray(4)
+    val endY = FloatArray(4)
+    var reached = false
+    var handed = false
     /** Hörnen när det lämnade väggen: uppe till vänster, uppe till höger, nere till höger, nere till vänster. */
     val xs = FloatArray(4)
     val ys = FloatArray(4)
@@ -1274,6 +1456,8 @@ private class Tile {
     var refill = false
     /** Ska flyga till startsidan: klipps inte medan det väntar på sin tur. */
     var reserved = false
+    /** Skärmsläckarens senaste våg som nått platsen. */
+    var wave = 0
 
     fun reset(row: Int, col: Int) {
         this.row = row
@@ -1289,6 +1473,7 @@ private class Tile {
         detached = false
         refill = false
         reserved = false
+        wave = 0
     }
 }
 
@@ -1345,6 +1530,8 @@ internal fun PosterWallDriver(state: AppState, wall: PosterWall) {
             val idle = nowMs() - wall.lastInput >= IDLE_MS
             val target = when {
                 !state.introDone -> 1f
+                // Skärmsläckaren: väggen i full fart.
+                wall.saver -> 1f
                 state.nowPlaying != null -> 0f
                 // Ett omslag som tonas fram (det laddades sent) får tonas klart.
                 wall.busy -> AMBIENT_SPEED
@@ -1366,7 +1553,7 @@ internal fun PosterWallDriver(state: AppState, wall: PosterWall) {
                 speed = if (target > speed) min(target, speed + dt / EASE_MS) else max(target, speed - dt / EASE_MS)
                 wall.advance(dt * speed.toDouble())
                 // Som bakgrund räcker tjugofyra bilder i sekunden.
-                if (!state.introDone || frame - published >= AMBIENT_FRAME_MS) {
+                if (!state.introDone || wall.saver || frame - published >= AMBIENT_FRAME_MS) {
                     wall.publish()
                     published = frame
                 }
@@ -1416,10 +1603,11 @@ internal val LocalCoverEntrance = compositionLocalOf<CoverEntrance?> { null }
  */
 @Composable
 internal fun Modifier.coverEntrance(spot: MorphSpot? = null): Modifier {
+    // I startens slut: kortet visar sig när omslaget som flyger hit landar, utan att glida upp.
     if (spot != null && spot.landAt >= 0L) return morphReveal(spot)
-    val entrance = LocalCoverEntrance.current ?: return this
+    val entrance = LocalCoverEntrance.current ?: return morphReveal(spot)
     val order = remember(entrance) { entrance.next() }
-    if (order < 0) return this
+    if (order < 0) return morphReveal(spot)
     val progress = remember(entrance) { Animatable(0f) }
     LaunchedEffect(entrance) {
         delay(min(order, ENTRANCE_MAX_STEPS) * ENTRANCE_STAGGER_MS)
@@ -1427,7 +1615,8 @@ internal fun Modifier.coverEntrance(spot: MorphSpot? = null): Modifier {
     }
     return graphicsLayer {
         val p = progress.value
-        alpha = p
+        // Skärmsläckaren: kortet är borta medan dess omslag är på väggen.
+        alpha = p * (if (spot != null) spot.morph.cardAlpha(spot) else 1f)
         translationY = (1f - p) * ENTRANCE_RISE.toPx()
         compositingStrategy = CompositingStrategy.ModulateAlpha
     }
@@ -1638,6 +1827,18 @@ private const val PUSH_EASE_MS = 900f
 private const val DRIFT_RUSH = 1.6f
 private const val DRIFT_EASE_MS = 1_500f
 
+/**
+ * Skärmsläckaren: ett omslag i taget tonar över i ett annat, och då och då
+ * går en mjuk våg av nya filmer ut från mitten. Lugnt — det är en skärmsläckare.
+ */
+private const val SAVER_SWAP_FROM_MS = 1_600L
+private const val SAVER_SWAP_EVERY_MS = 1_100f
+private const val SAVER_SWAP_FADE_MS = 1_000f
+private const val SAVER_WAVE_FIRST_MS = 7_000L
+private const val SAVER_WAVE_EVERY_MS = 15_000L
+private const val SAVER_WAVE_SPREAD_MS = 650f
+private const val SAVER_WAVE_FADE_MS = 700f
+
 /** Medan starten väntar på startsidan: ett omslag i taget tonar långsamt över i ett annat. */
 private const val SWAP_FROM_MS = 2_800L
 private const val SWAP_EVERY_MS = 1_300f
@@ -1656,6 +1857,8 @@ private const val MORPH_FLIGHT_MS = 1_000L
 private const val MORPH_HERO_FLIGHT_MS = 1_150L
 internal const val MORPH_DISSOLVE_MS = 220L
 private const val MORPH_ARC = 0.18f
+/** Skärmsläckaren: väggen tonas fram över sidan så här länge, när alla omslag lyft. */
+internal const val GATHER_COVER_MS = 700L
 private const val MORPH_LIFT = 0.10f
 private val FLIGHT_EASING = CubicBezierEasing(0.6f, 0f, 0.2f, 1f)
 private const val FLIGHT_SIZE = 1024
