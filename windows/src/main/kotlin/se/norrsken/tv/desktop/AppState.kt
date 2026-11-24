@@ -49,6 +49,7 @@ import se.norrsken.tv.desktop.data.HistoryStore
 import se.norrsken.tv.desktop.data.WatchKind
 import se.norrsken.tv.desktop.data.WatchEntry
 import se.norrsken.tv.desktop.ui.AppTheme
+import se.norrsken.tv.desktop.ui.WallStyle
 import kotlinx.coroutines.delay
 import se.norrsken.tv.desktop.data.GuideIndex
 import se.norrsken.tv.desktop.data.GuideStore
@@ -425,6 +426,9 @@ class AppState {
         private set
     var theme by mutableStateOf(AppTheme.GRAPHITE)
         private set
+    /** Omslagsväggen bakom sidorna: Filmväggen eller Filmsiden i någon av färgerna. */
+    var wallStyle by mutableStateOf(WallStyle.WALL)
+        private set
 
     var selectedSeries by mutableStateOf<Series?>(null)
         private set
@@ -620,6 +624,7 @@ class AppState {
         movieSort = sortOrderOf(loaded.third.movieSort)
         seriesSort = sortOrderOf(loaded.third.seriesSort)
         theme = AppTheme.entries.firstOrNull { it.name == loaded.third.theme } ?: AppTheme.GRAPHITE
+        wallStyle = WallStyle.entries.firstOrNull { it.name == loaded.third.wallStyle } ?: WallStyle.WALL
         tmdbKey = SecretBox.unsealText(loaded.third.tmdbKey)
         tmdbConnected = tmdbKey != null
         backgrounds = loaded.third.backgrounds.filter { File(it).isFile }
@@ -1940,6 +1945,11 @@ class AppState {
         loading = false
     }
 
+    /** Förhandsbilder: filmväggen med just de här omslagen, som i en app med ett stort bibliotek. */
+    internal fun previewReel(reel: List<IntroReelItem>) {
+        introReel = reel
+    }
+
     /**
      * Förhandsbilder (windows/src/preview): spelarens läge utan någon spelare —
      * vad som spelas, en spolning eller ett kanalbyte på gång.
@@ -2222,6 +2232,11 @@ class AppState {
 
     fun selectTheme(option: AppTheme) {
         theme = option
+        saveSettings()
+    }
+
+    fun selectWallStyle(option: WallStyle) {
+        wallStyle = option
         saveSettings()
     }
 
@@ -3146,6 +3161,7 @@ class AppState {
         movieSort = movieSort.name,
         seriesSort = seriesSort.name,
         theme = theme.name,
+        wallStyle = wallStyle.name,
         tmdbKey = tmdbKey?.let { SecretBox.sealText(it) },
         backgrounds = backgrounds,
         audioLanguage = preferredAudio,

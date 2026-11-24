@@ -5,6 +5,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.Image
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -137,6 +138,10 @@ fun SettingsScreen(state: AppState) {
                     }
                     // Shield: menyernas upplösning. Windows visar inget här.
                     DisplayOptions()
+                }
+
+                Section("Omslagsväggen") {
+                    WallStyleChooser(state)
                 }
 
                 Section("Egna bakgrundsbilder") {
@@ -549,6 +554,56 @@ private fun ThemeCard(theme: AppTheme, selected: Boolean, onClick: () -> Unit) {
                 if (theme == AppTheme.CRYSTAL) Tag("NYTT", preview.signal)
             }
             Text(theme.description, style = MaterialTheme.typography.bodySmall, color = palette.textTertiary)
+        }
+    }
+}
+
+/**
+ * Omslagsväggen bakom sidorna: Filmväggen, eller Filmsiden med sidenbandet
+ * bakom omslagen i lila och rosa, isblått eller guld. Fyra kort i rad, med
+ * en liten bild av var och en.
+ */
+@Composable
+internal fun WallStyleChooser(state: AppState) {
+    val palette = LocalPalette.current
+    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        WallStyle.entries.forEach { option ->
+            WallStyleCard(option, selected = state.wallStyle == option, onClick = { state.selectWallStyle(option) })
+        }
+    }
+    if (state.backgrounds.isNotEmpty()) {
+        Text(
+            "Dina egna bakgrundsbilder visas i stället för väggen. Ta bort dem nedan för att se den.",
+            style = MaterialTheme.typography.bodySmall,
+            color = palette.textTertiary,
+        )
+    }
+}
+
+@Composable
+private fun WallStyleCard(style: WallStyle, selected: Boolean, onClick: () -> Unit) {
+    val palette = LocalPalette.current
+    val shape = RoundedCornerShape(14.dp)
+    val band = remember { SilkBand() }
+    Pressable(
+        onClick = onClick,
+        selected = selected,
+        shape = shape,
+        modifier = Modifier.width(188.dp).border(1.dp, if (selected) palette.focus else palette.hairline, shape),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            Spacer(
+                Modifier
+                    .fillMaxWidth()
+                    .height(96.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .drawBehind { wallMiniature(style.silk, band) },
+            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(style.label, style = MaterialTheme.typography.titleMedium)
+                if (style == WallStyle.SILK) Tag("NYTT", palette.signal)
+            }
+            Text(style.description, style = MaterialTheme.typography.bodySmall, color = palette.textTertiary)
         }
     }
 }

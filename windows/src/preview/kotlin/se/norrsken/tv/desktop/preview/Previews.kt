@@ -33,6 +33,22 @@ import se.norrsken.tv.desktop.data.MatchGoal
 import se.norrsken.tv.desktop.data.MatchState
 import se.norrsken.tv.desktop.data.isMalmoFF
 import se.norrsken.tv.desktop.ui.AppRoot
+import se.norrsken.tv.desktop.ui.CardMorph
+import se.norrsken.tv.desktop.ui.PosterWall
+import se.norrsken.tv.desktop.ui.PosterWallDriver
+import se.norrsken.tv.desktop.ui.SaverControl
+import se.norrsken.tv.desktop.ui.ScreenSaver
+import se.norrsken.tv.desktop.ui.WallStyle
+import se.norrsken.tv.desktop.ui.WallStyleChooser
+import se.norrsken.tv.desktop.data.IntroReelItem
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import se.norrsken.tv.desktop.ui.MatchNoticeOverlay
 import se.norrsken.tv.desktop.ui.PlayerLayers
 import se.norrsken.tv.desktop.ui.PlayerStill
@@ -110,6 +126,11 @@ fun main(args: Array<String>) {
     println(
         "Läge: laddar=${state.loading}, källor=${state.sources.size}, filmer=${state.library.movies.size}, " +
             "serier=${state.library.series.size}, kanaler=${state.library.channels.size}, sparat=${Storage().loadSources().size}",
+    )
+    // Filmväggen bakom sidorna: alla omslag, som med ett riktigt bibliotek.
+    state.previewReel(
+        data.movies.mapNotNull { movie -> movie.poster?.let { IntroReelItem(movie.name, it, null) } } +
+            data.content.series.mapNotNull { series -> series.cover?.let { IntroReelItem(series.name, it, null) } },
     )
     state.introDone = true
     // Tablån läses från disken en stund efter starten.
@@ -367,6 +388,75 @@ private fun scenes(state: AppState, data: PreviewData): List<Scene> {
             },
             settleMs = 7_000L,
             content = app,
+        ),
+        // Omslagsväggen bakom sidorna, och Filmsiden i sina färger. Väggen behöver
+        // några sekunder på sig att tändas och tona fram omslagen.
+        Scene(
+            "vagg-hem",
+            before = {
+                screen(Screen.HOME)()
+                state.selectWallStyle(WallStyle.WALL)
+            },
+            settleMs = 9_000L,
+            content = app,
+        ),
+        Scene(
+            "filmsiden-hem",
+            before = {
+                screen(Screen.HOME)()
+                state.selectWallStyle(WallStyle.SILK)
+            },
+            settleMs = 9_000L,
+            content = app,
+        ),
+        Scene(
+            "filmsiden-vag-filmer",
+            before = {
+                screen(Screen.MOVIES)()
+                state.selectWallStyle(WallStyle.WAVE)
+            },
+            settleMs = 9_000L,
+            content = app,
+        ),
+        Scene(
+            "filmsiden-champagne-tabla",
+            before = {
+                screen(Screen.GUIDE)()
+                state.selectWallStyle(WallStyle.CHAMPAGNE)
+            },
+            settleMs = 9_000L,
+            content = app,
+        ),
+        Scene(
+            "installningar-vagg",
+            before = { state.selectWallStyle(WallStyle.SILK) },
+            settleMs = 1_500L,
+            content = {
+                TvTheme(state.theme) {
+                    Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black).padding(48.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            WallStyleChooser(state)
+                        }
+                    }
+                }
+            },
+        ),
+        Scene(
+            "skarmslackare-filmsiden",
+            before = {
+                screen(Screen.HOME)()
+                state.selectWallStyle(WallStyle.SILK)
+            },
+            settleMs = 11_000L,
+            content = {
+                TvTheme(state.theme) {
+                    val wall = remember { PosterWall() }
+                    PosterWallDriver(state, wall)
+                    val morph = remember { CardMorph() }
+                    val saver = remember { SaverControl().also { it.start() } }
+                    ScreenSaver(state, wall, morph, saver)
+                }
+            },
         ),
     )
 }

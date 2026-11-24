@@ -294,7 +294,7 @@ fun AppRoot(state: AppState) {
             .fillMaxSize()
             .background(palette.background)
             .onPreviewKeyEvent { event ->
-                // Väggen står still medan man trycker på fjärren.
+                // Senaste trycket: skärmsläckaren räknar sina två minuter därifrån.
                 wall.lastInput = nowMs()
                 // Skärmsläckaren: en knapptryckning flyter tillbaka, och gör inget annat.
                 if (saver.shown) {
@@ -329,6 +329,7 @@ fun AppRoot(state: AppState) {
                 // Skärmsläckaren täcker allt: väggen bakom behöver inte ritas.
                 shown = (state.introDone || state.introRevealing) && !saver.covering,
                 quiet = state.screen == Screen.GUIDE || state.screen == Screen.LIVE || state.screen == Screen.SETTINGS,
+                silk = state.wallStyle.silk,
                 modifier = Modifier.fillMaxSize().graphicsLayer(),
             )
         }

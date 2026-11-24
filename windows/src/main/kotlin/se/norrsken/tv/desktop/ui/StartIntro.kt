@@ -635,7 +635,8 @@ internal fun ScreenSaver(state: AppState, wall: PosterWall, morph: CardMorph, sa
                 .drawBehind {
                     if (look.wall(morph.clock.longValue) <= 0.002f) return@drawBehind
                     drawRect(INTRO_BLACK)
-                    wall.drawIntro(this)
+                    // Filmsiden: sidenbandet slingrar sig genom väggen också här.
+                    wall.drawIntro(this, state.wallStyle.silk)
                     looks.drawWall(this)
                 },
         )

@@ -65,7 +65,7 @@ import kotlin.math.sqrt
  * snabbare, som en filmtrailer, ända upp till toppen där omslagen flyger
  * till startsidan — och klippen glesnar igen medan väggen tonar ner. Sedan
  * blir väggen kvar som appens bakgrund, mörk och dämpad, och glider sakta
- * medan man inte trycker på något.
+ * hela tiden — med Filmsiden också med ett sidenband bakom omslagen.
  *
  * Omslagen roteras aldrig, och väggen vrids inte: den står fast och
  * raderna glider. Samma film syns aldrig två gånger samtidigt: väggen
@@ -129,6 +129,12 @@ internal class PosterWall {
     /** Något omslag tonas fram eller byts: väggen ska gå i full fart tills det är klart. */
     var busy = false
         private set
+
+    /** Filmsiden: sidenbandet bakom omslagen, och dess egen tid (ms). */
+    private val silk = SilkBand()
+    private var silkTime = 0.0
+    /** Mellanrummet mellan omslagen, i väggens mått: där Filmsidens ljus lyser fram. */
+    private var rimGap = 1f
 
     val hasReel: Boolean get() = count > 0
 
@@ -284,6 +290,11 @@ internal class PosterWall {
         elapsed += ms
     }
 
+    /** Sidenbandets tid går fram [ms], i jämn takt oavsett väggens fart; syns med nästa [publish]. */
+    fun advanceSilk(ms: Double) {
+        silkTime += ms
+    }
+
     fun publish() {
         val v = elapsed.toLong()
         if (v != clock.longValue) clock.longValue = v
@@ -291,17 +302,32 @@ internal class PosterWall {
 
     // --- Ritningen ---------------------------------------------------------------------
 
-    /** Starten: väggen i full styrka, med ett stilla ljus kring mitten och djupet som mörknar. */
-    fun drawIntro(scope: DrawScope) {
+    /**
+     * Starten: väggen i full styrka, med ett stilla ljus kring mitten och
+     * djupet som mörknar. [silkColors]: skärmsläckaren med Filmsiden — bandet
+     * slingrar sig genom väggen, en bit bakom omslagen och nästa framför dem.
+     * Starten själv ritas alltid utan.
+     */
+    fun drawIntro(scope: DrawScope, silkColors: SilkColors? = null) {
         noteSize(scope.size)
         val u = clock.longValue
         loads.intValue
         if (!lit) return
         prepare(u)
         if (!ready) return
-        scope.drawTiles(u, null)
+        if (silkColors != null) {
+            silk.prepare(scope.size.width, scope.size.height, silkTime)
+            with(silk) { scope.drawBack(silkColors, 1f) }
+        }
+        scope.drawTiles(u, null, silkColors, rimGain = 1f, coverLight = SAVER_COVER_LIGHT)
         scope.drawPool()
         scope.drawFog(Color.Black, INTRO_FOG)
+        if (silkColors != null) {
+            with(silk) {
+                scope.drawFront(silkColors, 1f)
+                scope.drawLight(silkColors, 0.8f)
+            }
+        }
     }
 
     /**
@@ -309,7 +335,7 @@ internal class PosterWall {
      * temats bakgrundsfärg [tint] så att text och omslag framför syns tydligt.
      * [quiet]: sidor med mycket text, där den är ännu mörkare.
      */
-    fun drawBackdrop(scope: DrawScope, tint: Color, quiet: Boolean) {
+    fun drawBackdrop(scope: DrawScope, tint: Color, quiet: Boolean, silkColors: SilkColors? = null) {
         noteSize(scope.size)
         val u = clock.longValue
         loads.intValue
@@ -318,15 +344,22 @@ internal class PosterWall {
         if (!ready) return
         with(scope) {
             drawRect(tint)
-            drawTiles(u, backdropFilter)
+            // Filmsiden: bandet bakom omslagen. Det som ligger över väggen sedan mörkar
+            // också mellanrummen, så ljuset där är starkare från början.
+            if (silkColors != null) {
+                silk.prepare(size.width, size.height, silkTime)
+                with(silk) { drawBack(silkColors, BACKDROP_SILK) }
+            }
+            drawTiles(u, backdropFilter, silkColors, rimGain = BACKDROP_RIM, coverLight = BACKDROP_COVER_LIGHT)
             drawFog(tint, BACKDROP_FOG)
             drawRect(
                 Brush.verticalGradient(
-                    0f to tint.copy(alpha = 0.34f),
-                    0.5f to tint.copy(alpha = 0.52f),
-                    1f to tint.copy(alpha = 0.80f),
+                    0f to tint.copy(alpha = 0.24f),
+                    0.5f to tint.copy(alpha = 0.40f),
+                    1f to tint.copy(alpha = 0.68f),
                 ),
             )
+            if (silkColors != null) with(silk) { drawLight(silkColors, 1f) }
             if (quiet) drawRect(tint.copy(alpha = QUIET_DIM))
         }
     }
@@ -392,6 +425,7 @@ internal class PosterWall {
         val gap = (TILE_GAP * unit * k).roundToInt().coerceAtLeast(2)
         pitchX = (tileW + gap).toFloat()
         pitchY = (tileH + gap).toFloat()
+        rimGap = gap.toFloat()
     }
 
     /** Hur många platser som som mest behöver ett omslag samtidigt. */
@@ -870,15 +904,32 @@ internal class PosterWall {
      * Alla omslag genom en och samma projektion, bara flyttade. Ett omslag som
      * tonas fram växer lite in på sin plats; ett som byter film tonar över.
      */
-    private fun DrawScope.drawTiles(u: Long, filter: ColorFilter?) {
+    private fun DrawScope.drawTiles(
+        u: Long,
+        filter: ColorFilter?,
+        silkColors: SilkColors? = null,
+        rimGain: Float = 1f,
+        coverLight: Float = 0f,
+    ) {
         val center = Offset(tileW / 2f, tileH / 2f)
+        val w = tileW.toFloat()
+        val hh = tileH.toFloat()
         projected(wall) {
             for (i in tiles.indices) {
                 val tile = tiles[i]
                 // Omslag som flyger till startsidan ritas av slutet, inte här.
                 if (tile.poster < 0 || u < tile.igniteAt || tile.detached) continue
                 val ignite = (u - tile.igniteAt) / IGNITE_MS
-                translate(tileLeft(tile, u), tileTop(tile)) {
+                val left = tileLeft(tile, u)
+                val top = tileTop(tile)
+                // Filmsiden: hur nära bandet omslaget står. Kanten kommer när omslaget nästan tonats fram.
+                var near = 0f
+                if (silkColors != null) {
+                    project(left + w / 2f, top + hh / 2f)
+                    near = silk.nearness(projX, projY) * smoothstep(0.6f, 1f, ignite)
+                }
+                translate(left, top) {
+                    if (near > 0.02f && silkColors != null) rimBehind(silkColors, near, w, hh, rimGap, rimGain)
                     if (ignite < 1f) {
                         val q = ignite.coerceIn(0f, 1f)
                         val grow = 1f + IGNITE_GROW * (1f - easeOutCubic(q))
@@ -892,6 +943,7 @@ internal class PosterWall {
                     } else {
                         poster(tile.poster, 1f, filter)
                     }
+                    if (near > 0.02f && silkColors != null) coverLit(silkColors, near, coverLight, w, hh)
                 }
             }
         }
@@ -1481,8 +1533,8 @@ private class Tile {
 
 /**
  * Laddar omslagen och driver väggens tid. I starten går den i full fart.
- * Sedan glider den sakta medan man inte trycker på något, och står still
- * medan man navigerar och medan video spelas: då kostar den ingenting.
+ * Sedan glider den sakta hela tiden bakom sidorna, också medan man
+ * navigerar. Bara medan video spelas står den still: då syns den inte.
  */
 @Composable
 internal fun PosterWallDriver(state: AppState, wall: PosterWall) {
@@ -1527,20 +1579,16 @@ internal fun PosterWallDriver(state: AppState, wall: PosterWall) {
                 if (wall.lightingSoon(nowMs())) withFrameMillis { wall.tryLight(nowMs()) } else delay(250)
                 continue
             }
-            val idle = nowMs() - wall.lastInput >= IDLE_MS
             val target = when {
                 !state.introDone -> 1f
                 // Skärmsläckaren: väggen i full fart.
                 wall.saver -> 1f
                 state.nowPlaying != null -> 0f
-                // Ett omslag som tonas fram (det laddades sent) får tonas klart.
-                wall.busy -> AMBIENT_SPEED
-                idle -> AMBIENT_SPEED
-                else -> 0f
+                else -> AMBIENT_SPEED
             }
             if (target <= 0f) {
-                // Man trycker på fjärren, eller video spelas: väggen står still direkt,
-                // och ingen bild ritas om förrän den ska röra sig igen.
+                // Video spelas: väggen står still direkt, och ingen bild ritas om
+                // förrän den ska röra sig igen.
                 speed = 0f
                 last = -1L
                 delay(120)
@@ -1552,7 +1600,9 @@ internal fun PosterWallDriver(state: AppState, wall: PosterWall) {
                 // Kommer i gång mjukt.
                 speed = if (target > speed) min(target, speed + dt / EASE_MS) else max(target, speed - dt / EASE_MS)
                 wall.advance(dt * speed.toDouble())
-                // Som bakgrund räcker tjugofyra bilder i sekunden.
+                // Sidenbandet går i sin egen jämna takt, också när väggen går i full fart.
+                wall.advanceSilk(dt * min(1f, speed / AMBIENT_SPEED).toDouble())
+                // Som bakgrund räcker trettio bilder i sekunden: varannan bild på en 60 Hz-tv, jämnt.
                 if (!state.introDone || wall.saver || frame - published >= AMBIENT_FRAME_MS) {
                     wall.publish()
                     published = frame
@@ -1565,11 +1615,18 @@ internal fun PosterWallDriver(state: AppState, wall: PosterWall) {
 /**
  * Väggen som bakgrund bakom sidorna: mörk, dämpad och tonad mot temats
  * färg. Tänds väggen först nu (första starten) tonas omslagen fram här.
+ * [silk]: Filmsiden, med sidenbandet bakom omslagen.
  */
 @Composable
-internal fun PosterWallBackdrop(wall: PosterWall, shown: Boolean, quiet: Boolean, modifier: Modifier = Modifier) {
+internal fun PosterWallBackdrop(
+    wall: PosterWall,
+    shown: Boolean,
+    quiet: Boolean,
+    silk: SilkColors? = null,
+    modifier: Modifier = Modifier,
+) {
     val tint = LocalPalette.current.background
-    Spacer(modifier.drawBehind { if (shown) wall.drawBackdrop(this, tint, quiet) })
+    Spacer(modifier.drawBehind { if (shown) wall.drawBackdrop(this, tint, quiet, silk) })
 }
 
 // --- Omslag som tonas fram ------------------------------------------------------------
@@ -1876,15 +1933,21 @@ internal const val VIGNETTE_REACH = 0.72f
 private const val POOL_RADIUS = 1.35f
 private const val POOL_DARK = 0.32f
 private const val INTRO_FOG = 0.50f
-private const val BACKDROP_FOG = 0.55f
+private const val BACKDROP_FOG = 0.46f
 
 /** Bakgrunden i appen: hur mörk och hur färgstark, hur fort, och när den står still. */
-private const val BACKDROP_BRIGHTNESS = 0.36f
-private const val BACKDROP_SATURATION = 0.5f
-private const val QUIET_DIM = 0.5f
+private const val BACKDROP_BRIGHTNESS = 0.46f
+private const val BACKDROP_SATURATION = 0.6f
+/** Live TV, Tablå och Inställningar: lika mörk som förut, fast resten blev ljusare. */
+private const val QUIET_DIM = 0.68f
+
+/** Filmsiden bakom sidorna: bandets styrka (väggen över det mörkar), kanten och ljuset på omslagen. */
+private const val BACKDROP_SILK = 1.5f
+private const val BACKDROP_RIM = 1.4f
+private const val BACKDROP_COVER_LIGHT = 0.16f
+private const val SAVER_COVER_LIGHT = 0.10f
 private const val AMBIENT_SPEED = 0.45f
-private const val AMBIENT_FRAME_MS = 41L
-private const val IDLE_MS = 1_500L
+private const val AMBIENT_FRAME_MS = 32L
 private const val EASE_MS = 1_400f
 
 /** Korten som tonas fram när en sida visas. */
