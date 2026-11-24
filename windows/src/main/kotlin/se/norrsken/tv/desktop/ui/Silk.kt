@@ -41,7 +41,7 @@ enum class WallStyle(val label: String, val description: String, val silk: SilkC
     ),
     SILK(
         "Filmsiden",
-        "Ett sidenband i lila och rosa slingrar sig bakom omslagen. Ljuset lyser fram mellan dem och som en tunn kant runt omslagen.",
+        "Ett sidenband i lila och rosa bakom omslagen. Ljuset lyser fram mellan dem.",
         SilkColors(glow = Color(0xFFA357FF), accent = Color(0xFFFF66C9), thread = Color(0xFFF8EEFF)),
     ),
     WAVE(
@@ -473,7 +473,13 @@ internal fun DrawScope.wallMiniature(colors: SilkColors?, band: SilkBand) {
         }
     }
     drawRect(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.05f), Color.Black.copy(alpha = 0.45f))))
-    if (colors != null) with(band) { drawLight(colors, 1f) }
+    // Här syns bandet också där det går framför omslagen, så att det känns igen i den lilla bilden.
+    if (colors != null) {
+        with(band) {
+            drawFront(colors, 1f)
+            drawLight(colors, 1f)
+        }
+    }
 }
 
 private fun Color.darker(by: Float): Color = Color(red * (1f - by), green * (1f - by), blue * (1f - by), alpha)

@@ -1944,7 +1944,7 @@ private const val QUIET_DIM = 0.68f
 /** Filmsiden bakom sidorna: bandets styrka (väggen över det mörkar), kanten och ljuset på omslagen. */
 private const val BACKDROP_SILK = 1.5f
 private const val BACKDROP_RIM = 1.4f
-private const val BACKDROP_COVER_LIGHT = 0.16f
+private const val BACKDROP_COVER_LIGHT = 0.10f
 private const val SAVER_COVER_LIGHT = 0.10f
 private const val AMBIENT_SPEED = 0.45f
 private const val AMBIENT_FRAME_MS = 32L

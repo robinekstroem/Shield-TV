@@ -595,7 +595,7 @@ private fun WallStyleCard(style: WallStyle, selected: Boolean, onClick: () -> Un
             Spacer(
                 Modifier
                     .fillMaxWidth()
-                    .height(96.dp)
+                    .height(104.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .drawBehind { wallMiniature(style.silk, band) },
             )
