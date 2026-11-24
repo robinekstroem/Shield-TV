@@ -1133,6 +1133,8 @@ private fun MatchRow(
     dayText: String? = null,
     /** Tävlingen under tiden i stället för till höger: lagens sidor, där matcherna spelas i flera. */
     tagUnderTime: Boolean = false,
+    /** Plats till höger för kanalen. Utan: lagens namn får hela bredden. */
+    channelSpace: Boolean = true,
 ) {
     val palette = LocalPalette.current
     val mark = highlightOf(match)
@@ -1216,7 +1218,7 @@ private fun MatchRow(
                     modifier = Modifier.weight(1f, fill = false),
                 )
             }
-            Row(
+            if (showLeague || channelSpace) Row(
                 Modifier.width(if (showLeague) 290.dp else 200.dp),
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
@@ -1945,8 +1947,10 @@ private fun LazyListScope.leagueMatches(
     }
     for ((day, list) in upcoming.groupBy { dayOf(it.kickoff) }) {
         item(key = "dag-$day") { SectionTitle(dayLabel(day, today), trailing = matchCount(list.size)) }
+        // Kanalens plats bara när någon match den dagen har en kanal, så att resultaten står i rad.
+        val channelSpace = list.any { !state.matchChannels[it.id].isNullOrEmpty() }
         items(list, key = { "k" + it.id }) { match ->
-            MatchRow(state, match, focus, key = "liga:${match.id}", showLeague = false, tagUnderTime = team)
+            MatchRow(state, match, focus, key = "liga:${match.id}", showLeague = false, tagUnderTime = team, channelSpace = channelSpace)
         }
     }
     if (finished.isNotEmpty()) {
@@ -1958,6 +1962,7 @@ private fun LazyListScope.leagueMatches(
                 showLeague = false,
                 dayText = shortDay(match.kickoff, today),
                 tagUnderTime = team,
+                channelSpace = false,
             )
         }
     }
@@ -3404,35 +3409,22 @@ internal fun FootballPeek(state: AppState) {
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        // Smalt i menyn: märkena och lagens förkortningar runt tiden eller ställningen.
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TeamLogo(match.home, 30.dp)
-            Spacer(Modifier.width(8.dp))
-            Text(
-                match.home.short,
-                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                color = Color.White,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
+            TeamLogo(match.home, 34.dp)
+            Spacer(Modifier.width(6.dp))
+            Text(peekTag(match.home), style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Black), color = Color.White, maxLines = 1)
+            Spacer(Modifier.weight(1f))
             Text(
                 if (live) "${match.homeScore ?: 0}–${match.awayScore ?: 0}" else clockOf(match.kickoff),
-                style = scoreStyle(20.sp),
+                style = scoreStyle(22.sp),
                 color = Color.White,
                 maxLines = 1,
-                modifier = Modifier.padding(horizontal = 8.dp),
             )
-            Text(
-                match.away.short,
-                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                color = Color.White,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.End,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(Modifier.width(8.dp))
-            TeamLogo(match.away, 30.dp)
+            Spacer(Modifier.weight(1f))
+            Text(peekTag(match.away), style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Black), color = Color.White, maxLines = 1)
+            Spacer(Modifier.width(6.dp))
+            TeamLogo(match.away, 34.dp)
         }
         if (!live) {
             Text(
@@ -3444,3 +3436,6 @@ internal fun FootballPeek(state: AppState) {
         }
     }
 }
+
+/** Lagets förkortning i menyns glimt: ESPN:s, annars namnets tre första bokstäver. */
+private fun peekTag(team: FootballTeam): String = team.abbreviation.ifBlank { team.short.take(3).uppercase() }
