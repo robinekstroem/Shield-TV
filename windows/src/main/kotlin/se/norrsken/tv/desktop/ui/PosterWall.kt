@@ -106,6 +106,10 @@ internal class PosterWall {
     var lit = false
         private set
 
+    /** Samma sak, för Compose: tänd täcker väggen allt bakom sig (se AppRoot). */
+    private val litState = mutableStateOf(false)
+    val litObserved: Boolean get() = litState.value
+
     /** Väggen tändes i starten: den har klippen. Tänds den först som bakgrund blir det lugnare. */
     private var cinematic = false
 
@@ -245,6 +249,7 @@ internal class PosterWall {
         val settled = loadedCount + failedCount >= count
         if (loadedCount >= min(count, START_LOADED) || settled || now >= reelAt + WALL_WAIT_MS) {
             lit = true
+            litState.value = true
             cinematic = !ambient
             elapsed = 0.0
             clock.longValue = 0L

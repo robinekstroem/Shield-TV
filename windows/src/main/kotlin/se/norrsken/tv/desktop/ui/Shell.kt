@@ -321,7 +321,12 @@ fun AppRoot(state: AppState) {
         // Egna lager: det som rör sig i bakgrunden ritas om för sig, inte hela skärmen
         // med listor och text varje gång snön faller en bit.
         CustomBackdrop(state.backgrounds, running = decorated, modifier = Modifier.fillMaxSize().graphicsLayer())
-        ThemeBackdrop(palette.decoration, running = decorated, modifier = Modifier.fillMaxSize().graphicsLayer())
+        // Filmväggen täcker temats bakgrund helt när den väl tänts: då ritas den inte alls,
+        // i stället för att röra sig osynligt bakom väggen och ta kraft från resten.
+        val wallCovers = state.backgrounds.isEmpty() && (state.introDone || state.introRevealing) && wall.litObserved
+        if (!wallCovers) {
+            ThemeBackdrop(palette.decoration, running = decorated, modifier = Modifier.fillMaxSize().graphicsLayer())
+        }
         // Filmväggen bakom sidorna, mörk och dämpad. Egna bakgrundsbilder går före.
         if (state.backgrounds.isEmpty()) {
             PosterWallBackdrop(
