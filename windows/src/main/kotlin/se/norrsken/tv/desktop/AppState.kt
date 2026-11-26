@@ -3689,8 +3689,16 @@ class AppState {
                             // Under pausen kan de andra ha tagit det sista.
                             if (stopped || !queue.hasNext()) break
                             val (kind, title, year) = queue.next()
+                            val earlier = known[TmdbStore.keyOf(kind, title, year)]
                             val result = withContext(Dispatchers.IO) {
-                                runCatching { client.search(kind, title, year, genres[kind].orEmpty()) }
+                                runCatching {
+                                    // Hittad med förra versionen: bara omslaget väljs om, svenska först.
+                                    if (earlier != null && earlier.found && earlier.matcher == TmdbClient.BEFORE_POSTER_LANGUAGE) {
+                                        client.withPreferredPoster(kind, earlier)
+                                    } else {
+                                        client.search(kind, title, year, genres[kind].orEmpty())
+                                    }
+                                }
                             }
                             val facts = result.getOrNull()
                             if (facts == null) {

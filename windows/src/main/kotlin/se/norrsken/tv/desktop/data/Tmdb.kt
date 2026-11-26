@@ -280,14 +280,16 @@ class TmdbClient(private val key: String) {
     private fun toFacts(kind: String, o: JSONObject, genreNames: Map<Int, String>, sure: Boolean): TmdbFacts {
         val ids = o.optJSONArray("genre_ids")
         val genres = ids?.let { array -> (0 until array.length()).mapNotNull { genreNames[array.optInt(it)] } }.orEmpty()
+        val id = o.optInt("id")
+        val ownChoice = o.optString("poster_path", "").ifBlank { null }?.let { IMAGES + "w342" + it }
         return TmdbFacts(
-            id = o.optInt("id"),
+            id = id,
             genres = genres.joinToString(", "),
             rating = o.optDouble("vote_average", 0.0).takeIf { it > 0.0 },
             votes = o.optInt("vote_count", 0),
             popularity = o.optDouble("popularity", 0.0),
             overview = o.optString("overview", "").ifBlank { null },
-            poster = o.optString("poster_path", "").ifBlank { null }?.let { IMAGES + "w342" + it },
+            poster = preferredPoster(kind, id, ownChoice),
             backdrop = o.optString("backdrop_path", "").ifBlank { null }?.let { IMAGES + "w1280" + it },
             year = o.optString(if (kind == "movie") "release_date" else "first_air_date", "").take(4).toIntOrNull(),
             checkedUtc = System.currentTimeMillis(),
@@ -295,6 +297,56 @@ class TmdbClient(private val key: String) {
             sure = sure,
         )
     }
+
+    /**
+     * Omslaget i den ordning man vill ha det: på svenska om det finns, annars
+     * på engelska, annars [ownChoice] — TMDB:s eget val, på något annat språk
+     * — och sist ett omslag utan text. Bland flera på samma språk vinner det
+     * som fått bäst betyg hos TMDB.
+     */
+    private fun preferredPoster(kind: String, id: Int, ownChoice: String?): String? {
+        if (id <= 0) return ownChoice
+        val posters = try {
+            get("$kind/$id/images", mapOf("include_image_language" to "sv,en,null")).optJSONArray("posters")
+        } catch (busy: TmdbBusyException) {
+            throw busy
+        } catch (refused: TmdbKeyException) {
+            throw refused
+        } catch (error: Exception) {
+            // Bilderna gick inte att hämta just nu: TMDB:s eget val duger tills vidare.
+            null
+        } ?: return ownChoice
+        fun rank(o: JSONObject): Int = when (o.optString("iso_639_1", "")) {
+            "sv" -> 0
+            "en" -> 1
+            else -> 2
+        }
+        val sorted = (0 until posters.length())
+            .mapNotNull { posters.optJSONObject(it) }
+            .filter { it.optString("file_path", "").isNotBlank() }
+            .sortedWith(
+                compareBy<JSONObject> { rank(it) }
+                    .thenByDescending { it.optDouble("vote_average", 0.0) }
+                    .thenByDescending { it.optInt("vote_count", 0) },
+            )
+        val best = sorted.firstOrNull()
+        return when {
+            best != null && rank(best) < 2 -> IMAGES + "w342" + best.optString("file_path")
+            ownChoice != null -> ownChoice
+            best != null -> IMAGES + "w342" + best.optString("file_path")
+            else -> null
+        }
+    }
+
+    /**
+     * En titel som hittades med förra sökningen: bara omslaget väljs om, i
+     * ordningen svenska, engelska, annat — allt annat stämmer redan.
+     */
+    fun withPreferredPoster(kind: String, facts: TmdbFacts): TmdbFacts = facts.copy(
+        poster = preferredPoster(kind, facts.id, facts.poster),
+        matcher = MATCHER,
+        checkedUtc = System.currentTimeMillis(),
+    )
 
     /**
      * Titeln som bild — filmens eller seriens logga — helst på svenska, annars
@@ -365,8 +417,18 @@ class TmdbClient(private val key: String) {
     companion object {
         private const val IMAGES = "https://image.tmdb.org/t/p/"
 
-        /** Sökningens version: höjs när den hittar mer, så att det som inte hittades söks om. */
-        const val MATCHER = 2
+        /**
+         * Sökningens version: höjs när den hittar mer, så att det som inte hittades
+         * söks om. 3: omslagen på svenska först, sedan engelska — det som hittades med
+         * version 2 får bara omslaget valt om, och det som inte hittades söks inte om.
+         */
+        const val MATCHER = 3
+
+        /** Versionen före svenska omslag först: sådant behöver bara omslaget valt om. */
+        const val BEFORE_POSTER_LANGUAGE = 2
+
+        /** Den senaste versionen som hittade mer: det som inte hittades före den söks om. */
+        const val NOT_FOUND_MATCHER = 2
 
         /** TMDB:s omslag i större storlek, för en stor yta. Null: inte ett TMDB-omslag i vanlig storlek. */
         fun largePoster(url: String): String? {
@@ -462,7 +524,7 @@ class TmdbStore {
                 sure = e.optInt("s", 0) == 1,
             )
             // Inte hittad: söks om efter en månad, eller direkt när sökningen blivit bättre.
-            if (!facts.found && (facts.checkedUtc < stale || facts.matcher < TmdbClient.MATCHER)) continue
+            if (!facts.found && (facts.checkedUtc < stale || facts.matcher < TmdbClient.NOT_FOUND_MATCHER)) continue
             result[key] = facts
         }
         result
