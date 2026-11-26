@@ -2754,6 +2754,8 @@ class AppState {
         if (!preview) item.entry?.let { recordWatch(it) }
         previewMuted = preview
         if (!preview) footballPreview = null
+        // Live TV:s ruta på tv:n: en kanal man själv startat är vald; en som bara visas är det inte.
+        stageChosen = if (!preview && item.live) item.channel?.key else null
         // Något nytt att titta på: spelaren växer upp igen om den låg i hörnet.
         // Fotbollens förhandsvisning börjar i stället i hörnet, och i Live TV:s
         // stora ruta byts kanalen där bilden står.
@@ -2838,6 +2840,7 @@ class AppState {
         miniPlayer = false
         footballPreview = null
         previewMuted = false
+        stageChosen = null
         trackPanelOpen = false
         playerBoxFocused = false
         playerControlsFocused = false
@@ -2938,16 +2941,70 @@ class AppState {
 
     fun expandPlayer() {
         miniPlayer = false
-        // Fotbollens förhandsvisning blir en vanlig kanal: ljudet på, och sedd.
+        // Fotbollens förhandsvisning, och kanalen som bara visades i Live TV:s ruta,
+        // blir en vanlig kanal: ljudet på, och sedd.
+        val wasPreview = previewMuted || footballPreview != null
         if (previewMuted) {
             previewMuted = false
             videoPlayer?.setMuted(muted)
         }
-        if (footballPreview != null) {
-            footballPreview = null
-            nowPlaying?.entry?.let { recordWatch(it.copy(watchedAtUtc = System.currentTimeMillis())) }
-        }
+        footballPreview = null
+        if (wasPreview) nowPlaying?.entry?.let { recordWatch(it.copy(watchedAtUtc = System.currentTimeMillis())) }
+        nowPlaying?.takeIf { it.live }?.channel?.let { stageChosen = it.key }
         touchPlayer(force = true)
+    }
+
+    // --- Live TV:s stora ruta på tv:n -----------------------------------------------
+
+    /**
+     * Live TV på tv:n: kanalen man valt med OK och som spelas i den stora
+     * rutan med ljud. Null: rutan visar bara kanalen man står på, utan ljud.
+     */
+    var stageChosen by mutableStateOf<String?>(null)
+        private set
+
+    /** Kanalen i den stora rutan (den lilla bilden), om det som spelas där är en kanal. */
+    fun stagedChannelKey(): String? {
+        val playing = nowPlaying ?: return null
+        return if (playing.live && miniPlayer && footballPreview == null) playing.channel?.key else null
+    }
+
+    /**
+     * Live TV på tv:n: kanalen man står på visas i den stora rutan, utan ljud,
+     * tills man väljer den med OK. Visas redan den kanalen händer inget, och en
+     * film eller ett avsnitt i den lilla bilden får vara i fred.
+     */
+    fun previewInStage(channel: LiveChannel, queue: List<LiveChannel>) {
+        val playing = nowPlaying
+        if (playing != null && (!playing.live || !miniPlayer || footballPreview != null)) return
+        if (stagedChannelKey() == channel.key) return
+        playChannel(channel, queue, preview = true)
+    }
+
+    /**
+     * OK i Live TV på tv:n. Första gången blir kanalen vald och stannar i
+     * rutan — ljudet på, och den räknas som sedd. Andra gången: helskärm.
+     */
+    fun chooseInStage(channel: LiveChannel, queue: List<LiveChannel>) {
+        val staged = stagedChannelKey() == channel.key
+        if (staged && stageChosen == channel.key) {
+            expandPlayer()
+            return
+        }
+        // Rutan visade en annan kanal (eller inget, eller en film): den här startar i rutan.
+        if (!staged) playChannel(channel, queue, preview = true)
+        if (previewMuted) {
+            previewMuted = false
+            videoPlayer?.setMuted(muted)
+        }
+        nowPlaying?.entry?.let { recordWatch(it.copy(watchedAtUtc = System.currentTimeMillis())) }
+        stageChosen = channel.key
+    }
+
+    /** Live TV på tv:n lämnas: en kanal som bara visades i rutan, utan att man valt den, stängs. */
+    fun leaveStage() {
+        val key = stagedChannelKey() ?: return
+        if (previewMuted && stageChosen != key) closePlayer()
     }
 
     // --- Fotbollens lilla ruta ----------------------------------------------------

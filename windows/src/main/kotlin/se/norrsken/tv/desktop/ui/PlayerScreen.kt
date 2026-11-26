@@ -276,6 +276,9 @@ internal fun PlayerLayers(state: AppState, collapse: Float, highlighted: Boolean
             )
             waiting && tvLayout && !mini && (status.phase == Phase.OPENING || status.phase == Phase.IDLE) ->
                 LoadingScene(playing, facts, Modifier.align(Alignment.Center))
+            // Tv: kanalen startar i Live TV:s ruta — loggan och vad som sänds syns direkt.
+            waiting && tvLayout && mini && staged && playing.live && playing.channel != null ->
+                StageStarting(state, playing.channel)
             waiting -> Spinner(Modifier.align(Alignment.Center), size = if (mini) 28.dp else 48.dp)
             status.phase == Phase.PLAYING && !status.hasVideo && status.timeMs > 3_000 -> Text(
                 "Endast ljud",

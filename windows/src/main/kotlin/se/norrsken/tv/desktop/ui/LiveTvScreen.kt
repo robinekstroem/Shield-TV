@@ -61,6 +61,10 @@ import se.norrsken.tv.desktop.data.Programme
  * där, med kanalerna till vänster. Annars visar rutan kanalen man står på.
  * På tv:n glider kategorierna fram med pil vänster, och kategorin byts
  * medan man bläddrar bland dem.
+ *
+ * På tv:n spelar rutan kanalen man står på, utan ljud, så fort markeringen
+ * stannat en kort stund. OK väljer den — ljudet på, och den stannar i rutan
+ * — och OK igen tar den till helskärm. Bläddrar man vidare följer rutan med.
  */
 @Composable
 fun LiveTvScreen(state: AppState) {
@@ -105,6 +109,10 @@ fun LiveTvScreen(state: AppState) {
         shownKey = key
     }
     val shown = remember(channels, shownKey) { channels.firstOrNull { it.key == shownKey } ?: channels.firstOrNull() }
+    // Tv: lämnar man Live TV stängs en kanal som bara visades i rutan, utan att man valt den.
+    if (tvLayout) {
+        DisposableEffect(Unit) { onDispose { state.leaveStage() } }
+    }
 
     Row(Modifier.fillMaxSize()) {
         // Tv: den första kanalens logga bredvid varje kategori.
@@ -125,6 +133,15 @@ fun LiveTvScreen(state: AppState) {
         BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
             val withStage = maxWidth >= STAGE_FROM
             val listWidth = (maxWidth * (if (tvLayout) 0.42f else 0.48f)).coerceIn(460.dp, 680.dp)
+            // Tv: rutan spelar kanalen man står på när markeringen stannat en stund —
+            // inte varje kanal man passerar när man bläddrar fort.
+            if (tvLayout && withStage) {
+                LaunchedEffect(activeKey) {
+                    val key = activeKey ?: return@LaunchedEffect
+                    delay(STAGE_PREVIEW_MS)
+                    channels.firstOrNull { it.key == key }?.let { state.previewInStage(it, channels) }
+                }
+            }
             Row(Modifier.fillMaxSize()) {
                 Column(
                     if (withStage) Modifier.width(listWidth).fillMaxHeight() else Modifier.weight(1f).fillMaxHeight(),
@@ -158,11 +175,16 @@ fun LiveTvScreen(state: AppState) {
                                                 next = guide.next(channel, clock),
                                                 clock = clock,
                                                 onClick = {
-                                                    // Bilden står i den stora rutan: en annan kanal byts där, och
-                                                    // kanalen som redan spelas går till helskärm.
-                                                    val inStage = withStage && state.miniPlayer &&
-                                                        state.nowPlaying?.live == true && state.footballPreview == null
-                                                    state.playChannel(channel, channels, docked = inStage)
+                                                    if (tvLayout && withStage) {
+                                                        // Tv: OK väljer kanalen i rutan, OK igen ger helskärm.
+                                                        state.chooseInStage(channel, channels)
+                                                    } else {
+                                                        // Bilden står i den stora rutan: en annan kanal byts där, och
+                                                        // kanalen som redan spelas går till helskärm.
+                                                        val inStage = withStage && state.miniPlayer &&
+                                                            state.nowPlaying?.live == true && state.footballPreview == null
+                                                        state.playChannel(channel, channels, docked = inStage)
+                                                    }
                                                 },
                                                 onActive = { if (!tvLayout) activeKey = channel.key },
                                                 modifier = Modifier
@@ -197,6 +219,9 @@ fun LiveTvScreen(state: AppState) {
 
 /** Från den här bredden (utom kategorierna) får den stora rutan plats. */
 private val STAGE_FROM = 960.dp
+
+/** Tv: så länge markeringen ska stå still på en kanal innan rutan börjar spela den. */
+private const val STAGE_PREVIEW_MS = 450L
 
 /**
  * Live TV:s stora ruta medan den visas, i fönstrets bildpunkter; null
@@ -245,12 +270,13 @@ private fun LiveStage(state: AppState, channel: LiveChannel?, modifier: Modifier
         }
         if (tvLayout) {
             Spacer(Modifier.height(16.dp))
-            val docked = state.miniPlayer && state.nowPlaying?.live == true
+            val staged = state.stagedChannelKey()
+            val chosen = staged != null && state.stageChosen == staged
             Text(
-                if (docked) {
-                    "OK byter kanal i rutan  ·  OK igen eller Play: helskärm"
+                if (chosen) {
+                    "OK eller Play: helskärm  ·  pil upp och ner byter kanal i rutan"
                 } else {
-                    "OK tittar  ·  pil höger: favorit  ·  pil vänster: kategorier"
+                    "OK väljer kanalen  ·  OK igen: helskärm  ·  pil höger: favorit"
                 },
                 style = MaterialTheme.typography.labelMedium,
                 color = palette.textTertiary,
@@ -259,6 +285,19 @@ private fun LiveStage(state: AppState, channel: LiveChannel?, modifier: Modifier
                 modifier = Modifier.padding(start = 4.dp),
             )
         }
+    }
+}
+
+/**
+ * Tv: rutan medan kanalen startar — samma som utan bild, med en liten
+ * snurra, så att man ser vilken kanal det blir direkt (se PlayerLayers).
+ */
+@Composable
+internal fun StageStarting(state: AppState, channel: LiveChannel) {
+    // Täckande: bakom kan förra kanalens sista bild ligga kvar tills den nya kommer.
+    Box(Modifier.fillMaxSize().background(LocalPalette.current.surface)) {
+        ChannelStage(state, channel)
+        Spinner(Modifier.align(Alignment.TopEnd).padding(18.dp), size = 26.dp)
     }
 }
 

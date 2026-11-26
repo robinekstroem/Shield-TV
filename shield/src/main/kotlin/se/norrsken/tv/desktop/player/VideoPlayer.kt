@@ -21,6 +21,10 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.hls.DefaultHlsExtractorFactory
+import androidx.media3.exoplayer.hls.HlsMediaSource
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -200,10 +204,21 @@ class VideoPlayer(@Suppress("UNUSED_PARAMETER") engine: PlayerEngine) {
                 .setAllowCrossProtocolRedirects(true)
                 .setConnectTimeoutMs(15_000)
                 .setReadTimeoutMs(30_000)
+            val hls = url.contains(".m3u8", ignoreCase = true)
             val builder = MediaItem.Builder().setUri(url)
-            if (url.contains(".m3u8", ignoreCase = true)) builder.setMimeType(MimeTypes.APPLICATION_M3U8)
-            val source = DefaultMediaSourceFactory(DefaultDataSource.Factory(AppDirs.context, http))
-                .createMediaSource(builder.build())
+            if (hls) builder.setMimeType(MimeTypes.APPLICATION_M3U8)
+            val data = DefaultDataSource.Factory(AppDirs.context, http)
+            // Kanalbyten: bilden får börja på första hela bildrutan i strömmen, inte först
+            // på nästa "riktiga" nyckelbild. Många tv-kanaler har sådana bara med
+            // flera sekunders mellanrum, och då står bilden svart med ljud under tiden.
+            val source = if (hls) {
+                HlsMediaSource.Factory(data)
+                    .setExtractorFactory(DefaultHlsExtractorFactory(FAST_START_TS_FLAGS, true))
+                    .createMediaSource(builder.build())
+            } else {
+                DefaultMediaSourceFactory(data, DefaultExtractorsFactory().setTsExtractorFlags(FAST_START_TS_FLAGS))
+                    .createMediaSource(builder.build())
+            }
             p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
                 .clearOverrides()
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
@@ -417,6 +432,10 @@ private fun codecName(mime: String?): String? = when (mime) {
 }
 
 private const val BUFFER_FOR_PLAYBACK_MS = 1_500
+
+/** Tv-strömmar (MPEG-TS): bilden börjar på första hela bildrutan, inte bara på en IDR-bild. */
+@OptIn(UnstableApi::class)
+private const val FAST_START_TS_FLAGS = DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES
 private const val BUFFER_AFTER_REBUFFER_MS = 4_000
 
 /** Hur långt före målet en nyckelbild får ligga vid spolning. */
