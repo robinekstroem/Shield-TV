@@ -781,7 +781,8 @@ private fun TopTenCard(
         )
     }
     val numberWidth = with(local) { number.size.width.toDp() }
-    val overlap = sizes.posterWidth * 0.16f
+    // Omslaget täcker bara siffrans kant, också den smala ettan.
+    val overlap = minOf(sizes.posterWidth * 0.14f, numberWidth * 0.22f)
     val corner = if (tv) 10.dp else 8.dp
     Box(
         focus
@@ -827,10 +828,11 @@ private fun TopTenCard(
                 .padding(bottom = 8.dp)
                 .size(sizes.posterWidth, sizes.posterHeight)
                 .graphicsLayer {
+                    // Växer uppåt och åt höger, bort från siffran.
                     val s = 1f + (if (tv) 0.07f else 0.04f) * lit.value
                     scaleX = s
                     scaleY = s
-                    transformOrigin = TransformOrigin(0.5f, 1f)
+                    transformOrigin = TransformOrigin(0f, 1f)
                 }
                 .drawWithContent {
                     drawContent()

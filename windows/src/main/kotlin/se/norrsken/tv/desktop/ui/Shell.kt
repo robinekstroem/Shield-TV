@@ -82,6 +82,11 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.foundation.ScrollState
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -606,12 +611,15 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
         }
 
         // Rullar bara om fönstret är för lågt för allt. Luften inuti ger
-        // markeringens glöd plats, så att den inte klipps av i kanten.
+        // markeringens glöd plats, så att den inte klipps av i kanten. Tv: det
+        // som rullat utanför tonar ut mot kanten i stället för att klippas av.
+        val scroll = rememberScrollState()
         Column(
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
+                .then(if (tv) Modifier.fadingEdges(scroll) else Modifier)
+                .verticalScroll(scroll)
                 .padding(vertical = NAV_AIR),
             verticalArrangement = Arrangement.spacedBy(if (tv) 6.dp else 4.dp),
         ) {
@@ -962,6 +970,34 @@ private fun NavItem(
 private class NavPlace {
     var center = 0f
 }
+
+/**
+ * Det som rullat utanför listan tonar ut mot kanten, upptill och nedtill,
+ * bara när det finns mer åt det hållet. Ryms allt syns ingen skillnad.
+ */
+private fun Modifier.fadingEdges(scroll: ScrollState): Modifier =
+    graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            val edge = 30.dp.toPx()
+            val above = (scroll.value / edge).coerceIn(0f, 1f)
+            val below = ((scroll.maxValue - scroll.value) / edge).coerceIn(0f, 1f)
+            if (above > 0.01f) {
+                drawRect(
+                    Brush.verticalGradient(0f to Color.Black.copy(alpha = 1f - above), 1f to Color.Black, startY = 0f, endY = edge),
+                    size = Size(size.width, edge),
+                    blendMode = BlendMode.DstIn,
+                )
+            }
+            if (below > 0.01f) {
+                drawRect(
+                    Brush.verticalGradient(0f to Color.Black, 1f to Color.Black.copy(alpha = 1f - below), startY = size.height - edge, endY = size.height),
+                    topLeft = Offset(0f, size.height - edge),
+                    size = Size(size.width, edge),
+                    blendMode = BlendMode.DstIn,
+                )
+            }
+        }
 
 /**
  * Veckans topp 10 i menyn: den gula knappen (TopTen.kt) i stället för en
