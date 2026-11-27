@@ -642,17 +642,17 @@ private fun MenuStyleCard(style: MenuStyle, selected: Boolean, onClick: () -> Un
         modifier = Modifier.width(188.dp).border(1.dp, if (selected) palette.focus else palette.hairline, shape),
     ) {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-            Spacer(
+            Box(
                 Modifier
                     .fillMaxWidth()
                     .height(104.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .drawBehind { menuMiniature(style) },
-            )
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(style.label, style = MaterialTheme.typography.titleMedium)
-                if (style.fresh) Tag("NYTT", palette.signal)
+            ) {
+                // Märket i bildens hörn: namnen får plats på en rad bredvid.
+                if (style.fresh) Tag("NYTT", palette.signal, Modifier.align(Alignment.TopEnd).padding(6.dp))
             }
+            Text(style.label, style = MaterialTheme.typography.titleMedium, maxLines = 1)
             Text(style.description, style = MaterialTheme.typography.bodySmall, color = palette.textTertiary)
         }
     }

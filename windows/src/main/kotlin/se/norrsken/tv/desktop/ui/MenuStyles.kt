@@ -343,15 +343,15 @@ private fun MenuStyle.deskWidth() = when (this) {
     else -> 250.dp
 }
 
-/** Menyns bakgrund: mörk, så att innehållet skymtar svagt igenom. */
+/** Menyns bakgrund: täckande och mörk, så att innehållet bakom inte stör texten. */
 private fun DrawScope.styledBackdrop(style: MenuStyle) {
     when (style) {
         MenuStyle.MINIMAL -> {
-            drawRect(Brush.horizontalGradient(0f to Color(0xF4050608), 1f to Color(0xDE050608)))
+            drawRect(Brush.horizontalGradient(0f to Color(0xFF040506), 1f to Color(0xFF08090B)))
             drawRect(Brush.verticalGradient(0.6f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.35f)))
         }
         MenuStyle.MULTIVERSE -> {
-            drawRect(Brush.horizontalGradient(0f to Color(0xF7070405), 1f to Color(0xE6070405)))
+            drawRect(Brush.horizontalGradient(0f to Color(0xFF060304), 1f to Color(0xFF0B0506)))
             drawRect(
                 Brush.radialGradient(
                     0f to MARVEL_RED.copy(alpha = 0.26f),
@@ -363,7 +363,7 @@ private fun DrawScope.styledBackdrop(style: MenuStyle) {
             )
         }
         MenuStyle.STARK -> {
-            drawRect(Brush.horizontalGradient(0f to Color(0xF5020910), 1f to Color(0xE0020910)))
+            drawRect(Brush.horizontalGradient(0f to Color(0xFF01070C), 1f to Color(0xFF031019)))
             // Ett svagt rutnät, som på en hjälmskärm.
             val step = 32.dp.toPx()
             val grid = STARK_CYAN.copy(alpha = 0.035f)
@@ -880,7 +880,7 @@ private fun WheelPanel(ctx: MenuContext, index: Int, info: PeekInfo?, liveCount:
                 val s = 0.72f + 0.28f * c.coerceAtLeast(0f)
                 scaleX = s
                 scaleY = s
-                cameraDistance = 9f * this.density
+                cameraDistance = 6.5f * this.density
                 transformOrigin = TransformOrigin(0.3f, 0.5f)
             }
             .hoverable(interaction)
@@ -929,12 +929,12 @@ private fun WheelPanel(ctx: MenuContext, index: Int, info: PeekInfo?, liveCount:
                 .fillMaxSize()
                 .background(
                     Brush.horizontalGradient(
-                        0f to Color.Black.copy(alpha = 0.90f),
-                        0.55f to Color.Black.copy(alpha = if (isActive) 0.45f else 0.62f),
-                        1f to Color.Black.copy(alpha = if (isActive) 0.15f else 0.45f),
+                        0f to Color.Black.copy(alpha = 0.86f),
+                        0.5f to Color.Black.copy(alpha = if (isActive) 0.30f else 0.50f),
+                        1f to Color.Black.copy(alpha = if (isActive) 0.0f else 0.30f),
                     ),
                 )
-                .background(MARVEL_RED.copy(alpha = if (isActive) 0.20f else 0.10f)),
+                .background(MARVEL_RED.copy(alpha = if (isActive) 0.14f else 0.08f)),
         )
         Column(
             Modifier.align(Alignment.CenterStart).padding(start = if (ctx.tv) 16.dp else 10.dp, end = 12.dp),
@@ -1004,7 +1004,7 @@ private fun WheelPanel(ctx: MenuContext, index: Int, info: PeekInfo?, liveCount:
 // --- Stark ----------------------------------------------------------------------------
 
 /** Hur mycket hologrammet lutar, i grader. */
-private const val STARK_TILT = -9f
+private const val STARK_TILT = 10f
 
 /**
  * Stark: menyn är ett hologram som lutar in i rummet. Raden man står på får
@@ -1027,11 +1027,12 @@ private fun StarkMenu(ctx: MenuContext) {
     )
     Box(Modifier.fillMaxSize()) {
         StarkOrbit(nav, angle, boot, ctx.tv)
+        StarkOrbit(nav, angle, boot, ctx.tv, scale = 0.7f, tiltX = 66f, tiltY = 24f, speed = -0.6f)
         Column(
             Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    rotationY = STARK_TILT + (1f - boot.value) * -38f
+                    rotationY = STARK_TILT + (1f - boot.value) * 38f
                     alpha = (boot.value * 1.6f).coerceAtMost(1f)
                     cameraDistance = 10f * density
                     transformOrigin = TransformOrigin(0f, 0.5f)
@@ -1282,8 +1283,17 @@ private fun Ring(modifier: Modifier, color: Color, sweep: Float) {
  * följer markeringen upp och ner. Ritas en gång; bara lagret flyttas och vrids.
  */
 @Composable
-private fun StarkOrbit(nav: StyledNav, angle: State<Float>, boot: Animatable<Float, *>, tv: Boolean) {
-    val size = if (tv) 340.dp else 230.dp
+private fun StarkOrbit(
+    nav: StyledNav,
+    angle: State<Float>,
+    boot: Animatable<Float, *>,
+    tv: Boolean,
+    scale: Float = 1f,
+    tiltX: Float = 76f,
+    tiltY: Float = -14f,
+    speed: Float = 0.35f,
+) {
+    val size = (if (tv) 470.dp else 300.dp) * scale
     val density = LocalDensity.current
     val half = with(density) { size.toPx() / 2f }
     Box(
@@ -1291,7 +1301,7 @@ private fun StarkOrbit(nav: StyledNav, angle: State<Float>, boot: Animatable<Flo
             .size(size)
             .offset {
                 IntOffset(
-                    (if (tv) 150.dp else 90.dp).roundToPx(),
+                    ((if (tv) 195.dp else 120.dp).toPx() - half).roundToInt(),
                     (nav.markerY.value - half).roundToInt(),
                 )
             }
@@ -1299,9 +1309,10 @@ private fun StarkOrbit(nav: StyledNav, angle: State<Float>, boot: Animatable<Flo
                 val b = boot.value
                 scaleX = b
                 scaleY = b
-                alpha = 0.55f * b
-                rotationX = 74f
-                rotationZ = angle.value * 0.35f
+                alpha = 0.8f * b
+                rotationX = tiltX
+                rotationY = tiltY
+                rotationZ = angle.value * speed
                 cameraDistance = 12f * this.density
             },
     ) {
@@ -1459,8 +1470,8 @@ internal fun DrawScope.menuMiniature(style: MenuStyle) {
         }
         MenuStyle.STARK -> {
             drawRect(Color(0xFF020910))
-            val center = Offset(w * 0.62f, h * 0.52f)
-            drawOval(STARK_CYAN.copy(alpha = 0.6f), topLeft = Offset(center.x - w * 0.42f, center.y - h * 0.12f), size = Size(w * 0.84f, h * 0.24f), style = Stroke(width = 1.5f))
+            val center = Offset(w * 0.55f, h * 0.52f)
+            drawOval(STARK_CYAN.copy(alpha = 0.6f), topLeft = Offset(center.x - w * 0.4f, center.y - h * 0.12f), size = Size(w * 0.8f, h * 0.24f), style = Stroke(width = 1.5f))
             drawOval(STARK_GOLD.copy(alpha = 0.5f), topLeft = Offset(center.x - w * 0.3f, center.y - h * 0.08f), size = Size(w * 0.6f, h * 0.16f), style = Stroke(width = 1f))
             for (k in 0 until 6) {
                 val y = h * 0.2f + k * h * 0.12f
