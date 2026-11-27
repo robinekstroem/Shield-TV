@@ -133,11 +133,15 @@ internal val MENU_ROWS = listOf(
     MenuRow(Screen.SERIES, "Serier", Glyphs.Series),
     MenuRow(Screen.GENRES, "Genrer", Glyphs.Genres),
     MenuRow(Screen.HISTORY, "Historik", Glyphs.History),
+    MenuRow(Screen.TOP10, "Topp 10", Glyphs.Star),
     MenuRow(Screen.SETTINGS, "Inställningar", Glyphs.Settings),
 )
 
 private const val FOOTBALL_ROW = 3
-private const val SETTINGS_ROW = 8
+
+/** Veckans topp 10: den gula knappen (TopTen.kt), ritad likadant i alla menyer. */
+private const val TOP10_ROW = 8
+private const val SETTINGS_ROW = 9
 
 private val MARVEL_RED = Color(0xFFE62429)
 private val MINIMAL_RED = Color(0xFFFF2A2F)
@@ -492,7 +496,39 @@ internal fun rememberMenuPeeks(state: AppState): List<PeekInfo?> {
                 progress = it.progress.takeIf { p -> it.kind != WatchKind.LIVE && p > 0f },
             )
         },
+        state.weeklyTop.firstOrNull()?.let { first ->
+            PeekInfo(
+                "VECKANS TOPP 10",
+                "1. ${first.title}",
+                state.weeklyTop.getOrNull(1)?.let { "2. ${it.title}" },
+                first.poster,
+                poster = true,
+            )
+        } ?: PeekInfo("VECKANS TOPP 10", "Populärast just nu", "Enligt TMDB", null, poster = false),
         PeekInfo("INSTÄLLNINGAR", "Källor & uppspelning", "Utseende, menyn och omslagsväggen", null, poster = false),
+    )
+}
+
+/**
+ * Veckans topp 10 i de nya menyerna: den gula knappen, styrd som raderna
+ * (pilarna, OK, pil höger). Strecket och ringarna glider dit som till en rad.
+ */
+@Composable
+private fun StyledTopTen(ctx: MenuContext, modifier: Modifier = Modifier) {
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val isActive = ctx.active == TOP10_ROW
+    TopTenButton(
+        interaction = interaction,
+        active = isActive || (!ctx.tv && hovered),
+        current = ctx.current == TOP10_ROW,
+        tv = ctx.tv,
+        kick = { if (isActive) ctx.nav.press.value else 0f },
+        modifier = modifier
+            .onGloballyPositioned { ctx.nav.placed(TOP10_ROW, it.positionInRoot().y + it.size.height / 2f - ctx.nav.top) }
+            .hoverable(interaction)
+            .then(ctx.row(TOP10_ROW, interaction))
+            .pointerHoverIcon(PointerIcon.Hand),
     )
 }
 
@@ -524,7 +560,9 @@ private fun MinimalMenu(ctx: MenuContext) {
         Spacer(Modifier.height(if (ctx.tv) 30.dp else 22.dp))
         for (i in 0..FOOTBALL_ROW) MinimalRow(ctx, i, if (i == FOOTBALL_ROW && liveMatches > 0) liveMatches else null)
         Spacer(Modifier.height(if (ctx.tv) 22.dp else 14.dp))
-        for (i in FOOTBALL_ROW + 1 until SETTINGS_ROW) MinimalRow(ctx, i, null)
+        for (i in FOOTBALL_ROW + 1 until TOP10_ROW) MinimalRow(ctx, i, null)
+        Spacer(Modifier.height(if (ctx.tv) 14.dp else 10.dp))
+        StyledTopTen(ctx, Modifier.padding(end = if (ctx.tv) 26.dp else 10.dp))
         Spacer(Modifier.weight(1f))
         if (ctx.state.importingId != null) {
             ImportIndicator(ctx.state.importState)
@@ -919,88 +957,93 @@ private fun WheelPanel(ctx: MenuContext, index: Int, info: PeekInfo?, liveCount:
             .clip(androidx.compose.ui.graphics.RectangleShape)
             .background(Color(0xFF0B0809)),
     ) {
-        if (info?.image != null) {
-            RemoteImage(
-                url = info.image,
-                modifier = Modifier.fillMaxSize(),
-                maxSide = 600,
-                contentScale = if (info.poster) ContentScale.Crop else ContentScale.Fit,
-                alignment = Alignment.Center,
-            )
-        }
-        // Mörkt till vänster där namnet står, och Marvel-rött över bilden.
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.horizontalGradient(
-                        0f to Color.Black.copy(alpha = 0.86f),
-                        0.5f to Color.Black.copy(alpha = if (isActive) 0.30f else 0.50f),
-                        1f to Color.Black.copy(alpha = if (isActive) 0.0f else 0.30f),
-                    ),
-                )
-                .background(MARVEL_RED.copy(alpha = if (isActive) 0.14f else 0.08f)),
-        )
-        Column(
-            Modifier.align(Alignment.CenterStart).padding(start = if (ctx.tv) 16.dp else 10.dp, end = 12.dp),
-        ) {
-            if (isActive) {
-                Box(
-                    Modifier
-                        .graphicsLayer {
-                            scaleX = stamp.value
-                            scaleY = stamp.value
-                            transformOrigin = TransformOrigin(0f, 0.5f)
-                        }
-                        .background(MARVEL_RED)
-                        .padding(horizontal = 9.dp, vertical = 1.dp),
-                ) {
-                    Text(
-                        label,
-                        style = TextStyle(fontFamily = menuDisplayFont, fontSize = if (ctx.tv) 32.sp else 22.sp, lineHeight = if (ctx.tv) 36.sp else 25.sp, letterSpacing = 1.sp),
-                        color = Color.White,
-                        maxLines = 1,
-                        softWrap = false,
-                    )
-                }
-                if (info != null && ctx.tv) {
-                    Text(
-                        "${info.kicker}  ·  ${info.title}".uppercase(SWEDISH_UPPER),
-                        style = TextStyle(fontFamily = menuCondensedFont, fontWeight = FontWeight.SemiBold, fontSize = 10.sp, letterSpacing = 1.4.sp),
-                        color = Color.White.copy(alpha = 0.85f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
-            } else {
-                Text(
-                    label,
-                    style = TextStyle(fontFamily = menuDisplayFont, fontSize = if (ctx.tv) 28.sp else 20.sp, lineHeight = if (ctx.tv) 32.sp else 23.sp, letterSpacing = 1.sp),
-                    color = Color.White.copy(alpha = if (hovered) 0.85f else 0.62f),
-                    maxLines = 1,
-                    softWrap = false,
-                    modifier = Modifier.padding(start = 9.dp),
+        // Veckans topp 10: en gul ruta, som knappen i de andra menyerna.
+        if (row.screen == Screen.TOP10) {
+            TopTenWheelFace(isActive, ctx.tv)
+        } else {
+            if (info?.image != null) {
+                RemoteImage(
+                    url = info.image,
+                    modifier = Modifier.fillMaxSize(),
+                    maxSide = 600,
+                    contentScale = if (info.poster) ContentScale.Crop else ContentScale.Fit,
+                    alignment = Alignment.Center,
                 )
             }
-        }
-        if (liveCount != null) {
-            Row(
+            // Mörkt till vänster där namnet står, och Marvel-rött över bilden.
+            Box(
                 Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(8.dp)
-                    .background(LIVE_RED)
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .fillMaxSize()
+                    .background(
+                        Brush.horizontalGradient(
+                            0f to Color.Black.copy(alpha = 0.86f),
+                            0.5f to Color.Black.copy(alpha = if (isActive) 0.30f else 0.50f),
+                            1f to Color.Black.copy(alpha = if (isActive) 0.0f else 0.30f),
+                        ),
+                    )
+                    .background(MARVEL_RED.copy(alpha = if (isActive) 0.14f else 0.08f)),
+            )
+            Column(
+                Modifier.align(Alignment.CenterStart).padding(start = if (ctx.tv) 16.dp else 10.dp, end = 12.dp),
             ) {
-                Box(Modifier.size(5.dp).clip(CircleShape).background(Color.White))
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    "$liveCount LIVE",
-                    style = TextStyle(fontFamily = menuCondensedFont, fontWeight = FontWeight.Bold, fontSize = 9.sp, letterSpacing = 1.sp),
-                    color = Color.White,
-                    maxLines = 1,
-                )
+                if (isActive) {
+                    Box(
+                        Modifier
+                            .graphicsLayer {
+                                scaleX = stamp.value
+                                scaleY = stamp.value
+                                transformOrigin = TransformOrigin(0f, 0.5f)
+                            }
+                            .background(MARVEL_RED)
+                            .padding(horizontal = 9.dp, vertical = 1.dp),
+                    ) {
+                        Text(
+                            label,
+                            style = TextStyle(fontFamily = menuDisplayFont, fontSize = if (ctx.tv) 32.sp else 22.sp, lineHeight = if (ctx.tv) 36.sp else 25.sp, letterSpacing = 1.sp),
+                            color = Color.White,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
+                    if (info != null && ctx.tv) {
+                        Text(
+                            "${info.kicker}  ·  ${info.title}".uppercase(SWEDISH_UPPER),
+                            style = TextStyle(fontFamily = menuCondensedFont, fontWeight = FontWeight.SemiBold, fontSize = 10.sp, letterSpacing = 1.4.sp),
+                            color = Color.White.copy(alpha = 0.85f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                } else {
+                    Text(
+                        label,
+                        style = TextStyle(fontFamily = menuDisplayFont, fontSize = if (ctx.tv) 28.sp else 20.sp, lineHeight = if (ctx.tv) 32.sp else 23.sp, letterSpacing = 1.sp),
+                        color = Color.White.copy(alpha = if (hovered) 0.85f else 0.62f),
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(start = 9.dp),
+                    )
+                }
+            }
+            if (liveCount != null) {
+                Row(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .background(LIVE_RED)
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(5.dp).clip(CircleShape).background(Color.White))
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        "$liveCount LIVE",
+                        style = TextStyle(fontFamily = menuCondensedFont, fontWeight = FontWeight.Bold, fontSize = 9.sp, letterSpacing = 1.sp),
+                        color = Color.White,
+                        maxLines = 1,
+                    )
+                }
             }
         }
     }
@@ -1055,7 +1098,9 @@ private fun StarkMenu(ctx: MenuContext) {
                 maxLines = 1,
                 modifier = Modifier.padding(start = 10.dp, top = 12.dp, bottom = 6.dp),
             )
-            for (i in FOOTBALL_ROW + 1 until SETTINGS_ROW) StarkRow(ctx, i, null, angle)
+            for (i in FOOTBALL_ROW + 1 until TOP10_ROW) StarkRow(ctx, i, null, angle)
+            Spacer(Modifier.height(if (ctx.tv) 12.dp else 8.dp))
+            StyledTopTen(ctx, Modifier.padding(start = 4.dp, end = if (ctx.tv) 34.dp else 12.dp))
             Spacer(Modifier.weight(1f))
             if (ctx.state.importingId != null) {
                 ImportIndicator(ctx.state.importState)

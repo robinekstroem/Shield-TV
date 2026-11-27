@@ -26,6 +26,7 @@ import se.norrsken.tv.desktop.data.TmdbFacts
 import se.norrsken.tv.desktop.data.TmdbStore
 import se.norrsken.tv.desktop.data.WatchEntry
 import se.norrsken.tv.desktop.data.WatchKind
+import se.norrsken.tv.desktop.data.WeeklyTitle
 import se.norrsken.tv.desktop.player.VideoPlayer
 import androidx.compose.foundation.layout.fillMaxSize
 import se.norrsken.tv.desktop.data.FootballMatch
@@ -136,6 +137,7 @@ fun main(args: Array<String>) {
             data.content.series.mapNotNull { series -> series.cover?.let { IntroReelItem(series.name, it, null) } },
     )
     state.introDone = true
+    state.previewWeeklyTop(previewTopTen(images.base))
     // Tablån läses från disken en stund efter starten.
     waitFor("tablån", 20_000) { !state.guide.isEmpty }
 
@@ -533,8 +535,102 @@ private fun scenes(state: AppState, data: PreviewData): List<Scene> {
             settleMs = 3_000L,
             content = app,
         ),
+        // Veckans topp 10: sidan, med ettan markerad, och den gula knappen i varje meny.
+        Scene(
+            "topp10",
+            before = {
+                screen(Screen.TOP10)()
+                state.selectMenuStyle(MenuStyle.ORIGINAL)
+                TvNav.drawer = TvDrawer.NONE
+            },
+            settleMs = 4_000L,
+            content = app,
+        ),
+        Scene(
+            "topp10-meny",
+            before = {
+                screen(Screen.TOP10)()
+                state.selectMenuStyle(MenuStyle.ORIGINAL)
+            },
+            after = { TvNav.openMenu() },
+            each = { if (TvNav.drawer != TvDrawer.MENU) TvNav.openMenu() },
+            settleMs = 3_500L,
+            content = app,
+        ),
+        Scene(
+            "topp10-meny-minimal",
+            before = {
+                screen(Screen.TOP10)()
+                state.selectMenuStyle(MenuStyle.MINIMAL)
+            },
+            after = { TvNav.openMenu() },
+            each = { if (TvNav.drawer != TvDrawer.MENU) TvNav.openMenu() },
+            settleMs = 3_500L,
+            content = app,
+        ),
+        Scene(
+            "topp10-meny-multiversum",
+            before = {
+                screen(Screen.TOP10)()
+                state.selectMenuStyle(MenuStyle.MULTIVERSE)
+            },
+            after = { TvNav.openMenu() },
+            each = { if (TvNav.drawer != TvDrawer.MENU) TvNav.openMenu() },
+            settleMs = 4_500L,
+            content = app,
+        ),
+        Scene(
+            "topp10-meny-stark",
+            before = {
+                screen(Screen.TOP10)()
+                state.selectMenuStyle(MenuStyle.STARK)
+            },
+            after = { TvNav.openMenu() },
+            each = { if (TvNav.drawer != TvDrawer.MENU) TvNav.openMenu() },
+            settleMs = 3_500L,
+            content = app,
+        ),
     )
 }
+
+/**
+ * Veckans topp 10 utan TMDB: påhittade filmer, hälften ur det påhittade
+ * biblioteket (samma namn och år, så att de räknas som "finns") och hälften
+ * inte, med egna affischer och bilder från servern här.
+ */
+private fun previewTopTen(base: String): List<WeeklyTitle> {
+    class Top(val title: String, val year: Int, val libraryIndex: Int, val genres: String, val rating: Double, val overview: String)
+    val list = listOf(
+        Top("Kodnamn Orion", 2023, 7, "Action, Thriller", 7.9, "En avhoppad kodknäckare får tre dygn på sig att hitta läckan i en hemlig satellitstation, innan någon annan gör det."),
+        Top("Stjärnfallet", 2025, -1, "Science fiction, Drama", 7.1, "När en meteorit slår ner i en liten norrländsk by börjar alla i byn drömma samma dröm, varje natt."),
+        Top("Nordljus", 2016, 0, "Drama", 8.2, "Två syskon återvänder till fjällbyn där de växte upp, och till en vinter som ingen av dem pratat om sedan dess."),
+        Top("Sista passet", 2025, -1, "Skräck, Thriller", 6.8, "Det är sista natten innan sjukhuset stängs för gott. Då rullas en patient in som inte borde finnas."),
+        Top("Vargtimmen", 2024, 8, "Thriller", 7.4, "En fyrvaktare på en ö i Bottenhavet hör någon knacka på dörren mitt i stormen."),
+        Top("Isvägen", 2017, 37, "Action, Äventyr", 7.0, "Vintervägen över sjön är enda sättet att få fram medicinen i tid. Isen har redan börjat spricka."),
+        Top("Mörkrets hamn", 2025, -1, "Kriminal, Thriller", 6.6, "En tullare i hamnen hittar en container som inte står i några papper, och någon vill ha den tillbaka."),
+        Top("Djupet", 2016, 9, "Science fiction, Skräck", 7.7, "Ett forskarlag på havsbotten tappar kontakten med ytan och inser att de inte är ensamma där nere."),
+        Top("Den långa natten", 2024, -1, "Kriminal, Drama", 7.3, "Polarnattens första dygn: en polis letar efter en försvunnen turist innan ljuset försvinner helt."),
+        Top("Glaciären", 2017, 10, "Äventyr, Mysterium", 6.9, "En glaciolog hittar ett flygplan i isen som försvann för femtio år sedan, med motorerna fortfarande varma."),
+    )
+    return list.mapIndexed { k, top ->
+        WeeklyTitle(
+            id = 9_000 + k,
+            title = top.title,
+            original = top.title,
+            year = top.year,
+            poster = if (top.libraryIndex >= 0) "$base/poster/${top.libraryIndex}.png" else "$base/topp/$k.png",
+            backdrop = "$base/backdrop/${k + 3}.png",
+            overview = top.overview,
+            rating = top.rating,
+            genres = top.genres,
+        )
+    }
+}
+
+private val PREVIEW_TOP_TITLES = listOf(
+    "Kodnamn Orion", "Stjärnfallet", "Nordljus", "Sista passet", "Vargtimmen",
+    "Isvägen", "Mörkrets hamn", "Djupet", "Den långa natten", "Glaciären",
+)
 
 private fun waitFor(what: String, timeoutMs: Long, done: () -> Boolean) {
     val until = System.currentTimeMillis() + timeoutMs
@@ -718,6 +814,7 @@ private class PreviewImages(private val server: HttpServer) {
             val index = parts.getOrNull(1)?.substringBefore('.')?.toIntOrNull() ?: 0
             return when (parts.firstOrNull()) {
                 "poster" -> poster(index)
+                "topp" -> poster(index + 60, PREVIEW_TOP_TITLES.getOrNull(index))
                 "backdrop" -> landscape(1280, 720, index)
                 "logo" -> logo(index)
                 else -> error("okänd bild $path")
@@ -727,8 +824,8 @@ private class PreviewImages(private val server: HttpServer) {
         private fun hue(index: Int, shift: Float = 0f): Color =
             Color.getHSBColor(((index * 0.137f + shift) % 1f + 1f) % 1f, 0.62f, 0.78f)
 
-        /** En affisch: en färgskala, en form och titeln. */
-        private fun poster(index: Int): BufferedImage {
+        /** En affisch: en färgskala, en form och titeln ([label], annars bibliotekets titel). */
+        private fun poster(index: Int, label: String? = null): BufferedImage {
             val w = 400
             val h = 600
             val image = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
@@ -751,7 +848,7 @@ private class PreviewImages(private val server: HttpServer) {
                 closePath()
             }
             g.fill(ridge)
-            val title = (MOVIE_TITLES.getOrNull(index) ?: SERIES_TITLES.getOrNull(index - 100) ?: "Titel").uppercase()
+            val title = (label ?: MOVIE_TITLES.getOrNull(index) ?: SERIES_TITLES.getOrNull(index - 100) ?: "Titel").uppercase()
             g.color = Color.WHITE
             var size = 54
             g.font = Font("SansSerif", Font.BOLD, size)

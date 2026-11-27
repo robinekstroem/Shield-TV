@@ -11,6 +11,7 @@ import se.norrsken.tv.desktop.data.SeriesMark
 import se.norrsken.tv.desktop.data.SeriesMarksStore
 import se.norrsken.tv.desktop.data.TmdbExtrasStore
 import se.norrsken.tv.desktop.data.TrendingTitle
+import se.norrsken.tv.desktop.data.WeeklyTitle
 import se.norrsken.tv.desktop.data.VersionTags
 import se.norrsken.tv.desktop.data.FootballClient
 import se.norrsken.tv.desktop.data.FootballMatch
@@ -119,7 +120,7 @@ import java.text.Collator
 import java.util.UUID
 import javax.net.ssl.SSLException
 
-enum class Screen { HOME, LIVE, GUIDE, FOOTBALL, MOVIES, SERIES, GENRES, HISTORY, SETTINGS }
+enum class Screen { HOME, LIVE, GUIDE, FOOTBALL, MOVIES, SERIES, GENRES, HISTORY, SETTINGS, TOP10 }
 
 enum class SortOrder(val label: String) {
     PROVIDER("Standard"),
@@ -319,6 +320,18 @@ class AppState {
     var trending by mutableStateOf<List<TrendingTitle>>(emptyList())
         private set
     private var trendingAt = 0L
+    /** Veckans topp 10 från TMDB: de populäraste filmerna just nu, i biblioteket eller inte. */
+    var weeklyTop by mutableStateOf<List<WeeklyTitle>>(emptyList())
+        private set
+    /** När veckans topp 10 hämtades, eller 0. */
+    var weeklyTopAt by mutableStateOf(0L)
+        private set
+    /** Veckans topp 10 hämtas just nu. */
+    var weeklyTopLoading by mutableStateOf(false)
+        private set
+    /** Senaste hämtningen av veckans topp 10 misslyckades, och ingen sparad lista finns. */
+    var weeklyTopFailed by mutableStateOf(false)
+        private set
     private val extrasStore = TmdbExtrasStore()
     private val logoRequests = HashSet<String>()
     private val logoGate = Semaphore(2)
@@ -655,6 +668,8 @@ class AppState {
         tmdbLogos = extras.logos
         trending = extras.trending
         trendingAt = extras.trendingAt
+        weeklyTop = extras.weekly
+        weeklyTopAt = extras.weeklyAt
         // Startens filmvägg, om det inte fanns någon sparad: räknas fram ur
         // biblioteket så fort det finns, medan starten fortfarande visas.
         scope.launch {
@@ -667,6 +682,7 @@ class AppState {
         scope.launch {
             while (true) {
                 refreshTrending()
+                refreshWeeklyTop()
                 delay(TRENDING_CHECK_MS)
             }
         }
@@ -1564,8 +1580,73 @@ class AppState {
         extrasSaveJob?.cancel()
         extrasSaveJob = scope.launch {
             delay(3_000)
-            val snapshot = TmdbExtrasStore.Saved(tmdbLogos, trending, trendingAt)
+            val snapshot = TmdbExtrasStore.Saved(tmdbLogos, trending, trendingAt, weeklyTop, weeklyTopAt)
             withContext(Dispatchers.IO) { extrasStore.save(snapshot) }
+        }
+    }
+
+    // --- Veckans topp 10 ---------------------------------------------------------------
+
+    /**
+     * Veckans topp 10 från TMDB, högst var tredje timme (TMDB räknar om sin
+     * veckolista under dagen). [force]: nu, oavsett när den hämtades senast.
+     */
+    fun refreshWeeklyTop(force: Boolean = false) {
+        val apiKey = tmdbKey ?: return
+        if (weeklyTopLoading) return
+        val fresh = System.currentTimeMillis() - weeklyTopAt < WEEKLY_MAX_AGE_MS
+        if (!force && fresh && weeklyTop.isNotEmpty()) return
+        weeklyTopLoading = true
+        scope.launch {
+            val list = withContext(Dispatchers.IO) { runCatching { TmdbClient(apiKey).weeklyMovies() }.getOrNull() }
+            weeklyTopLoading = false
+            if (list.isNullOrEmpty()) {
+                weeklyTopFailed = weeklyTop.isEmpty()
+                return@launch
+            }
+            weeklyTopFailed = false
+            weeklyTop = list
+            weeklyTopAt = System.currentTimeMillis()
+            saveExtrasSoon()
+        }
+    }
+
+    /**
+     * Veckans filmer i biblioteket: för varje titel i [titles] filmens bästa
+     * version där den finns, annars null. Efter TMDB-id:t när det är känt,
+     * annars efter titeln (svensk eller originaltitel) och året, ±1 år.
+     * Tungt med ett stort bibliotek: anropas i bakgrunden.
+     */
+    fun weeklyInLibrary(titles: List<WeeklyTitle>): List<Movie?> {
+        if (titles.isEmpty()) return emptyList()
+        val ids = titles.mapTo(HashSet()) { it.id }
+        val names = HashSet<String>()
+        for (title in titles) {
+            for (name in listOf(title.title, title.original)) {
+                val normalized = TitleCleaner.normalize(name)
+                if (normalized.isNotEmpty()) names += normalized
+            }
+        }
+        val index = versions
+        val byId = HashMap<Int, Movie>()
+        val byName = HashMap<String, MutableList<Pair<Movie, Int?>>>()
+        for (movie in library.movies) {
+            if (index.isHidden(movie)) continue
+            tmdbFor(movie)?.id?.let { if (it in ids) byId.putIfAbsent(it, movie) }
+            val parts = tmdbKeyOf(movie).split('|')
+            val name = parts.getOrNull(1) ?: continue
+            if (name !in names) continue
+            byName.getOrPut(name) { ArrayList(2) } += movie to parts.getOrNull(2)?.toIntOrNull()
+        }
+        return titles.map { title ->
+            val found = byId[title.id] ?: listOf(title.title, title.original).firstNotNullOfOrNull { name ->
+                val candidates = byName[TitleCleaner.normalize(name)] ?: return@firstNotNullOfOrNull null
+                val year = title.year
+                candidates.firstOrNull { (_, y) -> y != null && year != null && y == year }?.first
+                    ?: candidates.firstOrNull { (_, y) -> y != null && year != null && kotlin.math.abs(y - year) <= 1 }?.first
+                    ?: candidates.firstOrNull { (_, y) -> y == null || year == null }?.first
+            }
+            found?.let { index.versionsOf(it).first() }
         }
     }
 
@@ -1953,6 +2034,13 @@ class AppState {
     /** Förhandsbilder: filmväggen med just de här omslagen, som i en app med ett stort bibliotek. */
     internal fun previewReel(reel: List<IntroReelItem>) {
         introReel = reel
+    }
+
+    /** Förhandsbilder: veckans topp 10 utan TMDB. */
+    internal fun previewWeeklyTop(list: List<WeeklyTitle>) {
+        weeklyTop = list
+        weeklyTopAt = System.currentTimeMillis() - 42 * 60_000L
+        weeklyTopFailed = false
     }
 
     /**
@@ -3566,10 +3654,12 @@ class AppState {
 
     fun tmdbFor(movie: Movie): TmdbFacts? {
         if (tmdbFacts.isEmpty()) return null
-        val key = tmdbKeys.getOrPut(movie.key) {
-            TitleCleaner.searchTitle(movie.name).let { (title, year) -> TmdbStore.keyOf("movie", title, year) }
-        }
-        return tmdbFacts[key]?.takeIf { it.found }
+        return tmdbFacts[tmdbKeyOf(movie)]?.takeIf { it.found }
+    }
+
+    /** Filmens nyckel i TMDB-uppslagen, "movie|titel|år": titelstädningen körs en gång per film. */
+    fun tmdbKeyOf(movie: Movie): String = tmdbKeys.getOrPut(movie.key) {
+        TitleCleaner.searchTitle(movie.name).let { (title, year) -> TmdbStore.keyOf("movie", title, year) }
     }
 
     fun tmdbFor(series: Series): TmdbFacts? {
@@ -3606,6 +3696,7 @@ class AppState {
                 saveSettings()
                 restartTmdbScan()
                 refreshTrending(force = true)
+                refreshWeeklyTop(force = true)
             }.onFailure { error ->
                 tmdbStatus = if (error is TmdbKeyException) {
                     "TMDB godkände inte nyckeln. Kontrollera att du kopierade API-nyckeln (32 tecken)."
@@ -3818,7 +3909,7 @@ class AppState {
         persistHistory()
         runCatching { factsStore.save(movieFacts) }
         runCatching { tmdbStore.save(tmdbFacts) }
-        runCatching { extrasStore.save(TmdbExtrasStore.Saved(tmdbLogos, trending, trendingAt)) }
+        runCatching { extrasStore.save(TmdbExtrasStore.Saved(tmdbLogos, trending, trendingAt, weeklyTop, weeklyTopAt)) }
         storage.saveSettings(currentSettings())
         WindowsIntegration.keepAwake(false)
         val released = videoPlayer?.release() ?: true
@@ -3967,6 +4058,8 @@ private const val NEW_FIRST_RUN_MS = 3 * DAY_MS
 private const val VISIT_COUNTS_AFTER_MS = 10 * 60_000L
 private const val TRENDING_MAX_AGE_MS = 6 * 60 * 60_000L
 private const val TRENDING_CHECK_MS = 60 * 60_000L
+/** Veckans topp 10 hämtas om när den är så här gammal. */
+private const val WEEKLY_MAX_AGE_MS = 3 * 60 * 60_000L
 /** Spoltryck med kortare mellanrum än så räknas som ett hopp. */
 private const val SEEK_GROUP_MS = 4_000L
 

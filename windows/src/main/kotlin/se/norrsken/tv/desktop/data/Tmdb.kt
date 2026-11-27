@@ -390,6 +390,49 @@ class TmdbClient(private val key: String) {
         return result
     }
 
+    /**
+     * Veckans populäraste filmer hos TMDB, de [count] första: TMDB:s egen
+     * lista över det som setts, sökts och betygsatts mest de senaste sju
+     * dagarna, mest först. Svenska titlar och beskrivningar där de finns,
+     * annars den engelska beskrivningen.
+     */
+    fun weeklyMovies(count: Int = 10): List<WeeklyTitle> {
+        val swedish = get("trending/movie/week", mapOf("language" to "sv-SE")).optJSONArray("results") ?: return emptyList()
+        val names = runCatching { genres("movie") }.getOrDefault(emptyMap())
+        val english = HashMap<Int, String>()
+        runCatching {
+            val array = get("trending/movie/week", mapOf("language" to "en-US")).optJSONArray("results")
+            if (array != null) {
+                for (index in 0 until array.length()) {
+                    val o = array.optJSONObject(index) ?: continue
+                    val text = o.optString("overview", "")
+                    if (text.isNotBlank()) english[o.optInt("id")] = text
+                }
+            }
+        }
+        val result = ArrayList<WeeklyTitle>(count)
+        for (index in 0 until swedish.length()) {
+            if (result.size >= count) break
+            val o = swedish.optJSONObject(index) ?: continue
+            val id = o.optInt("id")
+            if (id <= 0) continue
+            val ids = o.optJSONArray("genre_ids")
+            val genres = ids?.let { array -> (0 until array.length()).mapNotNull { names[array.optInt(it)] } }.orEmpty()
+            result += WeeklyTitle(
+                id = id,
+                title = o.optString("title", "").ifBlank { o.optString("original_title", "") },
+                original = o.optString("original_title", ""),
+                year = o.optString("release_date", "").take(4).toIntOrNull(),
+                poster = o.optString("poster_path", "").ifBlank { null }?.let { IMAGES + "w342" + it },
+                backdrop = o.optString("backdrop_path", "").ifBlank { null }?.let { IMAGES + "w1280" + it },
+                overview = o.optString("overview", "").ifBlank { null } ?: english[id],
+                rating = o.optDouble("vote_average", 0.0).takeIf { it > 0.0 },
+                genres = genres.take(2).joinToString(", "),
+            )
+        }
+        return result
+    }
+
     private fun get(path: String, params: Map<String, String>): JSONObject {
         val query = buildString {
             for ((name, value) in params) {
@@ -448,14 +491,37 @@ data class TrendingTitle(
 )
 
 /**
- * Loggor och dagens trendlista från TMDB, sparade mellan körningar så att
- * startsidan har dem direkt. Loggorna per "movie:id" eller "tv:id"; tom
- * text betyder att titeln saknar logga.
+ * En film på TMDB:s topplista för veckan (Veckans topp 10), med det som
+ * behövs för att visa den också när den inte finns i biblioteket. Bilderna
+ * är hela adresser; [genres] svenska namn, kommaseparerade.
+ */
+data class WeeklyTitle(
+    val id: Int,
+    val title: String,
+    val original: String,
+    val year: Int?,
+    val poster: String?,
+    val backdrop: String?,
+    val overview: String?,
+    val rating: Double?,
+    val genres: String = "",
+)
+
+/**
+ * Loggor, dagens trendlista och veckans topp 10 från TMDB, sparade mellan
+ * körningar så att startsidan har dem direkt. Loggorna per "movie:id" eller
+ * "tv:id"; tom text betyder att titeln saknar logga.
  */
 class TmdbExtrasStore {
     private val file: File get() = File(AppDirs.cache, "tmdb-extra.json")
 
-    class Saved(val logos: Map<String, String>, val trending: List<TrendingTitle>, val trendingAt: Long)
+    class Saved(
+        val logos: Map<String, String>,
+        val trending: List<TrendingTitle>,
+        val trendingAt: Long,
+        val weekly: List<WeeklyTitle> = emptyList(),
+        val weeklyAt: Long = 0L,
+    )
 
     fun load(): Saved = runCatching {
         val current = file
@@ -478,7 +544,26 @@ class TmdbExtrasStore {
                 )
             }
         }
-        Saved(logos, trending, o.optLong("at", 0L))
+        val week = o.optJSONArray("weekly")
+        val weekly = if (week == null) {
+            emptyList()
+        } else {
+            (0 until week.length()).mapNotNull { index ->
+                val e = week.optJSONObject(index) ?: return@mapNotNull null
+                WeeklyTitle(
+                    id = e.optInt("i"),
+                    title = e.optString("t", ""),
+                    original = e.optString("o", ""),
+                    year = if (e.has("y")) e.optInt("y") else null,
+                    poster = e.optString("p", "").ifEmpty { null },
+                    backdrop = e.optString("b", "").ifEmpty { null },
+                    overview = e.optString("d", "").ifEmpty { null },
+                    rating = if (e.has("r")) e.optDouble("r") else null,
+                    genres = e.optString("g", ""),
+                ).takeIf { it.id > 0 }
+            }
+        }
+        Saved(logos, trending, o.optLong("at", 0L), weekly, o.optLong("weeklyAt", 0L))
     }.getOrDefault(Saved(emptyMap(), emptyList(), 0L))
 
     fun save(saved: Saved) {
@@ -491,7 +576,18 @@ class TmdbExtrasStore {
                 t.year?.let { e.put("y", it) }
                 list.put(e)
             }
+            val week = JSONArray()
+            for (t in saved.weekly) {
+                val e = JSONObject().put("i", t.id).put("t", t.title).put("o", t.original).put("g", t.genres)
+                t.year?.let { e.put("y", it) }
+                t.poster?.let { e.put("p", it) }
+                t.backdrop?.let { e.put("b", it) }
+                t.overview?.let { e.put("d", it) }
+                t.rating?.let { e.put("r", it) }
+                week.put(e)
+            }
             val o = JSONObject().put("logos", logos).put("trending", list).put("at", saved.trendingAt)
+                .put("weekly", week).put("weeklyAt", saved.weeklyAt)
             writeFileSafely(file, o.toString().toByteArray(Charsets.UTF_8))
         }
     }

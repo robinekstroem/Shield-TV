@@ -342,10 +342,12 @@ fun AppRoot(state: AppState) {
         }
         // Filmväggen bakom sidorna, mörk och dämpad. Egna bakgrundsbilder går före.
         if (state.backgrounds.isEmpty()) {
+            // Veckans topp 10 har en egen bild över hela sidan: väggen syns inte där.
+            val topTenCovers = state.screen == Screen.TOP10 && state.selectedMovie == null && state.weeklyTop.isNotEmpty()
             PosterWallBackdrop(
                 wall,
                 // Skärmsläckaren täcker allt: väggen bakom behöver inte ritas.
-                shown = (state.introDone || state.introRevealing) && !saver.covering,
+                shown = (state.introDone || state.introRevealing) && !saver.covering && !topTenCovers,
                 quiet = state.screen == Screen.GUIDE || state.screen == Screen.LIVE || state.screen == Screen.SETTINGS,
                 silk = state.wallStyle.silk,
                 modifier = Modifier.fillMaxSize().graphicsLayer(),
@@ -404,6 +406,7 @@ fun AppRoot(state: AppState) {
                             Screen.GENRES -> GenreScreen(state)
                             Screen.HISTORY -> HistoryScreen(state)
                             Screen.SETTINGS -> SettingsScreen(state)
+                            Screen.TOP10 -> TopTenScreen(state)
                         }
                     }
                 }
@@ -639,6 +642,10 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
             NavItem(Glyphs.History, "Historik", "Fortsätt där du slutade", null, state.screen == Screen.HISTORY, docked, tv = tv, accent = MenuAccents.history, trail = trail, aura = aura, index = 7, onFocused = onFocused, modifier = navModifier(Screen.HISTORY)) {
                 go(Screen.HISTORY)
             }
+            // Veckans topp 10: den gula knappen, för sig under biblioteket.
+            TopTenNavItem(state.screen == Screen.TOP10, tv = tv, trail = trail, aura = aura, index = 8, onFocused = onFocused, modifier = navModifier(Screen.TOP10)) {
+                go(Screen.TOP10)
+            }
         }
 
         if (state.importingId != null) {
@@ -651,7 +658,7 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
             MenuPeek(state, peek, Modifier.fillMaxWidth().padding(bottom = 10.dp))
         }
 
-        NavItem(Glyphs.Settings, "Inställningar", "Källor & uppspelning", null, state.screen == Screen.SETTINGS, docked, tv = tv, accent = MenuAccents.settings, trail = trail, aura = aura, index = 8, onFocused = onFocused, modifier = navModifier(Screen.SETTINGS)) {
+        NavItem(Glyphs.Settings, "Inställningar", "Källor & uppspelning", null, state.screen == Screen.SETTINGS, docked, tv = tv, accent = MenuAccents.settings, trail = trail, aura = aura, index = 9, onFocused = onFocused, modifier = navModifier(Screen.SETTINGS)) {
             go(Screen.SETTINGS)
         }
     }
@@ -956,6 +963,53 @@ private class NavPlace {
     var center = 0f
 }
 
+/**
+ * Veckans topp 10 i menyn: den gula knappen (TopTen.kt) i stället för en
+ * rad. Styrs som raderna: markeringen och skenet glider dit, pil höger
+ * eller OK öppnar sidan.
+ */
+@Composable
+private fun TopTenNavItem(
+    selected: Boolean,
+    tv: Boolean,
+    trail: FocusTrail?,
+    aura: MenuAura?,
+    index: Int,
+    onFocused: ((Int) -> Unit)?,
+    modifier: Modifier,
+    onClick: () -> Unit,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val focused by interaction.collectIsFocusedAsState()
+    val place = remember { NavPlace() }
+    TopTenButton(
+        interaction = interaction,
+        active = focused || (hovered && !tv),
+        current = selected,
+        tv = tv,
+        modifier = modifier
+            .then(
+                if (trail != null) {
+                    Modifier
+                        .onGloballyPositioned { place.center = it.boundsInWindow().center.y }
+                        .trailMark(trail, index)
+                        .onFocusChanged {
+                            if (it.isFocused) {
+                                aura?.follow(place.center, TOP_YELLOW)
+                                onFocused?.invoke(index)
+                            }
+                        }
+                } else {
+                    Modifier
+                },
+            )
+            .hoverable(interaction)
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .pointerHoverIcon(PointerIcon.Hand),
+    )
+}
+
 /** "● 2 LIVE": det som pågår just nu, i rött, med en prick som pulserar. */
 @Composable
 private fun LiveBadge(count: Int) {
@@ -1111,6 +1165,16 @@ private fun MenuPeek(state: AppState, index: Int, modifier: Modifier) {
                     image = entry.image,
                     poster = entry.kind != WatchKind.LIVE,
                     progress = entry.progress.takeIf { entry.kind != WatchKind.LIVE && it > 0f },
+                )
+            }
+            8 -> state.weeklyTop.firstOrNull()?.let { first ->
+                PeekCard(
+                    label = "VECKANS TOPP 10",
+                    accent = TOP_YELLOW,
+                    title = "1. ${first.title}",
+                    line = state.weeklyTop.getOrNull(1)?.let { "2. ${it.title}" },
+                    image = first.poster,
+                    poster = true,
                 )
             }
             else -> Spacer(Modifier.height(0.dp))
