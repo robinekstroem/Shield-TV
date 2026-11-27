@@ -1365,7 +1365,7 @@ private val MARK_TEAL = Color(0xFF52D6C8)
 private const val ROW_FADE_MS = 130
 
 private val TV_GROUPS_CLOSED = 36.dp
-private val TV_GROUPS_OPEN = 372.dp
+internal val TV_GROUPS_OPEN = 372.dp
 /** Så länge markeringen ska stå still på en kategori innan den väljs. */
 private const val GROUP_PICK_MS = 300L
 

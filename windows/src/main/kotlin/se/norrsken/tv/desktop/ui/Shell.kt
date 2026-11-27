@@ -97,6 +97,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
@@ -107,6 +108,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import java.time.Instant
+import kotlin.math.abs
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -186,6 +188,14 @@ internal object TvNav {
      * stället för att startsidan tar den. Släpps när man lämnar menyn.
      */
     var holdMenu = false
+
+    /**
+     * Senaste trycket var ett finger på skärmen (Shield-appen på en telefon),
+     * inte fjärrkontrollen. Då finns ingen markering som kan flytta sig, så
+     * menyn och kategorierna går undan av sig själva när man valt något. På
+     * tv:n är det alltid falskt.
+     */
+    var touched = false
 
     /**
      * Var markeringen ska hamna om den tappats, till exempel när det man stod
@@ -296,6 +306,7 @@ fun AppRoot(state: AppState) {
             .onPreviewKeyEvent { event ->
                 // Senaste trycket: skärmsläckaren räknar sina två minuter därifrån.
                 wall.lastInput = nowMs()
+                TvNav.touched = false
                 // Skärmsläckaren: en knapptryckning flyter tillbaka, och gör inget annat.
                 if (saver.shown) {
                     if (event.type == KeyEventType.KeyDown) saver.wake = true
@@ -314,7 +325,9 @@ fun AppRoot(state: AppState) {
                         wall.lastInput = nowMs()
                     }
                 }
-            },
+            }
+            // Pekskärm (Shield-appen på en telefon): svep fram och bort menyerna.
+            .then(if (drawers) Modifier.touchDrawers(state) else Modifier),
     ) {
         // Temats dekor rör sig bara när spelaren eller skärmsläckaren inte täcker allt.
         val decorated = (state.nowPlaying == null || state.miniPlayer) && !saver.covering
@@ -485,6 +498,11 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
         TvNav.holdMenu = false
         state.screen = screen
         if (!tv) return
+        // Valt med fingret (telefon): ingen markering att flytta, menyn går undan.
+        if (TvNav.touched) {
+            TvNav.drawer = TvDrawer.NONE
+            return
+        }
         scope.launch {
             // Vänta in den nya skärmen, så att dess kategorier hunnit visas.
             repeat(3) { withFrameNanos { } }
@@ -1160,6 +1178,90 @@ internal fun PeekCard(
             if (progress != null) {
                 Box(Modifier.padding(top = 3.dp).fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.14f))) {
                     Box(Modifier.fillMaxHeight().fillMaxWidth(progress.coerceIn(0f, 1f)).background(accent))
+                }
+            }
+        }
+    }
+}
+
+// --- Pekskärm: svep fram och bort menyerna --------------------------------------------
+
+/** Svep som börjar så här nära vänsterkanten (andel av bredden) tar fram kategorierna eller menyn. */
+private const val TOUCH_EDGE = 0.12f
+
+/** Så långt åt sidan fingret ska ha gått för att det ska räknas som ett svep. */
+private val TOUCH_SWIPE = 36.dp
+
+/** Högerkanten på det som är framme till vänster: menyn eller kategorierna. */
+private fun drawerEdge(drawer: TvDrawer, state: AppState): Dp = when (drawer) {
+    TvDrawer.MENU -> if (state.menuStyle == MenuStyle.ORIGINAL) TV_MENU_WIDTH else state.menuStyle.tvWidth()
+    TvDrawer.CATEGORIES -> TV_GROUPS_OPEN
+    TvDrawer.NONE -> 0.dp
+}
+
+/**
+ * Shield-appen på en telefon, där det inte finns någon fjärrkontroll:
+ *
+ * - Svep åt höger från vänsterkanten: kategorierna fram, eller menyn om sidan
+ *   inte har några — som pil vänster vid kanten.
+ * - Svep åt höger medan kategorierna syns: menyn fram.
+ * - Svep åt vänster medan något av dem syns: det går undan.
+ * - Ett tryck bredvid dem: de går undan, utan att trycket når sidan bakom.
+ * - Ett tryck på en kategori väljer den och låter listan gå undan.
+ *
+ * Bara fingrar räknas, och bara här i tv-läget: på tv:n och i Windows händer
+ * ingenting nytt. Svep som börjar längst ut vid kanten tar telefonen själv som
+ * Tillbaka, och det tar också fram menyn.
+ */
+private fun Modifier.touchDrawers(state: AppState): Modifier = pointerInput(state) {
+    awaitPointerEventScope {
+        while (true) {
+            val first = awaitPointerEvent(PointerEventPass.Initial)
+            val down = first.changes.firstOrNull { it.type == PointerType.Touch && it.pressed && !it.previousPressed } ?: continue
+            TvNav.touched = true
+            val start = down.position
+            val open = TvNav.drawer
+            val outside = open != TvDrawer.NONE && start.x > drawerEdge(open, state).toPx()
+            val fromEdge = open == TvDrawer.NONE && start.x < size.width * TOUCH_EDGE
+            // Bredvid en öppen meny: sidan bakom får inte trycket.
+            var claimed = outside
+            if (claimed) down.consume()
+            var acted = false
+            var moved = false
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                val dx = change.position.x - start.x
+                val dy = change.position.y - start.y
+                if (!moved && (abs(dx) > viewConfiguration.touchSlop || abs(dy) > viewConfiguration.touchSlop)) moved = true
+                if (!acted && abs(dx) > TOUCH_SWIPE.toPx() && abs(dx) > abs(dy) * 1.5f) {
+                    when {
+                        dx > 0f && fromEdge -> {
+                            TvNav.openLeft()
+                            acted = true
+                        }
+                        dx > 0f && open == TvDrawer.CATEGORIES -> {
+                            TvNav.openMenu()
+                            acted = true
+                        }
+                        dx < 0f && open != TvDrawer.NONE -> {
+                            TvNav.drawer = TvDrawer.NONE
+                            acted = true
+                        }
+                    }
+                    if (acted) claimed = true
+                }
+                if (claimed) change.consume()
+                if (!change.pressed) {
+                    if (!moved && !acted) {
+                        when {
+                            // Ett tryck bredvid: undan.
+                            outside -> TvNav.drawer = TvDrawer.NONE
+                            // Ett tryck i kategorierna: kategorin väljs (av raden själv) och listan går undan.
+                            open == TvDrawer.CATEGORIES -> TvNav.drawer = TvDrawer.NONE
+                        }
+                    }
+                    break
                 }
             }
         }

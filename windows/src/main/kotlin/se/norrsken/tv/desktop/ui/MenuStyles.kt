@@ -244,6 +244,11 @@ internal fun StyledSidebar(state: AppState, style: MenuStyle, tv: Boolean) {
         TvNav.holdMenu = false
         state.screen = screen
         if (!tv) return
+        // Valt med fingret (telefon): ingen markering att flytta, menyn går undan.
+        if (TvNav.touched) {
+            TvNav.drawer = TvDrawer.NONE
+            return
+        }
         scope.launch {
             repeat(3) { withFrameNanos { } }
             if (TvNav.categories > 0) {
@@ -331,7 +336,7 @@ internal fun StyledSidebar(state: AppState, style: MenuStyle, tv: Boolean) {
     }
 }
 
-private fun MenuStyle.tvWidth() = when (this) {
+internal fun MenuStyle.tvWidth() = when (this) {
     MenuStyle.MULTIVERSE -> 440.dp
     MenuStyle.STARK -> 400.dp
     else -> 340.dp

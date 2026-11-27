@@ -55,6 +55,7 @@ import se.norrsken.tv.desktop.ui.MatchNoticeOverlay
 import se.norrsken.tv.desktop.ui.PlayerLayers
 import se.norrsken.tv.desktop.ui.PlayerStill
 import se.norrsken.tv.desktop.ui.TvNav
+import se.norrsken.tv.desktop.ui.TvDrawer
 import se.norrsken.tv.desktop.ui.TvTheme
 import java.awt.BasicStroke
 import java.awt.Color
@@ -483,6 +484,7 @@ private fun scenes(state: AppState, data: PreviewData): List<Scene> {
                 state.selectMenuStyle(MenuStyle.MINIMAL)
             },
             after = { TvNav.openMenu() },
+            each = { if (TvNav.drawer != TvDrawer.MENU) TvNav.openMenu() },
             settleMs = 3_500L,
             content = app,
         ),
@@ -494,6 +496,7 @@ private fun scenes(state: AppState, data: PreviewData): List<Scene> {
                 state.selectMenuStyle(MenuStyle.MULTIVERSE)
             },
             after = { TvNav.openMenu() },
+            each = { if (TvNav.drawer != TvDrawer.MENU) TvNav.openMenu() },
             settleMs = 4_500L,
             content = app,
         ),
@@ -505,6 +508,7 @@ private fun scenes(state: AppState, data: PreviewData): List<Scene> {
                 state.selectMenuStyle(MenuStyle.STARK)
             },
             after = { TvNav.openMenu() },
+            each = { if (TvNav.drawer != TvDrawer.MENU) TvNav.openMenu() },
             settleMs = 3_500L,
             content = app,
         ),
@@ -515,6 +519,7 @@ private fun scenes(state: AppState, data: PreviewData): List<Scene> {
                 state.selectMenuStyle(MenuStyle.STARK)
             },
             after = { TvNav.openMenu() },
+            each = { if (TvNav.drawer != TvDrawer.MENU) TvNav.openMenu() },
             settleMs = 3_500L,
             content = app,
         ),
