@@ -454,6 +454,12 @@ fun AppRoot(state: AppState) {
  */
 @Composable
 private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
+    // Menyns utseende (Inställningar): de nya ritas i MenuStyles.kt. Står minispelaren
+    // i sidofältet på datorn visas Original, som har facket för den.
+    if (state.menuStyle != MenuStyle.ORIGINAL && !docked) {
+        StyledSidebar(state, state.menuStyle, tv)
+        return
+    }
     val palette = LocalPalette.current
     var focused by remember { mutableStateOf(false) }
     // Tv: markeringen glider från raden den lämnar till nästa (se NavItem), och
@@ -963,7 +969,7 @@ private fun LiveBadge(count: Int) {
 }
 
 @Composable
-private fun ImportIndicator(importState: ImportState) {
+internal fun ImportIndicator(importState: ImportState) {
     val palette = LocalPalette.current
     Column(
         Modifier

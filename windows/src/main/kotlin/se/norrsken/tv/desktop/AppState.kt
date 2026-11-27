@@ -49,6 +49,7 @@ import se.norrsken.tv.desktop.data.HistoryStore
 import se.norrsken.tv.desktop.data.WatchKind
 import se.norrsken.tv.desktop.data.WatchEntry
 import se.norrsken.tv.desktop.ui.AppTheme
+import se.norrsken.tv.desktop.ui.MenuStyle
 import se.norrsken.tv.desktop.ui.WallStyle
 import kotlinx.coroutines.delay
 import se.norrsken.tv.desktop.data.GuideIndex
@@ -429,6 +430,9 @@ class AppState {
     /** Omslagsväggen bakom sidorna: Filmväggen eller Filmsiden i någon av färgerna. */
     var wallStyle by mutableStateOf(WallStyle.WALL)
         private set
+    /** Menyns utseende: Original, Minimal, Multiversum eller Stark. */
+    var menuStyle by mutableStateOf(MenuStyle.ORIGINAL)
+        private set
 
     var selectedSeries by mutableStateOf<Series?>(null)
         private set
@@ -625,6 +629,7 @@ class AppState {
         seriesSort = sortOrderOf(loaded.third.seriesSort)
         theme = AppTheme.entries.firstOrNull { it.name == loaded.third.theme } ?: AppTheme.GRAPHITE
         wallStyle = WallStyle.entries.firstOrNull { it.name == loaded.third.wallStyle } ?: WallStyle.WALL
+        menuStyle = MenuStyle.entries.firstOrNull { it.name == loaded.third.menuStyle } ?: MenuStyle.ORIGINAL
         tmdbKey = SecretBox.unsealText(loaded.third.tmdbKey)
         tmdbConnected = tmdbKey != null
         backgrounds = loaded.third.backgrounds.filter { File(it).isFile }
@@ -2240,6 +2245,11 @@ class AppState {
         saveSettings()
     }
 
+    fun selectMenuStyle(option: MenuStyle) {
+        menuStyle = option
+        saveSettings()
+    }
+
     private fun sortOrderOf(name: String?): SortOrder =
         SortOrder.entries.firstOrNull { it.name == name } ?: SortOrder.PROVIDER
 
@@ -3219,6 +3229,7 @@ class AppState {
         seriesSort = seriesSort.name,
         theme = theme.name,
         wallStyle = wallStyle.name,
+        menuStyle = menuStyle.name,
         tmdbKey = tmdbKey?.let { SecretBox.sealText(it) },
         backgrounds = backgrounds,
         audioLanguage = preferredAudio,

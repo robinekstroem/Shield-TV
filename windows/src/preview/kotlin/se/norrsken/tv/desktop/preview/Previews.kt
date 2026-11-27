@@ -40,6 +40,8 @@ import se.norrsken.tv.desktop.ui.SaverControl
 import se.norrsken.tv.desktop.ui.ScreenSaver
 import se.norrsken.tv.desktop.ui.WallStyle
 import se.norrsken.tv.desktop.ui.WallStyleChooser
+import se.norrsken.tv.desktop.ui.MenuStyle
+import se.norrsken.tv.desktop.ui.MenuStyleChooser
 import se.norrsken.tv.desktop.data.IntroReelItem
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -457,6 +459,74 @@ private fun scenes(state: AppState, data: PreviewData): List<Scene> {
                     ScreenSaver(state, wall, morph, saver)
                 }
             },
+        ),
+        // Menyns utseenden (Inställningar → Menyn): valet, och varje meny framme vid Filmer.
+        Scene(
+            "installningar-meny",
+            before = { state.selectMenuStyle(MenuStyle.MULTIVERSE) },
+            settleMs = 1_500L,
+            content = {
+                TvTheme(state.theme) {
+                    Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black).padding(48.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            MenuStyleChooser(state)
+                        }
+                    }
+                }
+            },
+        ),
+        Scene(
+            "meny-minimal",
+            before = {
+                screen(Screen.MOVIES)()
+                state.selectWallStyle(WallStyle.WALL)
+                state.selectMenuStyle(MenuStyle.MINIMAL)
+            },
+            after = { TvNav.openMenu() },
+            settleMs = 3_500L,
+            content = app,
+        ),
+        Scene(
+            "meny-multiversum",
+            before = {
+                screen(Screen.MOVIES)()
+                state.selectWallStyle(WallStyle.WALL)
+                state.selectMenuStyle(MenuStyle.MULTIVERSE)
+            },
+            after = { TvNav.openMenu() },
+            settleMs = 4_500L,
+            content = app,
+        ),
+        Scene(
+            "meny-stark",
+            before = {
+                screen(Screen.MOVIES)()
+                state.selectWallStyle(WallStyle.WALL)
+                state.selectMenuStyle(MenuStyle.STARK)
+            },
+            after = { TvNav.openMenu() },
+            settleMs = 3_500L,
+            content = app,
+        ),
+        Scene(
+            "meny-stark-hem",
+            before = {
+                screen(Screen.HOME)()
+                state.selectMenuStyle(MenuStyle.STARK)
+            },
+            after = { TvNav.openMenu() },
+            settleMs = 3_500L,
+            content = app,
+        ),
+        Scene(
+            "meny-original-igen",
+            before = {
+                screen(Screen.MOVIES)()
+                state.selectMenuStyle(MenuStyle.ORIGINAL)
+            },
+            after = { TvNav.openMenu() },
+            settleMs = 3_000L,
+            content = app,
         ),
     )
 }

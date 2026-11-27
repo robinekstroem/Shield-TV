@@ -28,6 +28,8 @@ data class Settings(
     val theme: String? = null,
     /** Omslagsväggen bakom sidorna: namnet på en WallStyle. */
     val wallStyle: String? = null,
+    /** Menyns utseende: namnet på en MenuStyle. */
+    val menuStyle: String? = null,
     /** TMDB-nyckeln, DPAPI-krypterad som lösenorden. */
     val tmdbKey: String? = null,
     /** Egna bakgrundsbilder: sökvägar till appens kopior. */
@@ -102,6 +104,7 @@ class Storage {
             seriesSort = o.optString("seriesSort", "").ifEmpty { null },
             theme = o.optString("theme", "").ifEmpty { null },
             wallStyle = o.optString("wallStyle", "").ifEmpty { null },
+            menuStyle = o.optString("menuStyle", "").ifEmpty { null },
             tmdbKey = o.optString("tmdbKey", "").ifEmpty { null },
             backgrounds = o.optJSONArray("backgrounds")?.let { array ->
                 (0 until array.length()).mapNotNull { array.optString(it, "").ifEmpty { null } }
@@ -128,6 +131,7 @@ class Storage {
                 .put("seriesSort", settings.seriesSort)
                 .put("theme", settings.theme)
                 .put("wallStyle", settings.wallStyle)
+                .put("menuStyle", settings.menuStyle)
                 .put("tmdbKey", settings.tmdbKey)
                 .put("backgrounds", JSONArray(settings.backgrounds))
                 .put("lastVisitUtc", settings.lastVisitUtc)

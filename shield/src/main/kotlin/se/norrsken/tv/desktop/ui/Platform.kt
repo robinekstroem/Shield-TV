@@ -1,5 +1,6 @@
 package se.norrsken.tv.desktop.ui
 
+import se.norrsken.tv.shield.R
 import se.norrsken.tv.shield.RemoteInputHost
 import se.norrsken.tv.shield.TvResolution
 import se.norrsken.tv.shield.TvDisplay
@@ -32,6 +33,7 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -209,6 +211,18 @@ internal fun DisplayOptions() {
 
 /** Shield styrs med fjärrkontroll: tydlig markering och titeln man står på överst. */
 internal const val tvLayout = true
+
+/**
+ * De nya menyernas typsnitt (MenuStyles.kt): Anton för klockan och de stora
+ * namnen, och en smal Roboto för raderna. Ligger i res/font; licenserna
+ * (SIL OFL) i assets/licenses.
+ */
+internal val menuDisplayFont: FontFamily = FontFamily(Font(R.font.anton))
+
+internal val menuCondensedFont: FontFamily = FontFamily(
+    Font(R.font.tv_condensed_semibold, FontWeight.SemiBold),
+    Font(R.font.tv_condensed_bold, FontWeight.Bold),
+)
 
 /** Under appens namn i sidomenyn. */
 internal const val platformName = "Shield"

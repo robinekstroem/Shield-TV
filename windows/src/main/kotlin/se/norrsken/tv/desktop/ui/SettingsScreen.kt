@@ -144,6 +144,10 @@ fun SettingsScreen(state: AppState) {
                     WallStyleChooser(state)
                 }
 
+                Section("Menyn") {
+                    MenuStyleChooser(state)
+                }
+
                 Section("Egna bakgrundsbilder") {
                     BackgroundsCard(state)
                 }
@@ -602,6 +606,52 @@ private fun WallStyleCard(style: WallStyle, selected: Boolean, onClick: () -> Un
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(style.label, style = MaterialTheme.typography.titleMedium)
                 if (style == WallStyle.SILK) Tag("NYTT", palette.signal)
+            }
+            Text(style.description, style = MaterialTheme.typography.bodySmall, color = palette.textTertiary)
+        }
+    }
+}
+
+/**
+ * Menyns utseende: Original, eller någon av de nya — Minimal, Multiversum och
+ * Stark. Fyra kort i rad med en liten bild av var och en. Gäller direkt.
+ */
+@Composable
+internal fun MenuStyleChooser(state: AppState) {
+    val palette = LocalPalette.current
+    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        MenuStyle.entries.forEach { option ->
+            MenuStyleCard(option, selected = state.menuStyle == option, onClick = { state.selectMenuStyle(option) })
+        }
+    }
+    Text(
+        if (tvLayout) "Syns när du går till menyn med pil vänster." else "Gäller menyn till vänster direkt.",
+        style = MaterialTheme.typography.bodySmall,
+        color = palette.textTertiary,
+    )
+}
+
+@Composable
+private fun MenuStyleCard(style: MenuStyle, selected: Boolean, onClick: () -> Unit) {
+    val palette = LocalPalette.current
+    val shape = RoundedCornerShape(14.dp)
+    Pressable(
+        onClick = onClick,
+        selected = selected,
+        shape = shape,
+        modifier = Modifier.width(188.dp).border(1.dp, if (selected) palette.focus else palette.hairline, shape),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            Spacer(
+                Modifier
+                    .fillMaxWidth()
+                    .height(104.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .drawBehind { menuMiniature(style) },
+            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(style.label, style = MaterialTheme.typography.titleMedium)
+                if (style.fresh) Tag("NYTT", palette.signal)
             }
             Text(style.description, style = MaterialTheme.typography.bodySmall, color = palette.textTertiary)
         }

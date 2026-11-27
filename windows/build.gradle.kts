@@ -93,6 +93,8 @@ val previewPlatform by tasks.registering(Sync::class) {
 }
 
 val preview: SourceSet = sourceSets.create("preview")
+// Typsnitten och annat i resources finns med också i förhandsbilderna.
+preview.resources.srcDir("src/main/resources")
 
 kotlin {
     sourceSets.named("preview") {

@@ -1,5 +1,8 @@
 package se.norrsken.tv.desktop.ui
 
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import se.norrsken.tv.desktop.platform.WindowsIntegration
 import org.jetbrains.skia.Rect as SkiaRect
 import org.jetbrains.skia.Paint as SkiaPaint
@@ -298,6 +301,27 @@ internal fun DisplayOptions() = Unit
 
 /** Windows styrs med mus: omslagen förstoras lite vid hovring, ingen titel överst. */
 internal const val tvLayout = false
+
+/**
+ * De nya menyernas typsnitt (MenuStyles.kt): Anton för klockan och de stora
+ * namnen, och en smal Roboto för raderna. Ligger i resources/fonts, med sina
+ * licenser (SIL OFL). Saknas en fil blir det systemets typsnitt i stället.
+ */
+internal val menuDisplayFont: FontFamily =
+    menuFont("anton.ttf", FontWeight.Normal)?.let { FontFamily(it) } ?: FontFamily.Default
+
+internal val menuCondensedFont: FontFamily =
+    listOfNotNull(
+        menuFont("tv_condensed_semibold.ttf", FontWeight.SemiBold),
+        menuFont("tv_condensed_bold.ttf", FontWeight.Bold),
+    ).takeIf { it.isNotEmpty() }?.let { FontFamily(it) } ?: FontFamily.SansSerif
+
+private object MenuFonts
+
+private fun menuFont(name: String, weight: FontWeight): Font? =
+    runCatching { MenuFonts::class.java.getResourceAsStream("/fonts/$name")?.use { it.readBytes() } }
+        .getOrNull()
+        ?.let { bytes -> androidx.compose.ui.text.platform.Font("tv-meny-$name", bytes, weight) }
 
 /** Under appens namn i sidomenyn. */
 internal val platformName: String = if (WindowsIntegration.isMac) "Mac" else "Windows"
