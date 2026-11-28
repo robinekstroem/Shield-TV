@@ -76,6 +76,16 @@ jobs:
             '</fontconfig>' > ~/.config/fontconfig/fonts.conf
           fc-cache -f >/dev/null 2>&1 || true
 
+      # Brasan, prov: filmer av brasor med fri licens från Wikimedia Commons och
+      # några bilder ur dem, till förhandsbilderna. Tas bort när brasan är vald.
+      - name: Brasan, provfilmer
+        if: steps.build.outputs.status == '0' && hashFiles('windows/verktyg/brasa-prov.py') != ''
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          command -v ffmpeg >/dev/null 2>&1 || sudo apt-get install -y -qq ffmpeg >/dev/null 2>&1 || true
+          python3 windows/verktyg/brasa-prov.py windows/build/previews/brasa
+
       - name: Rita förhandsbilder
         if: steps.build.outputs.status == '0'
         continue-on-error: true
