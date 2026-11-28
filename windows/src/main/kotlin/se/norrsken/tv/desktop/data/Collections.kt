@@ -42,8 +42,12 @@ class Franchise internal constructor(
 
 class FranchisePart internal constructor(val title: String, val films: List<FranchiseFilm>)
 
-/** En film i en samling. Namn med "~" först kräver året: det finns andra filmer som heter så. */
-class FranchiseFilm internal constructor(val year: Int, internal val names: List<String>) {
+/**
+ * En film i en samling. Namn med "~" först kräver året: det finns andra
+ * filmer som heter så. [tmdbId]: filmen hos TMDB (regissörernas samlingar),
+ * så att den hittas också när namnet i biblioteket är ett annat.
+ */
+class FranchiseFilm internal constructor(val year: Int, internal val names: List<String>, internal val tmdbId: Int = 0) {
     val title: String = names.first().removePrefix("~")
 }
 
@@ -56,8 +60,11 @@ object CollectionKeys {
 
     fun isGallery(group: String?): Boolean = group == GALLERY
 
-    fun franchiseOf(group: String?): Franchise? =
-        if (group != null && group.startsWith(PREFIX)) FRANCHISES_BY_ID[group.removePrefix(PREFIX)] else null
+    fun franchiseOf(group: String?): Franchise? {
+        if (group == null || !group.startsWith(PREFIX)) return null
+        val id = group.removePrefix(PREFIX)
+        return FRANCHISES_BY_ID[id] ?: DynamicFranchises.current.byId[id]
+    }
 
     /** Galleriet, en samling eller Disney: allt som hör till Samlingar. */
     fun isCollections(group: String?): Boolean = isGallery(group) || franchiseOf(group) != null || DisneyShelf.isDisney(group)
@@ -73,57 +80,151 @@ class CollectionIndex private constructor(private val owned: Map<String, Map<Int
 
     fun count(franchise: Franchise): Int = owned[franchise.id]?.size ?: 0
 
-    /** Samlingarna man har något ur, i galleriets ordning. */
-    fun present(): List<Franchise> = FRANCHISES.filter { count(it) > 0 }
+    /** Samlingarna man har något ur, i galleriets ordning: filmserierna, sedan regissörerna med minst två filmer. */
+    fun present(): List<Franchise> =
+        FRANCHISES.filter { count(it) > 0 } + DynamicFranchises.current.list.filter { count(it) >= DIRECTOR_MIN_OWNED }
 
     val isEmpty: Boolean get() = owned.isEmpty()
 
     companion object {
         val EMPTY = CollectionIndex(emptyMap())
 
-        /** Går igenom filmerna en gång. Gömda versioner hoppas över: en film per titel räcker. */
-        fun build(library: Library, versions: VersionIndex): CollectionIndex {
+        /**
+         * Går igenom filmerna en gång. Gömda versioner hoppas över: en film per
+         * titel räcker. Regissörernas filmer hittas också efter TMDB-id ([tmdbIdOf]).
+         */
+        fun build(library: Library, versions: VersionIndex, tmdbIdOf: (Movie) -> Int? = { null }): CollectionIndex {
+            val dynamic = DynamicFranchises.current
             val owned = HashMap<String, HashMap<Int, Movie>>()
+            fun own(franchise: Franchise, film: FranchiseFilm, movie: Movie) {
+                val position = franchise.positionOf(film)
+                if (position >= 0) owned.getOrPut(franchise.id) { HashMap() }.putIfAbsent(position, movie)
+            }
             for (movie in library.movies) {
                 if (versions.isHidden(movie)) continue
-                val candidates = NAMES[collectionName(versions.titleOf(movie))] ?: continue
+                val name = collectionName(versions.titleOf(movie))
                 val year = versions.yearOf(movie)
-                for (candidate in candidates) {
-                    if (!fits(candidate, year)) continue
-                    val franchise = candidate.franchise
-                    val position = franchise.positionOf(candidate.film)
-                    if (position < 0) continue
-                    owned.getOrPut(franchise.id) { HashMap() }.putIfAbsent(position, movie)
+                for (candidate in NAMES[name].orEmpty()) {
+                    if (fits(candidate, year)) own(candidate.franchise, candidate.film, movie)
                 }
+                if (dynamic.list.isEmpty()) continue
+                for (candidate in dynamic.names[name].orEmpty()) {
+                    if (fits(candidate, year)) own(candidate.franchise, candidate.film, movie)
+                }
+                val id = tmdbIdOf(movie) ?: continue
+                for ((franchise, film) in dynamic.byTmdb[id].orEmpty()) own(franchise, film, movie)
             }
             return CollectionIndex(owned)
         }
 
         /** Året ska stämma, med ett års marginal (två för de gamla). Utan år räcker namnet, utom för "~"-namnen. */
-        private fun fits(candidate: Candidate, year: Int?): Boolean {
+        private fun fits(candidate: FranchiseCandidate, year: Int?): Boolean {
             val film = candidate.film
             if (year != null) return abs(year - film.year) <= (if (film.year < 1970) 2 else 1)
             return !candidate.ambiguous
         }
 
-        private class Candidate(val franchise: Franchise, val film: FranchiseFilm, val ambiguous: Boolean)
+        private val NAMES: Map<String, List<FranchiseCandidate>> by lazy { namesOf(FRANCHISES) }
+    }
+}
 
-        private val NAMES: Map<String, List<Candidate>> by lazy {
-            val map = HashMap<String, MutableList<Candidate>>()
-            for (franchise in FRANCHISES) {
-                for (film in franchise.films) {
-                    for (raw in film.names) {
-                        val ambiguous = raw.startsWith("~")
-                        val name = collectionName(raw.removePrefix("~"))
-                        if (name.isEmpty()) continue
-                        val list = map.getOrPut(name) { ArrayList() }
-                        if (list.none { it.franchise === franchise && it.film === film }) list += Candidate(franchise, film, ambiguous)
-                    }
-                }
+/** En möjlig träff: filmen i samlingen, och om namnet kräver året. */
+internal class FranchiseCandidate(val franchise: Franchise, val film: FranchiseFilm, val ambiguous: Boolean)
+
+/** Samlingarnas filmer efter namn att jämföra ([collectionName]). */
+internal fun namesOf(franchises: List<Franchise>): Map<String, List<FranchiseCandidate>> {
+    val map = HashMap<String, MutableList<FranchiseCandidate>>()
+    for (franchise in franchises) {
+        for (film in franchise.films) {
+            for (raw in film.names) {
+                val ambiguous = raw.startsWith("~")
+                val name = collectionName(raw.removePrefix("~"))
+                if (name.isEmpty()) continue
+                val list = map.getOrPut(name) { ArrayList() }
+                if (list.none { it.franchise === franchise && it.film === film }) list += FranchiseCandidate(franchise, film, ambiguous)
             }
-            map
         }
     }
+    return map
+}
+
+/** Så många av en regissörs filmer man ska ha för att regissören ska synas bland samlingarna. */
+private const val DIRECTOR_MIN_OWNED = 2
+
+/**
+ * Regissörernas samlingar: byggs av appen ur TMDB (se [directorFranchise])
+ * och visas efter filmserierna. Byts ut som helhet, så att galleriet och
+ * uppslagen i bakgrunden alltid ser samma lista.
+ */
+object DynamicFranchises {
+    class Snapshot internal constructor(val list: List<Franchise>) {
+        val byId: Map<String, Franchise> = list.associateBy { it.id }
+        internal val names: Map<String, List<FranchiseCandidate>> = namesOf(list)
+        internal val byTmdb: Map<Int, List<Pair<Franchise, FranchiseFilm>>> = HashMap<Int, MutableList<Pair<Franchise, FranchiseFilm>>>().also { map ->
+            for (franchise in list) {
+                for (film in franchise.films) {
+                    if (film.tmdbId > 0) map.getOrPut(film.tmdbId) { ArrayList(1) } += franchise to film
+                }
+            }
+        }
+    }
+
+    @Volatile
+    var current: Snapshot = Snapshot(emptyList())
+        private set
+
+    fun set(list: List<Franchise>) {
+        current = Snapshot(list)
+    }
+}
+
+/**
+ * Regissörerna appen letar efter hos TMDB, i galleriets ordning. De syns bara
+ * när man har minst två av deras filmer.
+ */
+val DIRECTOR_NAMES: List<String> = listOf(
+    "Lasse Åberg", "Steven Spielberg", "Christopher Nolan", "Quentin Tarantino", "Martin Scorsese", "Stanley Kubrick",
+    "Alfred Hitchcock", "James Cameron", "Ridley Scott", "David Fincher", "Denis Villeneuve", "Tim Burton",
+    "Robert Zemeckis", "Peter Jackson", "Clint Eastwood", "Guy Ritchie", "Wes Anderson", "Joel Coen",
+    "Francis Ford Coppola", "Ron Howard", "Michael Bay", "Sam Raimi", "Guillermo del Toro", "George Lucas",
+    "John Carpenter", "Danny Boyle", "Steven Soderbergh", "Brian De Palma", "Oliver Stone", "Matthew Vaughn",
+    "Zack Snyder", "J.J. Abrams", "Jon Favreau", "Taika Waititi", "Jordan Peele", "Ingmar Bergman", "Olle Hellbom",
+    "Lasse Hallström", "Tage Danielsson", "Roy Andersson", "Ruben Östlund", "Tomas Alfredson", "Lukas Moodysson",
+    "Bo Widerberg", "Jan Troell", "Colin Nutley", "Josef Fares", "Måns Herngren", "Hannes Holm",
+)
+
+/** Regissörernas färger: mörkt till mörkt med en klar ton, en per regissör. */
+private val DIRECTOR_LOOKS = listOf(
+    Triple(0xFF101624L, 0xFF2C3E66L, 0xFFFFC857L),
+    Triple(0xFF1A0F0FL, 0xFF5C1F1FL, 0xFFFF8A65L),
+    Triple(0xFF0F1A14L, 0xFF1F5C3EL, 0xFF7CF5B5L),
+    Triple(0xFF15101FL, 0xFF46306BL, 0xFFC7A6FFL),
+    Triple(0xFF1F1A0FL, 0xFF6B5320L, 0xFFFFE08AL),
+    Triple(0xFF0F1A1FL, 0xFF1F4E5CL, 0xFF7FE3FFL),
+)
+
+/** En regissör hos TMDB som samling: filmerna i utgivningsordning, och de man har. */
+fun directorFranchise(director: DirectorFilms): Franchise {
+    val look = DIRECTOR_LOOKS[Math.floorMod(director.personId, DIRECTOR_LOOKS.size)]
+    val years = director.films.mapNotNull { it.year }
+    val span = if (years.isEmpty()) "" else " · ${years.min()}–${years.max()}"
+    val films = director.films.mapNotNull { t ->
+        val year = t.year ?: return@mapNotNull null
+        // Namnen kräver året: regissörernas listor är långa, och en kort titel finns ofta flera gånger.
+        val names = listOf(t.title, t.original).filter { it.isNotBlank() }.distinct().map { "~$it" }
+        if (names.isEmpty()) null else FranchiseFilm(year, names, t.id)
+    }
+    return Franchise(
+        id = "regi-${director.personId}",
+        title = director.name,
+        tagline = "Regissör$span",
+        from = look.first,
+        to = look.second,
+        accent = look.third,
+        parts = listOf(FranchisePart("Filmer", films)),
+        byYear = true,
+        storyTitles = null,
+    )
 }
 
 /**
@@ -880,9 +981,36 @@ private val NARNIA = franchise(
     ),
 )
 
+private val JONSSONLIGAN = franchise(
+    "jonssonligan", "Jönssonligan", "Sickan har en plan", 0xFF14201AL, 0xFF4E4320L, 0xFFFFD34DL,
+    part(
+        "Jönssonligan",
+        film(1981, "Varning för Jönssonligan"),
+        film(1982, "Jönssonligan & Dynamit-Harry", "Jönssonligan och Dynamit-Harry"),
+        film(1984, "Jönssonligan får guldfeber"),
+        film(1986, "Jönssonligan dyker upp igen"),
+        film(1989, "Jönssonligan på Mallorca"),
+        film(1992, "Jönssonligan & den svarta diamanten", "Jönssonligan och den svarta diamanten"),
+        film(1995, "Jönssonligans största kupp"),
+        film(2000, "Jönssonligan spelar högt"),
+        film(2015, "Jönssonligan – Den perfekta stöten", "Den perfekta stöten"),
+        film(2020, "Se upp för Jönssonligan"),
+        film(2024, "Jönssonligan kommer tillbaka"),
+        film(2026, "Jönssonligan & Wall Enberg", "Jönssonligan och Wall Enberg"),
+    ),
+    part(
+        "Lilla Jönssonligan",
+        film(1996, "Lilla Jönssonligan och cornflakeskuppen"),
+        film(1997, "Lilla Jönssonligan på styva linan"),
+        film(2004, "Lilla Jönssonligan på kollo"),
+        film(2006, "Lilla Jönssonligan & stjärnkuppen", "Lilla Jönssonligan och stjärnkuppen"),
+    ),
+    byYear = false,
+)
+
 /** Alla samlingar, i galleriets ordning. Disneys tre läggs in efter Star Wars. */
 val FRANCHISES: List<Franchise> = listOf(
-    MARVEL, STAR_WARS, HARRY_POTTER, MIDDLE_EARTH, BOND, SPIDER_MAN, X_MEN, DC, BATMAN, FAST_FURIOUS, JURASSIC,
+    MARVEL, STAR_WARS, HARRY_POTTER, JONSSONLIGAN, MIDDLE_EARTH, BOND, SPIDER_MAN, X_MEN, DC, BATMAN, FAST_FURIOUS, JURASSIC,
     MISSION_IMPOSSIBLE, PIRATES, INDIANA_JONES, JOHN_WICK, DREAMWORKS, GHIBLI, ICE_AGE, DESPICABLE_ME, HUNGER_GAMES,
     TWILIGHT, TRANSFORMERS, ALIEN, MATRIX, BACK_TO_THE_FUTURE, TERMINATOR, ROCKY, CONJURING, MONSTERVERSE, APES, MAD_MAX,
     DIE_HARD, NARNIA,

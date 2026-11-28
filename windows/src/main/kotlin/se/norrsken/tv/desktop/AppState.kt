@@ -12,6 +12,15 @@ import se.norrsken.tv.desktop.data.SeriesMarksStore
 import se.norrsken.tv.desktop.data.TmdbExtrasStore
 import se.norrsken.tv.desktop.data.TrendingTitle
 import se.norrsken.tv.desktop.data.WeeklyTitle
+import se.norrsken.tv.desktop.data.CALENDAR_WORDS
+import se.norrsken.tv.desktop.data.CHRISTMAS_WORDS
+import se.norrsken.tv.desktop.data.DIRECTOR_NAMES
+import se.norrsken.tv.desktop.data.DirectorFilms
+import se.norrsken.tv.desktop.data.DynamicFranchises
+import se.norrsken.tv.desktop.data.JulIndex
+import se.norrsken.tv.desktop.data.JulKeys
+import se.norrsken.tv.desktop.data.TmdbListTitle
+import se.norrsken.tv.desktop.data.directorFranchise
 import se.norrsken.tv.desktop.data.VersionTags
 import se.norrsken.tv.desktop.data.FootballClient
 import se.norrsken.tv.desktop.data.FootballMatch
@@ -244,6 +253,21 @@ class AppState {
     /** Kortfilmerna: bara en figur, eller alla. */
     var disneyCharacter by mutableStateOf<String?>(null)
     private var disneyJob: Job? = null
+
+    // --- Julen och regissörerna -----------------------------------------------------
+
+    /** Julfilmerna och julkalendrarna i biblioteket (Jul.kt). Byggs om i bakgrunden. */
+    var jul by mutableStateOf(JulIndex.EMPTY)
+        private set
+    /** TMDB:s julfilmer och julkalendrar, sparade mellan körningar. */
+    private var christmasFilms: List<TmdbListTitle> = emptyList()
+    private var christmasShows: List<TmdbListTitle> = emptyList()
+    private var christmasAt = 0L
+    private var christmasLoading = false
+    /** Regissörerna bland samlingarna, med filmerna från TMDB. */
+    private var directors: List<DirectorFilms> = emptyList()
+    private var directorsAt = 0L
+    private var directorsLoading = false
     var movieQuery by mutableStateOf("")
     var seriesGroup by mutableStateOf<String?>(null)
     var seriesQuery by mutableStateOf("")
@@ -670,6 +694,12 @@ class AppState {
         trendingAt = extras.trendingAt
         weeklyTop = extras.weekly
         weeklyTopAt = extras.weeklyAt
+        christmasFilms = extras.christmasFilms
+        christmasShows = extras.christmasShows
+        christmasAt = extras.christmasAt
+        directors = extras.directors
+        directorsAt = extras.directorsAt
+        if (directors.isNotEmpty()) DynamicFranchises.set(directors.map { directorFranchise(it) })
         // Startens filmvägg, om det inte fanns någon sparad: räknas fram ur
         // biblioteket så fort det finns, medan starten fortfarande visas.
         scope.launch {
@@ -683,6 +713,8 @@ class AppState {
             while (true) {
                 refreshTrending()
                 refreshWeeklyTop()
+                refreshJul()
+                refreshDirectors()
                 delay(TRENDING_CHECK_MS)
             }
         }
@@ -870,6 +902,17 @@ class AppState {
         val index = versions
         if (DisneyShelf.isDisney(group)) return disneyMovies(DisneyShelf.of(group), query)
         if (PersonalKeys.isPersonal(group)) return personalMovies(group, query)
+        if (group == JulKeys.FILMS) {
+            // Julfilmerna: bäst betyg först, räknat som IMDb:s topplista, om man inte valt annat.
+            val films = jul.films
+            val list = library.movies.filter { it.key in films && (query.isEmpty() || query in it.searchKey) }
+            val sorted = if (movieSort == SortOrder.PROVIDER) {
+                list.sortedByDescending { films[it.key] ?: -1.0 }
+            } else {
+                list.ordered(movieSort, { index.titleOf(it) }, { it.addedUtc }, { scoreOf(it) }, { index.yearOf(it) }, { tmdbFor(it)?.popularity })
+            }
+            return index.collapseMovies(sorted, preferDefault = true)
+        }
         return library.movies
             .filter { (group == null || it.group == group) && (query.isEmpty() || query in it.searchKey) }
             .ordered(movieSort, { index.titleOf(it) }, { it.addedUtc }, { scoreOf(it) }, { index.yearOf(it) }, { tmdbFor(it)?.popularity })
@@ -972,7 +1015,12 @@ class AppState {
             val index = versions
             val choices = disneyChoices
             disney = withContext(Dispatchers.Default) { DisneyIndex.build(lib, index, choices) }
-            collections = withContext(Dispatchers.Default) { CollectionIndex.build(lib, index) }
+            collections = withContext(Dispatchers.Default) { CollectionIndex.build(lib, index) { tmdbFor(it)?.id } }
+            val films = christmasFilms
+            val shows = christmasShows
+            jul = withContext(Dispatchers.Default) {
+                JulIndex.build(lib, index, films, shows, { tmdbFor(it)?.id }, { tmdbFor(it)?.id })
+            }
         }
     }
 
@@ -998,6 +1046,17 @@ class AppState {
         val group = seriesGroup
         val index = versions
         if (PersonalKeys.isPersonal(group)) return personalSeries(group, query)
+        if (group == JulKeys.CALENDARS) {
+            // Julkalendrarna: den senaste först, om man inte valt annat.
+            val calendars = jul.calendars
+            val list = library.series.filter { it.key in calendars && (query.isEmpty() || query in it.searchKey) }
+            val sorted = if (seriesSort == SortOrder.PROVIDER) {
+                list.sortedByDescending { calendars[it.key] ?: -1 }
+            } else {
+                list.ordered(seriesSort, { index.titleOf(it) }, { it.addedUtc }, { scoreOf(it) }, { index.yearOf(it) }, { tmdbFor(it)?.popularity })
+            }
+            return index.collapseSeries(sorted, preferDefault = true)
+        }
         return library.series
             .filter { (group == null || it.group == group) && (query.isEmpty() || query in it.searchKey) }
             .ordered(seriesSort, { index.titleOf(it) }, { it.addedUtc }, { scoreOf(it) }, { index.yearOf(it) }, { tmdbFor(it)?.popularity })
@@ -1585,11 +1644,86 @@ class AppState {
         }
     }
 
+    private fun extrasSnapshot() = TmdbExtrasStore.Saved(
+        logos = tmdbLogos,
+        trending = trending,
+        trendingAt = trendingAt,
+        weekly = weeklyTop,
+        weeklyAt = weeklyTopAt,
+        christmasFilms = christmasFilms,
+        christmasShows = christmasShows,
+        christmasAt = christmasAt,
+        directors = directors,
+        directorsAt = directorsAt,
+    )
+
+    /**
+     * Julens listor från TMDB, en gång i veckan: de populäraste julfilmerna
+     * (och de svenska), och julkalendrarna. Sedan byggs julens kategorier om.
+     */
+    fun refreshJul(force: Boolean = false) {
+        val apiKey = tmdbKey ?: return
+        if (christmasLoading) return
+        val fresh = System.currentTimeMillis() - christmasAt < LISTS_MAX_AGE_MS
+        if (!force && fresh && christmasFilms.isNotEmpty()) return
+        christmasLoading = true
+        scope.launch {
+            val lists = withContext(Dispatchers.IO) {
+                runCatching {
+                    val client = TmdbClient(apiKey)
+                    val words = CHRISTMAS_WORDS.flatMap { client.keywordIds(it, CHRISTMAS_WORDS) }.distinct()
+                    val films = client.discover("movie", words, pages = 15) +
+                        client.discover("movie", words, pages = 3, extra = mapOf("with_original_language" to "sv"))
+                    val calendarWords = CALENDAR_WORDS.flatMap { runCatching { client.keywordIds(it, CALENDAR_WORDS) }.getOrDefault(emptyList()) }.distinct()
+                    val shows = runCatching { client.discover("tv", calendarWords, pages = 5) }.getOrDefault(emptyList())
+                    films.distinctBy { it.id } to shows
+                }.getOrNull()
+            }
+            christmasLoading = false
+            if (lists == null || lists.first.isEmpty()) return@launch
+            christmasFilms = lists.first
+            christmasShows = lists.second
+            christmasAt = System.currentTimeMillis()
+            saveExtrasSoon()
+            scheduleDisney()
+        }
+    }
+
+    /**
+     * Regissörerna i Samlingar (DIRECTOR_NAMES) och filmerna de gjort, från
+     * TMDB en gång i veckan. Sedan byggs samlingarna om.
+     */
+    fun refreshDirectors(force: Boolean = false) {
+        val apiKey = tmdbKey ?: return
+        if (directorsLoading) return
+        val fresh = System.currentTimeMillis() - directorsAt < LISTS_MAX_AGE_MS
+        if (!force && fresh && directors.isNotEmpty()) return
+        directorsLoading = true
+        scope.launch {
+            val list = withContext(Dispatchers.IO) {
+                val client = TmdbClient(apiKey)
+                DIRECTOR_NAMES.mapNotNull { name ->
+                    runCatching {
+                        val person = client.findDirector(name)
+                        if (person == null) null else DirectorFilms(person.first, person.second, client.directedFilms(person.first))
+                    }.getOrNull()?.takeIf { it.films.size >= 2 }
+                }
+            }
+            directorsLoading = false
+            if (list.isEmpty()) return@launch
+            directors = list
+            directorsAt = System.currentTimeMillis()
+            DynamicFranchises.set(list.map { directorFranchise(it) })
+            saveExtrasSoon()
+            scheduleDisney()
+        }
+    }
+
     private fun saveExtrasSoon() {
         extrasSaveJob?.cancel()
         extrasSaveJob = scope.launch {
             delay(3_000)
-            val snapshot = TmdbExtrasStore.Saved(tmdbLogos, trending, trendingAt, weeklyTop, weeklyTopAt)
+            val snapshot = extrasSnapshot()
             withContext(Dispatchers.IO) { extrasStore.save(snapshot) }
         }
     }
@@ -2043,6 +2177,15 @@ class AppState {
     /** Förhandsbilder: filmväggen med just de här omslagen, som i en app med ett stort bibliotek. */
     internal fun previewReel(reel: List<IntroReelItem>) {
         introReel = reel
+    }
+
+    /** Förhandsbilder: julens listor och regissörerna utan TMDB, och samlingarna byggda om. */
+    internal fun previewJul(films: List<TmdbListTitle>, shows: List<TmdbListTitle>, directorList: List<DirectorFilms>) {
+        christmasFilms = films
+        christmasShows = shows
+        directors = directorList
+        DynamicFranchises.set(directorList.map { directorFranchise(it) })
+        scheduleDisney()
     }
 
     /** Förhandsbilder: veckans topp 10 utan TMDB. */
@@ -3712,6 +3855,8 @@ class AppState {
                 restartTmdbScan()
                 refreshTrending(force = true)
                 refreshWeeklyTop(force = true)
+                refreshJul(force = true)
+                refreshDirectors(force = true)
             }.onFailure { error ->
                 tmdbStatus = if (error is TmdbKeyException) {
                     "TMDB godkände inte nyckeln. Kontrollera att du kopierade API-nyckeln (32 tecken)."
@@ -3924,7 +4069,7 @@ class AppState {
         persistHistory()
         runCatching { factsStore.save(movieFacts) }
         runCatching { tmdbStore.save(tmdbFacts) }
-        runCatching { extrasStore.save(TmdbExtrasStore.Saved(tmdbLogos, trending, trendingAt, weeklyTop, weeklyTopAt)) }
+        runCatching { extrasStore.save(extrasSnapshot()) }
         storage.saveSettings(currentSettings())
         WindowsIntegration.keepAwake(false)
         val released = videoPlayer?.release() ?: true
@@ -4075,6 +4220,8 @@ private const val TRENDING_MAX_AGE_MS = 6 * 60 * 60_000L
 private const val TRENDING_CHECK_MS = 60 * 60_000L
 /** Veckans topp 10 hämtas om när den är så här gammal. */
 private const val WEEKLY_MAX_AGE_MS = 3 * 60 * 60_000L
+/** Julens listor och regissörerna hämtas om en gång i veckan. */
+private const val LISTS_MAX_AGE_MS = 7 * 24 * 60 * 60_000L
 /** Spoltryck med kortare mellanrum än så räknas som ett hopp. */
 private const val SEEK_GROUP_MS = 4_000L
 

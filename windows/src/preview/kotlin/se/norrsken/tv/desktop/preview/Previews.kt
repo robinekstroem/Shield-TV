@@ -27,6 +27,10 @@ import se.norrsken.tv.desktop.data.TmdbStore
 import se.norrsken.tv.desktop.data.WatchEntry
 import se.norrsken.tv.desktop.data.WatchKind
 import se.norrsken.tv.desktop.data.WeeklyTitle
+import se.norrsken.tv.desktop.data.CollectionKeys
+import se.norrsken.tv.desktop.data.DirectorFilms
+import se.norrsken.tv.desktop.data.JulKeys
+import se.norrsken.tv.desktop.data.TmdbListTitle
 import se.norrsken.tv.desktop.player.VideoPlayer
 import androidx.compose.foundation.layout.fillMaxSize
 import se.norrsken.tv.desktop.data.FootballMatch
@@ -138,6 +142,7 @@ fun main(args: Array<String>) {
     )
     state.introDone = true
     state.previewWeeklyTop(previewTopTen(images.base))
+    state.previewJul(previewChristmas(), emptyList(), previewDirectors())
     // Tablån läses från disken en stund efter starten.
     waitFor("tablån", 20_000) { !state.guide.isEmpty }
 
@@ -535,6 +540,58 @@ private fun scenes(state: AppState, data: PreviewData): List<Scene> {
             settleMs = 3_000L,
             content = app,
         ),
+        // Samlingarna: galleriet, Jönssonligan och en regissör. Julen: julfilmerna och julkalendrarna.
+        Scene(
+            "samlingar",
+            before = {
+                screen(Screen.MOVIES)()
+                state.selectMenuStyle(MenuStyle.ORIGINAL)
+                TvNav.drawer = TvDrawer.NONE
+                state.openCollection(CollectionKeys.GALLERY)
+            },
+            settleMs = 3_500L,
+            content = app,
+        ),
+        Scene(
+            "samling-jonssonligan",
+            before = {
+                screen(Screen.MOVIES)()
+                TvNav.drawer = TvDrawer.NONE
+                state.openCollection(CollectionKeys.of("jonssonligan"))
+            },
+            settleMs = 3_500L,
+            content = app,
+        ),
+        Scene(
+            "samling-regissor",
+            before = {
+                screen(Screen.MOVIES)()
+                TvNav.drawer = TvDrawer.NONE
+                state.openCollection(CollectionKeys.of("regi-9001"))
+            },
+            settleMs = 3_500L,
+            content = app,
+        ),
+        Scene(
+            "julfilmer",
+            before = {
+                screen(Screen.MOVIES)()
+                TvNav.drawer = TvDrawer.NONE
+                state.openCollection(JulKeys.FILMS)
+            },
+            settleMs = 3_500L,
+            content = app,
+        ),
+        Scene(
+            "julkalendrar-kategorier",
+            before = {
+                screen(Screen.SERIES)()
+                state.seriesGroup = JulKeys.CALENDARS
+            },
+            after = { TvNav.openCategories() },
+            settleMs = 3_500L,
+            content = app,
+        ),
         // Veckans topp 10: sidan, med ettan markerad, och den gula knappen i varje meny.
         Scene(
             "topp10",
@@ -626,6 +683,55 @@ private fun previewTopTen(base: String): List<WeeklyTitle> {
         )
     }
 }
+
+/** Filmerna med riktiga titlar och år i förhandsbiblioteket. */
+private val PREVIEW_EXTRA_MOVIES = listOf(
+    "Varning för Jönssonligan" to 1981,
+    "Jönssonligan får guldfeber" to 1984,
+    "Jönssonligan på Mallorca" to 1989,
+    "Jönssonligans största kupp" to 1995,
+    "Sällskapsresan" to 1980,
+    "Sällskapsresan II – Snowroller" to 1985,
+    "Den ofrivillige golfaren" to 1991,
+    "Tomten är far till alla barnen" to 1999,
+    "Snöänglarna" to 2018,
+    "Julnatten" to 2021,
+    "Pepparkaksstaden" to 2016,
+)
+
+/** Julkalendrarna i förhandsbiblioteket: SVT:s, så att de känns igen utan TMDB. */
+private val PREVIEW_CALENDARS = listOf(
+    "Mysteriet på Greveholm" to 1996,
+    "Sunes jul" to 1991,
+    "Superhjältejul" to 2009,
+    "Tjuvarnas jul" to 2011,
+    "Panik i tomteverkstan" to 2019,
+)
+
+/** TMDB:s julfilmer, som de skulle se ut: tre av förhandsbibliotekets filmer och en till. */
+private fun previewChristmas(): List<TmdbListTitle> = listOf(
+    TmdbListTitle(8001, "Tomten är far till alla barnen", "Tomten är far till alla barnen", 1999, 6.7, 180),
+    TmdbListTitle(8002, "Snöänglarna", "Snow Angels", 2018, 7.6, 640),
+    TmdbListTitle(8003, "Julnatten", "The Night Before", 2021, 7.1, 2400),
+    TmdbListTitle(8004, "Pepparkaksstaden", "Gingerbread Town", 2016, 6.2, 90),
+    TmdbListTitle(8005, "En julsaga", "A Christmas Carol", 2009, 6.9, 3000),
+)
+
+/** En regissör, som TMDB skulle ge den: Lasse Åbergs filmer, varav tre finns. */
+private fun previewDirectors(): List<DirectorFilms> = listOf(
+    DirectorFilms(
+        9001,
+        "Lasse Åberg",
+        listOf(
+            TmdbListTitle(7001, "Repmånad", "Repmånad", 1979, 6.6, 60),
+            TmdbListTitle(7002, "Sällskapsresan", "Sällskapsresan", 1980, 7.3, 300),
+            TmdbListTitle(7003, "Sällskapsresan II – Snowroller", "Sällskapsresan II – Snowroller", 1985, 6.9, 200),
+            TmdbListTitle(7004, "Den ofrivillige golfaren", "Den ofrivillige golfaren", 1991, 6.4, 120),
+            TmdbListTitle(7005, "Hälsoresan – En smal film av stor vikt", "Hälsoresan", 1999, 5.9, 80),
+            TmdbListTitle(7006, "The Stig-Helmer Story", "The Stig-Helmer Story", 2011, 4.9, 40),
+        ),
+    ),
+)
 
 private val PREVIEW_TOP_TITLES = listOf(
     "Kodnamn Orion", "Stjärnfallet", "Nordljus", "Sista passet", "Vargtimmen",
@@ -719,7 +825,38 @@ private class PreviewData(
                     extension = "mkv",
                 )
             }
+            // Samlingarna och julen: några riktiga titlar med rätt år, så att galleriet,
+            // en regissör och julens kategorier har något att visa.
+            val extraMovies = PREVIEW_EXTRA_MOVIES.mapIndexed { k, (name, year) ->
+                Movie(
+                    key = "$SOURCE:movie:x$k",
+                    sourceId = SOURCE,
+                    streamId = 5000 + k,
+                    name = "$name ($year)",
+                    group = "Familj",
+                    poster = "$base/extra/$k.png",
+                    rating = 6.4 + (k % 5) * 0.3,
+                    addedUtc = now - (200 + k) * 6 * 3_600_000L,
+                    extension = "mkv",
+                )
+            }
             val seriesGroups = listOf("Svenska serier", "Drama", "Kriminal")
+            val extraSeries = PREVIEW_CALENDARS.mapIndexed { k, (name, year) ->
+                Series(
+                    key = "$SOURCE:series:x$k",
+                    sourceId = SOURCE,
+                    seriesId = 6000 + k,
+                    name = name,
+                    group = "Svenska serier",
+                    cover = "$base/extra/${20 + k}.png",
+                    backdrop = "$base/backdrop/${30 + k}.png",
+                    plot = "En av SVT:s julkalendrar, med en lucka om dagen fram till julafton.",
+                    genre = "Familj",
+                    releaseDate = "$year-12-01",
+                    rating = 7.2 + (k % 4) * 0.2,
+                    addedUtc = now - (100 + k) * 12 * 3_600_000L,
+                )
+            }
             val series = SERIES.mapIndexed { i, name ->
                 Series(
                     key = "$SOURCE:series:$i",
@@ -738,8 +875,8 @@ private class PreviewData(
             }
             val content = SourceContent(
                 channels = channels,
-                movies = movies,
-                series = series,
+                movies = movies + extraMovies,
+                series = series + extraSeries,
                 liveGroups = channels.map { it.group }.distinct(),
                 movieGroups = movieGroups,
                 seriesGroups = seriesGroups,
@@ -815,6 +952,7 @@ private class PreviewImages(private val server: HttpServer) {
             return when (parts.firstOrNull()) {
                 "poster" -> poster(index)
                 "topp" -> poster(index + 60, PREVIEW_TOP_TITLES.getOrNull(index))
+                "extra" -> poster(index + 70, if (index >= 20) PREVIEW_CALENDARS.getOrNull(index - 20)?.first else PREVIEW_EXTRA_MOVIES.getOrNull(index)?.first)
                 "backdrop" -> landscape(1280, 720, index)
                 "logo" -> logo(index)
                 else -> error("okänd bild $path")

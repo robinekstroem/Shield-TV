@@ -11,6 +11,7 @@ import se.norrsken.tv.desktop.data.ListKind
 import se.norrsken.tv.desktop.data.DisneyIndex
 import se.norrsken.tv.desktop.data.CollectionKeys
 import se.norrsken.tv.desktop.data.DisneyShelf
+import se.norrsken.tv.desktop.data.JulKeys
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.graphics.graphicsLayer
@@ -152,7 +153,7 @@ fun MoviesScreen(state: AppState) {
     val character = state.disneyCharacter
     // Fortsätt titta och Min lista följer historiken och listan; andra kategorier gör det inte.
     val personal = if (PersonalKeys.isPersonal(group)) state.history to state.myList else null
-    val computed = rememberInBackground(library, group, query, sort, state.tmdbFacts, state.versions, state.disney, character, personal) {
+    val computed = rememberInBackground(library, group, query, sort, state.tmdbFacts, state.versions, state.disney, character, personal, state.jul) {
         Computed(listOf(group, query, sort, character), state.filteredMovies())
     }
     // Tv: medan man bläddrar bland omslagen byts listan inte ut under en.
@@ -234,7 +235,7 @@ fun MoviesScreen(state: AppState) {
                 state.disneyCharacter = null
                 state.collectionPart = null
             },
-            pinned = personalPinned(state, LibraryFilter.MOVIE) + collectionsPinned(state),
+            pinned = personalPinned(state, LibraryFilter.MOVIE) + collectionsPinned(state) + julPinned(state, LibraryFilter.MOVIE),
             onEnterContent = enterGrid,
             look = GroupLook(MenuAccents.movies, "Filmer", Glyphs.Movies),
             covers = covers.orEmpty(),
@@ -268,7 +269,7 @@ fun MoviesScreen(state: AppState) {
                 val title = when {
                     disneyShelf != null -> disneyShelf.title
                     disneyView -> "Disney"
-                    else -> PersonalKeys.titleOf(group) ?: group ?: "Alla filmer"
+                    else -> PersonalKeys.titleOf(group) ?: JulKeys.titleOf(group) ?: group ?: "Alla filmer"
                 }
                 val subtitle = if (disneyView) {
                     disneySubtitle(state, disneyShelf, movies, movies.size + disneySeries.size)
@@ -767,7 +768,7 @@ fun SeriesScreen(state: AppState) {
     val query = state.seriesQuery
     val sort = state.seriesSort
     val personal = if (PersonalKeys.isPersonal(group)) state.history to state.myList else null
-    val computed = rememberInBackground(library, group, query, sort, state.tmdbFacts, state.versions, personal) {
+    val computed = rememberInBackground(library, group, query, sort, state.tmdbFacts, state.versions, personal, state.jul) {
         Computed(listOf(group, query, sort), state.filteredSeries())
     }
     // Tv: medan man bläddrar bland omslagen byts listan inte ut under en.
@@ -806,7 +807,7 @@ fun SeriesScreen(state: AppState) {
             counts = library.seriesCounts,
             selected = group,
             onSelect = { state.seriesGroup = it },
-            pinned = personalPinned(state, LibraryFilter.SERIES),
+            pinned = personalPinned(state, LibraryFilter.SERIES) + julPinned(state, LibraryFilter.SERIES),
             onEnterContent = { scope.launch { entry.enter { posterKeys(gridState) } } },
             look = GroupLook(MenuAccents.series, "Serier", Glyphs.Series),
             covers = covers.orEmpty(),
@@ -823,7 +824,7 @@ fun SeriesScreen(state: AppState) {
             Column(Modifier.fillMaxSize()) {
                 if (tvLayout) {
                     TvLibraryBar(
-                        title = PersonalKeys.titleOf(group) ?: group ?: "Alla serier",
+                        title = PersonalKeys.titleOf(group) ?: JulKeys.titleOf(group) ?: group ?: "Alla serier",
                         position = position ?: "${series.size.grouped()} serier",
                         sort = state.seriesSort,
                         series = true,
@@ -834,7 +835,7 @@ fun SeriesScreen(state: AppState) {
                     )
                 } else {
                     ScreenHeader(
-                        title = PersonalKeys.titleOf(group) ?: group ?: "Alla serier",
+                        title = PersonalKeys.titleOf(group) ?: JulKeys.titleOf(group) ?: group ?: "Alla serier",
                         subtitle = "${series.size.grouped()} serier",
                         query = query,
                         onQuery = { state.seriesQuery = it },
@@ -1684,6 +1685,16 @@ private fun DisneyChooser(state: AppState, movie: Movie, onDone: () -> Unit) {
  * sedda (kanaler) överst i kategorilistan, när de har något i sig. De var
  * förut rader på startsidan.
  */
+/** Julfilmer överst i Filmer och Julkalendrar i Serier, när det finns några. */
+internal fun julPinned(state: AppState, kind: Char): List<PinnedGroup> {
+    val jul = state.jul
+    return when (kind) {
+        LibraryFilter.MOVIE -> if (jul.filmCount > 0) listOf(PinnedGroup(JulKeys.FILMS, "Julfilmer", jul.filmCount)) else emptyList()
+        LibraryFilter.SERIES -> if (jul.calendarCount > 0) listOf(PinnedGroup(JulKeys.CALENDARS, "Julkalendrar", jul.calendarCount)) else emptyList()
+        else -> emptyList()
+    }
+}
+
 @Composable
 internal fun personalPinned(state: AppState, kind: Char): List<PinnedGroup> {
     // Räknas i bakgrunden: första gången byggs uppslagen för hela biblioteket.

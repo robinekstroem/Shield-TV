@@ -433,6 +433,85 @@ class TmdbClient(private val key: String) {
         return result
     }
 
+    /** Nyckelorden hos TMDB, sökta med [query], som heter precis något av [names] (små bokstäver). */
+    fun keywordIds(query: String, names: Set<String>): List<Int> {
+        val array = get("search/keyword", mapOf("query" to query)).optJSONArray("results") ?: return emptyList()
+        return (0 until array.length())
+            .mapNotNull { array.optJSONObject(it) }
+            .filter { it.optString("name", "").lowercase() in names }
+            .map { it.optInt("id") }
+            .filter { it > 0 }
+    }
+
+    /**
+     * Filmer ([kind] "movie") eller serier ("tv") med något av nyckelorden,
+     * populärast först, högst [pages] sidor om 20. [extra]: fler villkor.
+     */
+    fun discover(kind: String, keywords: List<Int>, pages: Int, extra: Map<String, String> = emptyMap()): List<TmdbListTitle> {
+        if (keywords.isEmpty()) return emptyList()
+        val result = ArrayList<TmdbListTitle>()
+        val seen = HashSet<Int>()
+        for (page in 1..pages) {
+            val params = mapOf(
+                "with_keywords" to keywords.distinct().joinToString("|"),
+                "sort_by" to "popularity.desc",
+                "language" to "sv-SE",
+                "include_adult" to "false",
+                "page" to page.toString(),
+            ) + extra
+            val o = get("discover/$kind", params)
+            val array = o.optJSONArray("results") ?: break
+            for (index in 0 until array.length()) {
+                val item = listTitle(kind, array.optJSONObject(index) ?: continue) ?: continue
+                if (seen.add(item.id)) result += item
+            }
+            if (page >= o.optInt("total_pages", 1)) break
+        }
+        return result
+    }
+
+    /** Personen som heter [name], helst någon som är känd för regi: id och namnet hos TMDB. */
+    fun findDirector(name: String): Pair<Int, String>? {
+        val array = get("search/person", mapOf("query" to name, "include_adult" to "false")).optJSONArray("results") ?: return null
+        val people = (0 until array.length()).mapNotNull { array.optJSONObject(it) }
+        val wanted = TitleCleaner.normalize(name)
+        val same = people.filter { TitleCleaner.normalize(it.optString("name", "")) == wanted }
+        val pick = same.firstOrNull { it.optString("known_for_department") == "Directing" } ?: same.firstOrNull() ?: return null
+        val id = pick.optInt("id")
+        return if (id > 0) id to pick.optString("name", name) else null
+    }
+
+    /**
+     * Filmerna [personId] regisserat, äldst först: bara det som kommit ut,
+     * och inte det nästan ingen sett (färre än [minVotes] röster), som
+     * studentfilmerna.
+     */
+    fun directedFilms(personId: Int, minVotes: Int = 10): List<TmdbListTitle> {
+        val array = get("person/$personId/movie_credits", mapOf("language" to "sv-SE")).optJSONArray("crew") ?: return emptyList()
+        val seen = HashSet<Int>()
+        return (0 until array.length())
+            .mapNotNull { array.optJSONObject(it) }
+            .filter { it.optString("job") == "Director" && !it.optBoolean("video", false) }
+            .mapNotNull { listTitle("movie", it) }
+            .filter { it.year != null && it.votes >= minVotes && seen.add(it.id) }
+            .sortedBy { it.year }
+    }
+
+    private fun listTitle(kind: String, o: JSONObject): TmdbListTitle? {
+        val id = o.optInt("id")
+        if (id <= 0) return null
+        val tv = kind == "tv"
+        val original = o.optString(if (tv) "original_name" else "original_title", "")
+        return TmdbListTitle(
+            id = id,
+            title = o.optString(if (tv) "name" else "title", "").ifBlank { original },
+            original = original,
+            year = o.optString(if (tv) "first_air_date" else "release_date", "").take(4).toIntOrNull(),
+            rating = o.optDouble("vote_average", 0.0).takeIf { it > 0.0 },
+            votes = o.optInt("vote_count", 0),
+        )
+    }
+
     private fun get(path: String, params: Map<String, String>): JSONObject {
         val query = buildString {
             for ((name, value) in params) {
@@ -507,10 +586,23 @@ data class WeeklyTitle(
     val genres: String = "",
 )
 
+/** En film eller serie ur en lista hos TMDB: julfilmerna, julkalendrarna, en regissörs filmer. */
+data class TmdbListTitle(
+    val id: Int,
+    val title: String,
+    val original: String,
+    val year: Int?,
+    val rating: Double?,
+    val votes: Int,
+)
+
+/** En regissör hos TMDB och filmerna hen regisserat, äldst först. */
+data class DirectorFilms(val personId: Int, val name: String, val films: List<TmdbListTitle>)
+
 /**
- * Loggor, dagens trendlista och veckans topp 10 från TMDB, sparade mellan
- * körningar så att startsidan har dem direkt. Loggorna per "movie:id" eller
- * "tv:id"; tom text betyder att titeln saknar logga.
+ * Loggor, dagens trendlista, veckans topp 10, julens listor och regissörerna
+ * från TMDB, sparade mellan körningar så att appen har dem direkt. Loggorna
+ * per "movie:id" eller "tv:id"; tom text betyder att titeln saknar logga.
  */
 class TmdbExtrasStore {
     private val file: File get() = File(AppDirs.cache, "tmdb-extra.json")
@@ -521,7 +613,38 @@ class TmdbExtrasStore {
         val trendingAt: Long,
         val weekly: List<WeeklyTitle> = emptyList(),
         val weeklyAt: Long = 0L,
+        val christmasFilms: List<TmdbListTitle> = emptyList(),
+        val christmasShows: List<TmdbListTitle> = emptyList(),
+        val christmasAt: Long = 0L,
+        val directors: List<DirectorFilms> = emptyList(),
+        val directorsAt: Long = 0L,
     )
+
+    private fun listToJson(list: List<TmdbListTitle>): JSONArray {
+        val array = JSONArray()
+        for (t in list) {
+            val e = JSONObject().put("i", t.id).put("t", t.title).put("o", t.original).put("v", t.votes)
+            t.year?.let { e.put("y", it) }
+            t.rating?.let { e.put("r", it) }
+            array.put(e)
+        }
+        return array
+    }
+
+    private fun listFromJson(array: JSONArray?): List<TmdbListTitle> {
+        if (array == null) return emptyList()
+        return (0 until array.length()).mapNotNull { index ->
+            val e = array.optJSONObject(index) ?: return@mapNotNull null
+            TmdbListTitle(
+                id = e.optInt("i"),
+                title = e.optString("t", ""),
+                original = e.optString("o", ""),
+                year = if (e.has("y")) e.optInt("y") else null,
+                rating = if (e.has("r")) e.optDouble("r") else null,
+                votes = e.optInt("v", 0),
+            ).takeIf { it.id > 0 }
+        }
+    }
 
     fun load(): Saved = runCatching {
         val current = file
@@ -563,7 +686,28 @@ class TmdbExtrasStore {
                 ).takeIf { it.id > 0 }
             }
         }
-        Saved(logos, trending, o.optLong("at", 0L), weekly, o.optLong("weeklyAt", 0L))
+        val people = o.optJSONArray("directors")
+        val directors = if (people == null) {
+            emptyList()
+        } else {
+            (0 until people.length()).mapNotNull { index ->
+                val e = people.optJSONObject(index) ?: return@mapNotNull null
+                DirectorFilms(e.optInt("p"), e.optString("n", ""), listFromJson(e.optJSONArray("f")))
+                    .takeIf { it.personId > 0 && it.name.isNotBlank() }
+            }
+        }
+        Saved(
+            logos = logos,
+            trending = trending,
+            trendingAt = o.optLong("at", 0L),
+            weekly = weekly,
+            weeklyAt = o.optLong("weeklyAt", 0L),
+            christmasFilms = listFromJson(o.optJSONArray("julFilms")),
+            christmasShows = listFromJson(o.optJSONArray("julShows")),
+            christmasAt = o.optLong("julAt", 0L),
+            directors = directors,
+            directorsAt = o.optLong("directorsAt", 0L),
+        )
     }.getOrDefault(Saved(emptyMap(), emptyList(), 0L))
 
     fun save(saved: Saved) {
@@ -586,8 +730,13 @@ class TmdbExtrasStore {
                 t.rating?.let { e.put("r", it) }
                 week.put(e)
             }
+            val people = JSONArray()
+            for (d in saved.directors) people.put(JSONObject().put("p", d.personId).put("n", d.name).put("f", listToJson(d.films)))
             val o = JSONObject().put("logos", logos).put("trending", list).put("at", saved.trendingAt)
                 .put("weekly", week).put("weeklyAt", saved.weeklyAt)
+                .put("julFilms", listToJson(saved.christmasFilms)).put("julShows", listToJson(saved.christmasShows))
+                .put("julAt", saved.christmasAt)
+                .put("directors", people).put("directorsAt", saved.directorsAt)
             writeFileSafely(file, o.toString().toByteArray(Charsets.UTF_8))
         }
     }
