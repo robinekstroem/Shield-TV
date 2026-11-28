@@ -1,102 +1,46 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Tv — en tv med antenner och en play-knapp, i norrskenets färger: grönt,
-  blått, violett. Samma märke som i appens meny (Glyphs.AppMark) och på
-  Windows. Ritat i en ruta på 96, här centrerat på en mörk platta.
+  Tv i retro: "TV" i tjocka, lutande bokstäver i gult med en brun skugga,
+  tre gula streck och en röd play-pil, på nästan svart — som Topp 10-knappen.
+  Bokstäverna är Anton, ritade som banor. Samma märke på Windows
+  (windows/icon.ico och Glyphs.AppMark) och i bannern. Ritat i en ruta på 100.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
+    android:viewportWidth="100"
+    android:viewportHeight="100">
 
     <path
-        android:fillColor="#FF0A0C18"
-        android:pathData="M0,0h108v108h-108z" />
+        android:fillColor="#FF15110A"
+        android:pathData="M0,0h100v100h-100z" />
 
-    <group
-        android:translateX="8.4"
-        android:translateY="10.5"
-        android:scaleX="0.95"
-        android:scaleY="0.95">
+    <!-- Skuggan, snett nedanför -->
+    <path
+        android:fillColor="#FF8F5300"
+        android:pathData="M25.89,73 L34.45,32.73 L28.53,32.73 L30.57,23.16 L52.37,23.16 L50.34,32.73 L44.42,32.73 L35.86,73 Z M49.14,73 L53.59,23.13 L63.08,23.13 L59.52,57.06 L69.99,23.13 L79.48,23.13 L62.73,73 Z" />
 
-        <!-- Antennerna -->
-        <path
-            android:pathData="M48,26 L34,10 M48,26 L62,10"
-            android:strokeWidth="5.5"
-            android:strokeLineCap="round"
-            android:fillColor="#00000000">
-            <aapt:attr name="android:strokeColor">
-                <gradient
-                    android:type="linear"
-                    android:startX="30"
-                    android:startY="0"
-                    android:endX="66"
-                    android:endY="0">
-                    <item android:offset="0" android:color="#FF2EE6C5" />
-                    <item android:offset="1" android:color="#FF5B8CFF" />
-                </gradient>
-            </aapt:attr>
-        </path>
-        <path android:fillColor="#FF2EE6C5" android:pathData="M34,5.6 a4.4,4.4 0 1 0 0.01,0 z" />
-        <path android:fillColor="#FF5B8CFF" android:pathData="M62,5.6 a4.4,4.4 0 1 0 0.01,0 z" />
+    <!-- Bokstäverna, gula uppifrån och mot bärnsten nedåt -->
+    <path android:pathData="M24.32,71 L32.88,30.73 L26.96,30.73 L28.99,21.16 L50.8,21.16 L48.76,30.73 L42.84,30.73 L34.28,71 Z M47.56,71 L52.02,21.13 L61.51,21.13 L57.95,55.06 L68.42,21.13 L77.9,21.13 L61.16,71 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="0"
+                android:startY="21.16"
+                android:endX="0"
+                android:endY="71">
+                <item android:offset="0" android:color="#FFFFCA15" />
+                <item android:offset="1" android:color="#FFFFB406" />
+            </gradient>
+        </aapt:attr>
+    </path>
 
-        <!-- Rutan -->
-        <path android:pathData="M26,22 H70 A20,20 0 0 1 90,42 V68 A20,20 0 0 1 70,88 H26 A20,20 0 0 1 6,68 V42 A20,20 0 0 1 26,22 Z">
-            <aapt:attr name="android:fillColor">
-                <gradient
-                    android:type="linear"
-                    android:startX="8"
-                    android:startY="22"
-                    android:endX="88"
-                    android:endY="88">
-                    <item android:offset="0" android:color="#FF2EE6C5" />
-                    <item android:offset="0.42" android:color="#FF3D7BFF" />
-                    <item android:offset="0.78" android:color="#FF7B4DFF" />
-                    <item android:offset="1" android:color="#FFC13DF0" />
-                </gradient>
-            </aapt:attr>
-        </path>
-
-        <!-- Norrskensbandet och ljuset uppifrån, inne i rutan -->
-        <group>
-            <clip-path android:pathData="M26,22 H70 A20,20 0 0 1 90,42 V68 A20,20 0 0 1 70,88 H26 A20,20 0 0 1 6,68 V42 A20,20 0 0 1 26,22 Z" />
-            <path android:pathData="M6,62 C22,50 36,70 54,58 C68,49 80,52 90,46 V60 C78,66 66,62 54,72 C36,86 22,66 6,76 Z">
-                <aapt:attr name="android:fillColor">
-                    <gradient
-                        android:type="linear"
-                        android:startX="6"
-                        android:startY="0"
-                        android:endX="90"
-                        android:endY="0">
-                        <item android:offset="0" android:color="#00FFFFFF" />
-                        <item android:offset="0.35" android:color="#38FFFFFF" />
-                        <item android:offset="1" android:color="#0AFFFFFF" />
-                    </gradient>
-                </aapt:attr>
-            </path>
-            <path android:pathData="M6,22 H90 V50 H6 Z">
-                <aapt:attr name="android:fillColor">
-                    <gradient
-                        android:type="linear"
-                        android:startX="0"
-                        android:startY="22"
-                        android:endX="0"
-                        android:endY="50">
-                        <item android:offset="0" android:color="#38FFFFFF" />
-                        <item android:offset="1" android:color="#00FFFFFF" />
-                    </gradient>
-                </aapt:attr>
-            </path>
-        </group>
-
-        <!-- Play-knappen, med en mjuk skugga -->
-        <path
-            android:fillColor="#4D14093A"
-            android:pathData="M40,45.6 L40,67.6 Q40,71.6 43.46,69.6 L62.54,58.6 Q66,56.6 62.54,54.6 L43.46,43.6 Q40,41.6 40,45.6 Z" />
-        <path
-            android:fillColor="#FFFFFFFF"
-            android:pathData="M40,44 L40,66 Q40,70 43.46,68 L62.54,57 Q66,55 62.54,53 L43.46,42 Q40,40 40,44 Z" />
-    </group>
+    <!-- Strecken och play-pilen -->
+    <path
+        android:fillColor="#FFFFD21A"
+        android:pathData="M58,82 h7 l-5,9 h-7 z M68,82 h7 l-5,9 h-7 z M78,82 h7 l-5,9 h-7 z" />
+    <path
+        android:fillColor="#FFE8231F"
+        android:pathData="M18,82 L26,86.5 L18,91 Z" />
 </vector>

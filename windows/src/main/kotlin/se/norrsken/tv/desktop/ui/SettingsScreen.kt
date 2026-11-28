@@ -563,16 +563,19 @@ private fun ThemeCard(theme: AppTheme, selected: Boolean, onClick: () -> Unit) {
 }
 
 /**
- * Omslagsväggen bakom sidorna: Filmväggen, eller Filmsiden med sidenbandet
- * bakom omslagen i lila och rosa, isblått eller guld. Fyra kort i rad, med
- * en liten bild av var och en.
+ * Omslagsväggen bakom sidorna: Filmväggen, Filmsiden med sidenbandet bakom
+ * omslagen i lila och rosa, isblått eller guld, eller väggen i 3D — Fodral,
+ * Djup eller Böjd vägg. Fyra kort i rad, med en liten bild av var och en.
  */
 @Composable
 internal fun WallStyleChooser(state: AppState) {
     val palette = LocalPalette.current
-    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-        WallStyle.entries.forEach { option ->
-            WallStyleCard(option, selected = state.wallStyle == option, onClick = { state.selectWallStyle(option) })
+    // Fyra i bredd: väggen och sidenbanden, sedan de tre i 3D.
+    WallStyle.entries.chunked(4).forEach { row ->
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            row.forEach { option ->
+                WallStyleCard(option, selected = state.wallStyle == option, onClick = { state.selectWallStyle(option) })
+            }
         }
     }
     if (state.backgrounds.isNotEmpty()) {
@@ -596,17 +599,17 @@ private fun WallStyleCard(style: WallStyle, selected: Boolean, onClick: () -> Un
         modifier = Modifier.width(188.dp).border(1.dp, if (selected) palette.focus else palette.hairline, shape),
     ) {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-            Spacer(
+            // De nya i 3D har märket på bilden: namnen är för långa för det bredvid.
+            Box(
                 Modifier
                     .fillMaxWidth()
                     .height(104.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .drawBehind { wallMiniature(style.silk, band) },
-            )
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(style.label, style = MaterialTheme.typography.titleMedium)
-                if (style == WallStyle.SILK) Tag("NYTT", palette.signal)
+                    .drawBehind { if (style.depth == WallDepth.FLAT) wallMiniature(style.silk, band) else wallMiniature3D(style.depth) },
+            ) {
+                if (style.depth != WallDepth.FLAT) Box(Modifier.align(Alignment.TopEnd).padding(6.dp)) { Tag("NYTT", palette.signal) }
             }
+            Text(style.label, style = MaterialTheme.typography.titleMedium, maxLines = 1)
             Text(style.description, style = MaterialTheme.typography.bodySmall, color = palette.textTertiary)
         }
     }

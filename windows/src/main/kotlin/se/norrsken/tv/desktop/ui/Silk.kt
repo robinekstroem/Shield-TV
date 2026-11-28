@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.LinearGradientShader
 import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
@@ -30,10 +31,17 @@ import kotlin.math.sin
 
 /**
  * Omslagsväggen bakom sidorna, som man väljer under Inställningar: bara
- * väggen, eller Filmsiden — väggen med ett sidenband bakom omslagen, som i
- * Polarnatt — i lila och rosa, isblått eller guld.
+ * väggen, Filmsiden — väggen med ett sidenband bakom omslagen, som i
+ * Polarnatt — i lila och rosa, isblått eller guld, eller väggen i 3D
+ * ([depth]): omslagen som askar, i lager på olika avstånd eller på en vägg
+ * som böjer sig runt en.
  */
-enum class WallStyle(val label: String, val description: String, val silk: SilkColors?) {
+enum class WallStyle(
+    val label: String,
+    val description: String,
+    val silk: SilkColors?,
+    val depth: WallDepth = WallDepth.FLAT,
+) {
     WALL(
         "Filmväggen",
         "Omslagen på en vägg i djupet, som glider sakta bakom sidorna.",
@@ -54,7 +62,31 @@ enum class WallStyle(val label: String, val description: String, val silk: SilkC
         "Sidenbandet i guld, som varmt ljus bakom omslagen.",
         SilkColors(glow = Color(0xFFFFA33A), accent = Color(0xFFFFE08A), thread = Color(0xFFFFF7E4)),
     ),
+    CASES(
+        "3D Fodral",
+        "Varje omslag en tunn ask med kant och glans, som på hyllan i en videobutik.",
+        null,
+        WallDepth.CASES,
+    ),
+    LAYERS(
+        "3D Djup",
+        "Omslagen i lager på olika avstånd: de närmaste större och ljusare, med skugga bakom.",
+        null,
+        WallDepth.LAYERS,
+    ),
+    CURVE(
+        "3D Böjd vägg",
+        "Väggen böjer sig runt dig, och omslagen glider runt i kurvan.",
+        null,
+        WallDepth.CURVE,
+    ),
 }
+
+/**
+ * Väggens 3D: platt (som förut), askar med kant ([CASES]), lager på olika
+ * avstånd ([LAYERS]) eller en vägg som böjer sig runt tittaren ([CURVE]).
+ */
+enum class WallDepth { FLAT, CASES, LAYERS, CURVE }
 
 /** Sidenbandets färger: skenet, tonen det skiftar mot längs bandet, och trådarna. */
 class SilkColors(val glow: Color, val accent: Color, val thread: Color) {
@@ -480,6 +512,127 @@ internal fun DrawScope.wallMiniature(colors: SilkColors?, band: SilkBand) {
             drawLight(colors, 1f)
         }
     }
+}
+
+/**
+ * Den lilla bilden av väggen i 3D: askar med kant och glans, lager med de
+ * närmaste större och ljusare, eller kolumner som vänder sig mot mitten.
+ */
+internal fun DrawScope.wallMiniature3D(depth: WallDepth) {
+    drawRect(MINI_BACK)
+    val w = size.width
+    val h = size.height
+    val tileH = h * 0.4f
+    val tileW = tileH * 2f / 3f
+    val gap = tileH * 0.1f
+    val corner = CornerRadius(tileW * 0.05f)
+    fun cover(color: Color, x: Float, y: Float, cw: Float, ch: Float, alpha: Float = 1f) {
+        drawRoundRect(
+            Brush.verticalGradient(listOf(color, color.darker(0.55f)), startY = y, endY = y + ch),
+            topLeft = Offset(x, y),
+            size = Size(cw, ch),
+            cornerRadius = corner,
+            alpha = alpha,
+        )
+    }
+    when (depth) {
+        WallDepth.CASES -> {
+            val side = tileW * 0.16f
+            var r = 0
+            var y = -tileH * 0.45f
+            while (y < h) {
+                var x = -tileW * 0.6f + (if (r % 2 == 0) 0f else tileW * 0.5f)
+                var c = 0
+                while (x < w) {
+                    val color = MINI_COVERS[(r * 5 + c * 3).mod(MINI_COVERS.size)]
+                    // Kanten till höger och nedtill, sedan framsidan med glansen.
+                    val edge = Path().apply {
+                        moveTo(x + tileW, y)
+                        lineTo(x + tileW + side, y + side * 0.6f)
+                        lineTo(x + tileW + side, y + tileH + side * 0.6f)
+                        lineTo(x + side, y + tileH + side * 0.6f)
+                        lineTo(x, y + tileH)
+                        lineTo(x + tileW, y + tileH)
+                        close()
+                    }
+                    drawPath(edge, Color(0xFF15171D))
+                    cover(color, x, y, tileW, tileH)
+                    drawRect(
+                        Brush.linearGradient(
+                            0.3f to Color.Transparent,
+                            0.47f to Color.White.copy(alpha = 0.3f),
+                            0.62f to Color.Transparent,
+                            start = Offset(x, y),
+                            end = Offset(x + tileW, y + tileH),
+                        ),
+                        topLeft = Offset(x, y),
+                        size = Size(tileW, tileH),
+                    )
+                    x += tileW + gap + side
+                    c++
+                }
+                y += tileH + gap + side * 0.6f
+                r++
+            }
+        }
+        WallDepth.LAYERS -> {
+            // Långt bort: små och mörka.
+            val small = 0.55f
+            var r = 0
+            var y = -tileH * small * 0.3f
+            while (y < h) {
+                var x = -tileW * small * 0.3f + (if (r % 2 == 0) 0f else tileW * small * 0.5f)
+                var c = 0
+                while (x < w) {
+                    cover(MINI_COVERS[(r * 3 + c * 5).mod(MINI_COVERS.size)], x, y, tileW * small, tileH * small, alpha = 0.45f)
+                    x += (tileW + gap) * small
+                    c++
+                }
+                y += (tileH + gap) * small
+                r++
+            }
+            // Nära: stora och ljusa, med skugga.
+            val near = listOf(Offset(0.06f, 0.18f), Offset(0.42f, 0.42f), Offset(0.74f, 0.1f))
+            near.forEachIndexed { k, spot ->
+                val x = spot.x * w
+                val y = spot.y * h
+                val cw = tileW * 1.15f
+                val ch = tileH * 1.15f
+                drawRoundRect(Color.Black.copy(alpha = 0.5f), topLeft = Offset(x + cw * 0.1f, y + ch * 0.12f), size = Size(cw, ch), cornerRadius = corner)
+                cover(MINI_COVERS[(k * 4 + 1).mod(MINI_COVERS.size)], x, y, cw, ch)
+            }
+        }
+        WallDepth.CURVE -> {
+            // Kolumner som vänder sig mot mitten: smalare och högre ut mot kanterna.
+            val columns = 9
+            for (c in 0 until columns) {
+                val t = (c - (columns - 1) / 2f) / ((columns - 1) / 2f)
+                val grow = 1f + 0.35f * t * t
+                val cw = tileW * (1f - 0.35f * t * t) * 0.95f
+                val ch = tileH * grow
+                val cx = w / 2f + t * w * 0.55f
+                val lean = t * ch * 0.12f
+                var r = -1
+                var y = h / 2f - ch * 1.6f + (if (c % 2 == 0) 0f else ch * 0.45f)
+                while (y < h) {
+                    val color = MINI_COVERS[(r * 5 + c * 3).mod(MINI_COVERS.size)]
+                    val left = cx - cw / 2f
+                    val panel = Path().apply {
+                        moveTo(left, y - lean)
+                        lineTo(left + cw, y + lean)
+                        lineTo(left + cw, y + ch - lean)
+                        lineTo(left, y + ch + lean)
+                        close()
+                    }
+                    drawPath(panel, Brush.verticalGradient(listOf(color, color.darker(0.55f)), startY = y, endY = y + ch), alpha = 1f - 0.35f * abs(t))
+                    y += ch + gap * grow
+                    r++
+                }
+            }
+        }
+        WallDepth.FLAT -> Unit
+    }
+    drawRect(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.05f), Color.Black.copy(alpha = 0.45f))))
 }
 
 private fun Color.darker(by: Float): Color = Color(red * (1f - by), green * (1f - by), blue * (1f - by), alpha)

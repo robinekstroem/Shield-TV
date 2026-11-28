@@ -53,6 +53,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -437,9 +438,110 @@ private fun scenes(state: AppState, data: PreviewData): List<Scene> {
             settleMs = 9_000L,
             content = app,
         ),
+        // Väggen i 3D (Inställningar → Omslagsväggen): som bakgrund, och i skärmsläckaren
+        // där den täcker allt. 3D:n tonar fram när väggen lagt sig.
+        Scene(
+            "vagg-3d-fodral",
+            before = {
+                screen(Screen.HOME)()
+                state.selectWallStyle(WallStyle.CASES)
+            },
+            settleMs = 11_000L,
+            content = app,
+        ),
+        Scene(
+            "vagg-3d-djup",
+            before = {
+                screen(Screen.MOVIES)()
+                state.selectWallStyle(WallStyle.LAYERS)
+            },
+            settleMs = 11_000L,
+            content = app,
+        ),
+        Scene(
+            "vagg-3d-bojd",
+            before = {
+                screen(Screen.HOME)()
+                state.selectWallStyle(WallStyle.CURVE)
+            },
+            settleMs = 11_000L,
+            content = app,
+        ),
+        Scene(
+            "skarmslackare-3d-fodral",
+            before = {
+                screen(Screen.HOME)()
+                state.selectWallStyle(WallStyle.CASES)
+            },
+            settleMs = 14_000L,
+            content = {
+                TvTheme(state.theme) {
+                    val wall = remember { PosterWall() }
+                    PosterWallDriver(state, wall)
+                    val morph = remember { CardMorph() }
+                    val saver = remember { SaverControl().also { it.start() } }
+                    ScreenSaver(state, wall, morph, saver)
+                }
+            },
+        ),
+        Scene(
+            "skarmslackare-3d-djup",
+            before = {
+                screen(Screen.HOME)()
+                state.selectWallStyle(WallStyle.LAYERS)
+            },
+            settleMs = 14_000L,
+            content = {
+                TvTheme(state.theme) {
+                    val wall = remember { PosterWall() }
+                    PosterWallDriver(state, wall)
+                    val morph = remember { CardMorph() }
+                    val saver = remember { SaverControl().also { it.start() } }
+                    ScreenSaver(state, wall, morph, saver)
+                }
+            },
+        ),
+        Scene(
+            "skarmslackare-3d-bojd",
+            before = {
+                screen(Screen.HOME)()
+                state.selectWallStyle(WallStyle.CURVE)
+            },
+            settleMs = 14_000L,
+            content = {
+                TvTheme(state.theme) {
+                    val wall = remember { PosterWall() }
+                    PosterWallDriver(state, wall)
+                    val morph = remember { CardMorph() }
+                    val saver = remember { SaverControl().also { it.start() } }
+                    ScreenSaver(state, wall, morph, saver)
+                }
+            },
+        ),
+        // Appens märke i retro (fönstrets ikon på Windows), stort och i de små storlekarna.
+        Scene(
+            "logga",
+            settleMs = 600L,
+            content = {
+                Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color(0xFF2A2D36)).padding(48.dp)) {
+                    androidx.compose.foundation.layout.Row(
+                        horizontalArrangement = Arrangement.spacedBy(28.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.Bottom,
+                    ) {
+                        for (side in listOf(256, 128, 64, 32, 24, 16)) {
+                            androidx.compose.foundation.Image(
+                                androidx.compose.ui.graphics.vector.rememberVectorPainter(se.norrsken.tv.desktop.ui.Glyphs.AppMark),
+                                contentDescription = null,
+                                modifier = Modifier.size(side.dp),
+                            )
+                        }
+                    }
+                }
+            },
+        ),
         Scene(
             "installningar-vagg",
-            before = { state.selectWallStyle(WallStyle.SILK) },
+            before = { state.selectWallStyle(WallStyle.CASES) },
             settleMs = 1_500L,
             content = {
                 TvTheme(state.theme) {

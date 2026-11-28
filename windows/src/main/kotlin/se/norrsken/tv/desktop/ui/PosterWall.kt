@@ -26,7 +26,9 @@ import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
@@ -134,6 +136,19 @@ internal class PosterWall {
     var busy = false
         private set
 
+    // --- 3D (Omslagsväggen i Inställningar) -------------------------------------------
+    /** Väggens 3D som valts. Sätts av [PosterWallDriver]. */
+    var depthStyle = WallDepth.FLAT
+    /** 3D:n som ritas just nu, och hur långt den kommit: 0 platt, 1 helt. Byts via platt. */
+    private var depthShown = WallDepth.FLAT
+    private var depthAmount = 0f
+    private val cornerX = FloatArray(4)
+    private val cornerY = FloatArray(4)
+    private val backX = FloatArray(4)
+    private val backY = FloatArray(4)
+    private val tileMatrix = FloatArray(9)
+    private val edgePath = Path()
+
     /** Filmsiden: sidenbandet bakom omslagen, och dess egen tid (ms). */
     private val silk = SilkBand()
     private var silkTime = 0.0
@@ -195,6 +210,9 @@ internal class PosterWall {
     private var preparedAt = Long.MIN_VALUE
     private var dirty = true
     private var ready = false
+
+    /** Hur långt kameran rätats upp för den böjda väggen: 0 som vanligt, 1 rakt framför kurvan. */
+    private var leveled = 0f
 
     init {
         // Väggen står fast: samma vinkel hela tiden, bara kameran går närmare och längre bort.
@@ -293,6 +311,22 @@ internal class PosterWall {
     /** Väggens tid går fram [ms]; syns först efter [publish]. */
     fun advance(ms: Double) {
         elapsed += ms
+    }
+
+    /**
+     * 3D:n tonar fram och bort i sin egen jämna takt ([ms] riktig tid): som
+     * bakgrund och i skärmsläckaren, men aldrig medan omslag flyger mellan
+     * väggen och sidan. Byter man stil blir väggen platt först.
+     */
+    fun advanceDepth(ms: Long) {
+        val wanted = if (ambient && flyers.isEmpty()) depthStyle else WallDepth.FLAT
+        val step = ms / DEPTH_EASE_MS
+        if (wanted != depthShown) {
+            depthAmount = max(0f, depthAmount - step)
+            if (depthAmount <= 0f) depthShown = wanted
+        } else if (wanted != WallDepth.FLAT) {
+            depthAmount = min(1f, depthAmount + step)
+        }
     }
 
     /** Sidenbandets tid går fram [ms], i jämn takt oavsett väggens fart; syns med nästa [publish]. */
@@ -455,9 +489,16 @@ internal class PosterWall {
      * Kameran [u] ms efter att väggen tänts: nära i början, sedan glider den
      * sakta bakåt och lägger sig. När klippen tar fart glider den mjukt fram
      * mot väggen igen, allt fortare, och fortsätter en bit förbi toppen medan
-     * den saktar in — inga stötar och inga stopp. Vinkeln är densamma hela tiden.
+     * den saktar in — inga stötar och inga stopp. Vinkeln är densamma hela tiden,
+     * utom när väggen böjs: då rätas kameran upp.
      */
     private fun pose(u: Long) {
+        // Den böjda väggen: kameran rätas upp, mitt framför kurvan, så att väggen böjer sig lika åt båda håll.
+        val level = if (depthShown == WallDepth.CURVE) depthEase() else 0f
+        if (level != leveled) {
+            leveled = level
+            rotation(PITCH + (CURVE_PITCH - PITCH) * level, YAW * (1f - level), ROLL * (1f - level))
+        }
         val back = easeOutCubic((u / GLIDE_MS).coerceIn(0f, 1f))
         zoom = (ZOOM_FROM + (ZOOM_TO - ZOOM_FROM) * back) * (1f + push(u))
         val s = zoom
@@ -515,6 +556,81 @@ internal class PosterWall {
         val w = wall[6] * x + wall[7] * y + wall[8]
         projX = (wall[0] * x + wall[1] * y + wall[2]) / w
         projY = (wall[3] * x + wall[4] * y + wall[5]) / w
+    }
+
+    /**
+     * Punkten (x, y) i väggen, [lift] ut mot kameran, med 3D:n som ritas just
+     * nu: i [projX] och [projY]. Platt och utan lyft är det samma som [project].
+     * Böjd vägg: väggen böjer sig runt kameran, mer ju längre från mitten.
+     */
+    private fun place(x: Float, y: Float, lift: Float = 0f) {
+        var px = x
+        var pz = -lift
+        if (depthShown == WallDepth.CURVE) {
+            val k = depthEase()
+            val r = CURVE_RADIUS * width
+            val angle = x / r
+            px = x + k * (r * sin(angle) - x)
+            pz -= k * r * (1f - cos(angle))
+        }
+        place3(px, y, pz)
+    }
+
+    /** Punkten (x, y, z) i väggens mått — z bort från kameran — på skärmen, i [projX] och [projY]. */
+    private fun place3(x: Float, y: Float, z: Float) {
+        val s = zoom
+        val cx = s * (rot[0] * x + rot[1] * y + rot[2] * z)
+        val cy = s * (rot[3] * x + rot[4] * y + rot[5] * z)
+        val cz = s * (rot[6] * x + rot[7] * y + rot[8] * z)
+        val w = (1f + cz / depth).coerceAtLeast(0.05f)
+        projX = width / 2f + cx / w
+        projY = height / 2f + cy / w
+    }
+
+    private fun depthEase(): Float = easeInOutCubic(depthAmount)
+
+    /** Djup: lagret platsen ligger i — de flesta längst bak, några närmare. */
+    private fun layerOf(tile: Tile): Int {
+        val h = hash(tile.row * 7 + 3, tile.col * 13 + 5)
+        return when {
+            h < 0.66f -> 0
+            h < 0.9f -> 1
+            else -> 2
+        }
+    }
+
+    /**
+     * Omslagets hörn på skärmen — uppe till vänster, uppe till höger, nere till
+     * höger, nere till vänster — som det står med 3D:n just nu. Fodral:
+     * framsidan askens tjocklek ut från väggen. Djup: närmare kameran längs
+     * synlinjen genom omslagets mitt, så att det står kvar över sin plats, bara
+     * större. Med [front] false där omslaget sitter på väggen.
+     */
+    private fun corners(tile: Tile, u: Long, xs: FloatArray, ys: FloatArray, front: Boolean = true) {
+        val left = tileLeft(tile, u)
+        val top = tileTop(tile)
+        val k = if (front) depthEase() else 0f
+        var dx = 0f
+        var dy = 0f
+        var dz = 0f
+        var lift = 0f
+        if (k > 0f && depthShown == WallDepth.LAYERS) {
+            val f = k * LAYER_FORWARD[layerOf(tile)]
+            // Kameran, i väggens mått.
+            val eye = -depth / zoom
+            dx = f * (eye * rot[6] - (left + tileW / 2f))
+            dy = f * (eye * rot[7] - (top + tileH / 2f))
+            dz = f * eye * rot[8]
+        } else if (depthShown == WallDepth.CASES) {
+            lift = k * CASE_DEPTH * tileW
+        }
+        for (c in 0 until 4) {
+            val x = if (c == 0 || c == 3) left else left + tileW
+            val y = if (c < 2) top else top + tileH
+            if (dz != 0f) place3(x + dx, y + dy, dz) else place(x, y, lift)
+            xs[c] = projX
+            ys[c] = projY
+        }
     }
 
     // --- Vad som syns ------------------------------------------------------------------
@@ -916,6 +1032,10 @@ internal class PosterWall {
         rimGain: Float = 1f,
         coverLight: Float = 0f,
     ) {
+        if (depthShown != WallDepth.FLAT && depthAmount > 0.001f && silkColors == null) {
+            drawTiles3D(u, filter)
+            return
+        }
         val center = Offset(tileW / 2f, tileH / 2f)
         val w = tileW.toFloat()
         val hh = tileH.toFloat()
@@ -952,6 +1072,146 @@ internal class PosterWall {
                 }
             }
         }
+    }
+
+    /**
+     * Väggen i 3D: varje omslag genom sin egen projektion, från sina hörn.
+     * Fodral: askarnas kanter först, sedan framsidorna med glans och en ljus
+     * kant. Djup: väggen längst bak, mörkare, sedan för varje lager närmare
+     * skuggorna och omslagen. Böjd vägg: omslagen vända mot mitten.
+     */
+    private fun DrawScope.drawTiles3D(u: Long, filter: ColorFilter?) {
+        val mode = depthShown
+        val k = depthEase()
+        if (mode == WallDepth.CASES) {
+            for (i in tiles.indices) {
+                val tile = tiles[i]
+                if (drawable(tile, u)) caseEdges(tile, u)
+            }
+        }
+        val passes = if (mode == WallDepth.LAYERS) LAYER_FORWARD.size else 1
+        for (pass in 0 until passes) {
+            if (pass > 0) {
+                for (i in tiles.indices) {
+                    val tile = tiles[i]
+                    if (drawable(tile, u) && layerOf(tile) == pass) layerShadow(tile, u, k)
+                }
+            }
+            for (i in tiles.indices) {
+                val tile = tiles[i]
+                if (!drawable(tile, u)) continue
+                if (mode == WallDepth.LAYERS && layerOf(tile) != pass) continue
+                corners(tile, u, cornerX, cornerY)
+                quadMatrix(cornerX, cornerY, QUAD.toFloat(), tileMatrix)
+                projected(tileMatrix) {
+                    tileContent(tile, u, filter)
+                    depthOverlay(mode, tile, u, k, pass)
+                }
+            }
+        }
+    }
+
+    /**
+     * Över omslaget i 3D: fodralets glans och ljusa kant; i Djup är väggen
+     * längst bak mörkare; i den böjda väggen mörknar det ut mot sidorna.
+     */
+    private fun DrawScope.depthOverlay(mode: WallDepth, tile: Tile, u: Long, k: Float, pass: Int) {
+        when (mode) {
+            WallDepth.CASES -> {
+                val shown = k * igniteAlpha(tile, u)
+                drawRect(CASE_SHEEN, size = QUAD_SIZE, alpha = shown)
+                drawRect(Color.White, size = QUAD_SIZE, alpha = CASE_RIM_ALPHA * shown, style = CASE_RIM)
+            }
+            WallDepth.LAYERS -> {
+                if (pass == 0) drawRect(Color.Black, size = QUAD_SIZE, alpha = LAYER_FAR_DIM * k)
+            }
+            WallDepth.CURVE -> {
+                val angle = abs(tileLeft(tile, u) + tileW / 2f) / (CURVE_RADIUS * width)
+                val dim = CURVE_SIDE_DIM * k * smoothstep(CURVE_DIM_FROM, CURVE_DIM_TO, angle)
+                if (dim > 0.01f) drawRect(Color.Black, size = QUAD_SIZE, alpha = dim)
+            }
+            WallDepth.FLAT -> Unit
+        }
+    }
+
+    /** Omslaget ritas av väggen: det har en film, har börjat tonas fram och flyger inte. */
+    private fun drawable(tile: Tile, u: Long): Boolean = tile.poster >= 0 && u >= tile.igniteAt && !tile.detached
+
+    private fun igniteAlpha(tile: Tile, u: Long): Float = smoothstep(0f, 1f, ((u - tile.igniteAt) / IGNITE_MS).coerceIn(0f, 1f))
+
+    /** Omslaget i rutan [QUAD]: tonas fram och växer lite in på sin plats, eller tonar över efter ett klipp. */
+    private fun DrawScope.tileContent(tile: Tile, u: Long, filter: ColorFilter?) {
+        val ignite = (u - tile.igniteAt) / IGNITE_MS
+        if (ignite < 1f) {
+            val q = ignite.coerceIn(0f, 1f)
+            val grow = 1f + IGNITE_GROW * (1f - easeOutCubic(q))
+            scale(grow, grow, pivot = QUAD_CENTER) {
+                quadPoster(tile.poster, smoothstep(0f, 1f, q), filter)
+            }
+        } else if (tile.previous >= 0) {
+            val fade = ((u - tile.cutAt) / tile.cutMs).coerceIn(0f, 1f)
+            quadPoster(tile.previous, 1f, filter)
+            quadPoster(tile.poster, fade, filter)
+        } else {
+            quadPoster(tile.poster, 1f, filter)
+        }
+    }
+
+    private fun DrawScope.quadPoster(index: Int, alpha: Float, filter: ColorFilter?) {
+        val image = images[index]
+        if (image == null) {
+            drawRect(TILE_BACK, size = QUAD_SIZE, alpha = alpha)
+            return
+        }
+        drawImage(
+            image = image,
+            srcOffset = IntOffset(srcX[index], srcY[index]),
+            srcSize = IntSize(srcW[index], srcH[index]),
+            dstSize = IntSize(QUAD, QUAD),
+            alpha = alpha,
+            colorFilter = filter,
+            filterQuality = FilterQuality.Medium,
+        )
+    }
+
+    /**
+     * Fodral: askens kanter mellan väggen och framsidan — bara de som vänder
+     * sig mot kameran. Över- och vänsterkanten är ljusare, som med ljus uppifrån.
+     */
+    private fun DrawScope.caseEdges(tile: Tile, u: Long) {
+        corners(tile, u, backX, backY, front = false)
+        corners(tile, u, cornerX, cornerY)
+        val front = quadArea(cornerX[0], cornerY[0], cornerX[1], cornerY[1], cornerX[2], cornerY[2], cornerX[3], cornerY[3])
+        val alpha = igniteAlpha(tile, u)
+        for (e in 0 until 4) {
+            val n = (e + 1) and 3
+            val area = quadArea(cornerX[e], cornerY[e], cornerX[n], cornerY[n], backX[n], backY[n], backX[e], backY[e])
+            if (area * front >= 0f) continue
+            edgePath.reset()
+            edgePath.moveTo(cornerX[e], cornerY[e])
+            edgePath.lineTo(cornerX[n], cornerY[n])
+            edgePath.lineTo(backX[n], backY[n])
+            edgePath.lineTo(backX[e], backY[e])
+            edgePath.close()
+            drawPath(edgePath, if (e == 0 || e == 3) CASE_EDGE_LIT else CASE_EDGE, alpha = alpha)
+        }
+    }
+
+    /** Djup: en mjuk skugga på väggen bakom ett omslag som står närmare, nedåt till höger. */
+    private fun DrawScope.layerShadow(tile: Tile, u: Long, k: Float) {
+        val grow = tileW * SHADOW_GROW
+        val left = tileLeft(tile, u) + tileW * SHADOW_SHIFT_X - grow
+        val top = tileTop(tile) + tileH * SHADOW_SHIFT_Y - grow
+        val right = left + tileW + grow * 2f
+        val bottom = top + tileH + grow * 2f
+        for (c in 0 until 4) {
+            place(if (c == 0 || c == 3) left else right, if (c < 2) top else bottom)
+            backX[c] = projX
+            backY[c] = projY
+        }
+        quadMatrix(backX, backY, QUAD.toFloat(), tileMatrix)
+        val strength = SHADOW_ALPHA[layerOf(tile)] * k * igniteAlpha(tile, u)
+        projected(tileMatrix) { drawRect(LAYER_SHADOW, size = QUAD_SIZE, alpha = strength) }
     }
 
     /** Ljuset som vandrar över väggen i starten: ljust där det är, mörkare längre bort. */
@@ -1156,11 +1416,8 @@ internal class PosterWall {
         if (alive) {
             val left = tileLeft(tile, u)
             val top = tileTop(tile)
-            for (k in 0 until 4) {
-                project(if (k == 0 || k == 3) left else left + tileW, if (k < 2) top else top + tileH)
-                flyer.endX[k] = projX
-                flyer.endY[k] = projY
-            }
+            // Mot platsen som den står just nu, i 3D om väggen är det.
+            corners(tile, u, flyer.endX, flyer.endY)
             flyer.shade = shadeAt(left + tileW / 2f, top + tileH / 2f)
             flyer.reached = true
         }
@@ -1248,11 +1505,7 @@ internal class PosterWall {
         }
         val left = tileLeft(tile, u)
         val top = tileTop(tile)
-        for (k in 0 until 4) {
-            project(if (k == 0 || k == 3) left else left + tileW, if (k < 2) top else top + tileH)
-            flyer.xs[k] = projX
-            flyer.ys[k] = projY
-        }
+        corners(tile, u, flyer.xs, flyer.ys)
         flyer.shade = shadeAt(left + tileW / 2f, top + tileH / 2f)
         tile.detached = true
         flyer.launched = true
@@ -1489,6 +1742,10 @@ private fun quadMatrix(xs: FloatArray, ys: FloatArray, size: Float, out: FloatAr
     out[8] = 1f
 }
 
+/** Fyrhörningens area med tecken (skosnöret): tecknet säger åt vilket håll den är vänd. */
+private fun quadArea(x0: Float, y0: Float, x1: Float, y1: Float, x2: Float, y2: Float, x3: Float, y3: Float): Float =
+    (x0 * y1 - x1 * y0) + (x1 * y2 - x2 * y1) + (x2 * y3 - x3 * y2) + (x3 * y0 - x0 * y3)
+
 /** En plats i väggen: rad, kolumn och omslaget som sitter där. */
 private class Tile {
     var row = 0
@@ -1579,6 +1836,7 @@ internal fun PosterWallDriver(state: AppState, wall: PosterWall) {
         var published = 0L
         while (true) {
             wall.ambient = state.introDone
+            wall.depthStyle = state.wallStyle.depth
             if (!wall.lit) {
                 // Tänds så fort omslagen räcker; dröjer de, kollas det då och då.
                 if (wall.lightingSoon(nowMs())) withFrameMillis { wall.tryLight(nowMs()) } else delay(250)
@@ -1605,6 +1863,7 @@ internal fun PosterWallDriver(state: AppState, wall: PosterWall) {
                 // Kommer i gång mjukt.
                 speed = if (target > speed) min(target, speed + dt / EASE_MS) else max(target, speed - dt / EASE_MS)
                 wall.advance(dt * speed.toDouble())
+                wall.advanceDepth(dt)
                 // Sidenbandet går i sin egen jämna takt, också när väggen går i full fart.
                 wall.advanceSilk(dt * min(1f, speed / AMBIENT_SPEED).toDouble())
                 // Som bakgrund räcker trettio bilder i sekunden: varannan bild på en 60 Hz-tv, jämnt.
@@ -1924,6 +2183,53 @@ internal const val GATHER_COVER_MS = 700L
 private const val MORPH_LIFT = 0.10f
 private val FLIGHT_EASING = CubicBezierEasing(0.6f, 0f, 0.2f, 1f)
 private const val FLIGHT_SIZE = 1024
+
+/** 3D: så lång tid det tar för väggen att gå från platt till helt i 3D, och tillbaka. */
+private const val DEPTH_EASE_MS = 1_400f
+/** Fodral: askens tjocklek, i omslagets bredder — som en videokassett. */
+private const val CASE_DEPTH = 0.2f
+private const val CASE_RIM_ALPHA = 0.16f
+/**
+ * Djup: hur långt fram mot kameran lagren står, som del av avståndet dit;
+ * längst bak väggen själv. Ett omslag en femtedel närmare syns en fjärdedel större.
+ */
+private val LAYER_FORWARD = floatArrayOf(0f, 0.11f, 0.22f)
+/** Djup: väggen längst bak är så här mycket mörkare. */
+private const val LAYER_FAR_DIM = 0.38f
+/** Djup: skuggornas förskjutning och storlek, i omslagets mått, och hur mörka de är per lager. */
+private const val SHADOW_SHIFT_X = 0.1f
+private const val SHADOW_SHIFT_Y = 0.12f
+private const val SHADOW_GROW = 0.16f
+private val SHADOW_ALPHA = floatArrayOf(0f, 0.5f, 0.7f)
+/** Böjd vägg: kurvans radie, i skärmens bredd, och kamerans lutning när den rätats upp (grader). */
+private const val CURVE_RADIUS = 0.45f
+private const val CURVE_PITCH = -4f
+/** Böjd vägg: hur mörkt det blir ut mot sidorna, och mellan vilka vinklar (radianer) det mörknar. */
+private const val CURVE_SIDE_DIM = 0.45f
+private const val CURVE_DIM_FROM = 0.2f
+private const val CURVE_DIM_TO = 1f
+/** Rutan omslagen ritas i när de får egen projektion (3D), i bildpunkter. */
+private const val QUAD = 600
+private val QUAD_SIZE = Size(QUAD.toFloat(), QUAD.toFloat())
+private val QUAD_CENTER = Offset(QUAD / 2f, QUAD / 2f)
+private val CASE_EDGE = Color(0xFF111319)
+private val CASE_EDGE_LIT = Color(0xFF2B2F3A)
+private val CASE_SHEEN = Brush.linearGradient(
+    0.28f to Color.Transparent,
+    0.45f to Color.White.copy(alpha = 0.22f),
+    0.52f to Color.White.copy(alpha = 0.06f),
+    0.64f to Color.Transparent,
+    start = Offset.Zero,
+    end = Offset(QUAD.toFloat(), QUAD.toFloat()),
+)
+private val CASE_RIM = Stroke(width = QUAD * 0.012f)
+private val LAYER_SHADOW = Brush.radialGradient(
+    0f to Color.Black,
+    0.5f to Color.Black.copy(alpha = 0.6f),
+    1f to Color.Transparent,
+    center = QUAD_CENTER,
+    radius = QUAD * 0.62f,
+)
 private const val POSTER_ASPECT = 2f / 3f
 /** Platserna omslagen lämnade fylls på en stund efter slutet (väggens tid). */
 private const val REFILL_DELAY_MS = 400L
