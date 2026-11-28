@@ -134,6 +134,7 @@ internal val MENU_ROWS = listOf(
     MenuRow(Screen.GENRES, "Genrer", Glyphs.Genres),
     MenuRow(Screen.HISTORY, "Historik", Glyphs.History),
     MenuRow(Screen.TOP10, "Topp 10", Glyphs.Star),
+    MenuRow(Screen.MUSIC, "Musik", Glyphs.Music),
     MenuRow(Screen.SETTINGS, "Inställningar", Glyphs.Settings),
 )
 
@@ -141,7 +142,9 @@ private const val FOOTBALL_ROW = 3
 
 /** Veckans topp 10: den gula knappen (TopTen.kt), ritad likadant i alla menyer. */
 private const val TOP10_ROW = 8
-private const val SETTINGS_ROW = 9
+/** Musik: Spotify (MusicScreen.kt), under den gula knappen. */
+private const val MUSIC_ROW = 9
+private const val SETTINGS_ROW = 10
 
 private val MARVEL_RED = Color(0xFFE62429)
 private val MINIMAL_RED = Color(0xFFFF2A2F)
@@ -505,6 +508,7 @@ internal fun rememberMenuPeeks(state: AppState): List<PeekInfo?> {
                 poster = true,
             )
         } ?: PeekInfo("VECKANS TOPP 10", "Populärast just nu", "Enligt TMDB", null, poster = false),
+        PeekInfo("MUSIK", "Spotify", "Musik medan du tittar runt", null, poster = false),
         PeekInfo("INSTÄLLNINGAR", "Källor & uppspelning", "Utseende, menyn och omslagsväggen", null, poster = false),
     )
 }
@@ -563,6 +567,8 @@ private fun MinimalMenu(ctx: MenuContext) {
         for (i in FOOTBALL_ROW + 1 until TOP10_ROW) MinimalRow(ctx, i, null)
         Spacer(Modifier.height(if (ctx.tv) 14.dp else 10.dp))
         StyledTopTen(ctx, Modifier.padding(end = if (ctx.tv) 26.dp else 10.dp))
+        Spacer(Modifier.height(if (ctx.tv) 10.dp else 6.dp))
+        MinimalRow(ctx, MUSIC_ROW, null)
         Spacer(Modifier.weight(1f))
         if (ctx.state.importingId != null) {
             ImportIndicator(ctx.state.importState)
@@ -1101,6 +1107,8 @@ private fun StarkMenu(ctx: MenuContext) {
             for (i in FOOTBALL_ROW + 1 until TOP10_ROW) StarkRow(ctx, i, null, angle)
             Spacer(Modifier.height(if (ctx.tv) 12.dp else 8.dp))
             StyledTopTen(ctx, Modifier.padding(start = 4.dp, end = if (ctx.tv) 34.dp else 12.dp))
+            Spacer(Modifier.height(if (ctx.tv) 8.dp else 6.dp))
+            StarkRow(ctx, MUSIC_ROW, null, angle)
             Spacer(Modifier.weight(1f))
             if (ctx.state.importingId != null) {
                 ImportIndicator(ctx.state.importState)

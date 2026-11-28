@@ -709,6 +709,27 @@ private fun scenes(state: AppState, data: PreviewData): List<Scene> {
             settleMs = 3_500L,
             content = app,
         ),
+        // Musik: sidan med knappen till Spotify, och raden i menyn.
+        Scene(
+            "musik-sida",
+            before = {
+                screen(Screen.MUSIC)()
+                TvNav.drawer = TvDrawer.NONE
+            },
+            settleMs = 2_500L,
+            content = app,
+        ),
+        Scene(
+            "musik",
+            before = {
+                screen(Screen.MUSIC)()
+                state.selectMenuStyle(MenuStyle.ORIGINAL)
+            },
+            after = { TvNav.openMenu() },
+            each = { if (TvNav.drawer != TvDrawer.MENU) TvNav.openMenu() },
+            settleMs = 3_000L,
+            content = app,
+        ),
         // Veckans topp 10: sidan, med ettan markerad, och den gula knappen i varje meny.
         Scene(
             "topp10",

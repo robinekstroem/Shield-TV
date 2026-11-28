@@ -86,6 +86,25 @@ internal fun openInBrowser(url: String) {
     }
 }
 
+/**
+ * Musik: Spotifys tv-app (eller den vanliga), och finns ingen av dem Spotify
+ * i Play Butik. Musiken spelar vidare när man kommer tillbaka hit. Falskt om
+ * inget gick att öppna. Paketen står i manifestets queries, annars syns de inte.
+ */
+internal fun openSpotify(): Boolean {
+    val context = AppDirs.context
+    val packages = context.packageManager
+    for (name in listOf("com.spotify.tv.android", "com.spotify.music")) {
+        val intent = packages.getLeanbackLaunchIntentForPackage(name) ?: packages.getLaunchIntentForPackage(name) ?: continue
+        if (runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess) return true
+    }
+    return runCatching {
+        context.startActivity(
+            Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=com.spotify.tv.android")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    }.isSuccess
+}
+
 /** Ingen fildialog på en tv-box. Egna bakgrundsbilder läggs in från Windows-appen. */
 internal fun pickImages(): List<File> = emptyList()
 

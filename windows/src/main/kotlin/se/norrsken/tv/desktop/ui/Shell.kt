@@ -411,6 +411,7 @@ fun AppRoot(state: AppState) {
                             Screen.HISTORY -> HistoryScreen(state)
                             Screen.SETTINGS -> SettingsScreen(state)
                             Screen.TOP10 -> TopTenScreen(state)
+                            Screen.MUSIC -> MusicScreen(state)
                         }
                     }
                 }
@@ -653,6 +654,10 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
             TopTenNavItem(state.screen == Screen.TOP10, tv = tv, trail = trail, aura = aura, index = 8, onFocused = onFocused, modifier = navModifier(Screen.TOP10)) {
                 go(Screen.TOP10)
             }
+            // Musik: Spotify öppnas därifrån.
+            NavItem(Glyphs.Music, "Musik", "Spotify medan du tittar", null, state.screen == Screen.MUSIC, docked, tv = tv, accent = MenuAccents.music, trail = trail, aura = aura, index = 9, onFocused = onFocused, modifier = navModifier(Screen.MUSIC)) {
+                go(Screen.MUSIC)
+            }
         }
 
         if (state.importingId != null) {
@@ -665,7 +670,7 @@ private fun Sidebar(state: AppState, docked: Boolean, tv: Boolean) {
             MenuPeek(state, peek, Modifier.fillMaxWidth().padding(bottom = 10.dp))
         }
 
-        NavItem(Glyphs.Settings, "Inställningar", "Källor & uppspelning", null, state.screen == Screen.SETTINGS, docked, tv = tv, accent = MenuAccents.settings, trail = trail, aura = aura, index = 9, onFocused = onFocused, modifier = navModifier(Screen.SETTINGS)) {
+        NavItem(Glyphs.Settings, "Inställningar", "Källor & uppspelning", null, state.screen == Screen.SETTINGS, docked, tv = tv, accent = MenuAccents.settings, trail = trail, aura = aura, index = 10, onFocused = onFocused, modifier = navModifier(Screen.SETTINGS)) {
             go(Screen.SETTINGS)
         }
     }
@@ -797,6 +802,7 @@ internal object MenuAccents {
     val series = Color(0xFFA27CFF)
     val genres = Color(0xFFFF6FA8)
     val history = Color(0xFF4CC3F5)
+    val music = Color(0xFF5BE38F)
     val settings = Color(0xFF9AA6BC)
 
     /** Text och symboler på en yta i [color]: nästan svart på ljusa färger, vit på mörka. */
@@ -1202,6 +1208,14 @@ private fun MenuPeek(state: AppState, index: Int, modifier: Modifier) {
                     progress = entry.progress.takeIf { entry.kind != WatchKind.LIVE && it > 0f },
                 )
             }
+            9 -> PeekCard(
+                label = "MUSIK",
+                accent = MenuAccents.music,
+                title = "Spotify",
+                line = "Musik medan du tittar runt",
+                image = null,
+                poster = false,
+            )
             8 -> state.weeklyTop.firstOrNull()?.let { first ->
                 PeekCard(
                     label = "VECKANS TOPP 10",

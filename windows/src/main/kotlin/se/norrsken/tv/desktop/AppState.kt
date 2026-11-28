@@ -131,7 +131,7 @@ import java.text.Collator
 import java.util.UUID
 import javax.net.ssl.SSLException
 
-enum class Screen { HOME, LIVE, GUIDE, FOOTBALL, MOVIES, SERIES, GENRES, HISTORY, SETTINGS, TOP10 }
+enum class Screen { HOME, LIVE, GUIDE, FOOTBALL, MOVIES, SERIES, GENRES, HISTORY, SETTINGS, TOP10, MUSIC }
 
 enum class SortOrder(val label: String) {
     PROVIDER("Standard"),

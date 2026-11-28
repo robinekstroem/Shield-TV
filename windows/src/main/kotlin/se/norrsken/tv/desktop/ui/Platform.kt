@@ -155,6 +155,17 @@ internal fun openInBrowser(url: String) {
     }
 }
 
+/**
+ * Musik: Spotify-appen om den finns (den tar adresser som börjar med
+ * "spotify:"), annars Spotify i webbläsaren. Falskt om inget gick att öppna.
+ */
+internal fun openSpotify(): Boolean {
+    if (!Desktop.isDesktopSupported()) return false
+    val desktop = Desktop.getDesktop()
+    if (runCatching { desktop.browse(URI("spotify:home")) }.isSuccess) return true
+    return runCatching { desktop.browse(URI("https://open.spotify.com")) }.isSuccess
+}
+
 /** Windows egen fildialog, flera bilder åt gången. Tom lista om man avbryter. */
 internal fun pickImages(): List<File> {
     val dialog = FileDialog(null as AwtFrame?, "Välj bakgrundsbilder", FileDialog.LOAD)

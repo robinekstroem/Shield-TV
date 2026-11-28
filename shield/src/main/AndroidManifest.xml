@@ -5,6 +5,12 @@
     <!-- Håller wifi och processor vakna medan en film eller kanal spelas. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- Musik i menyn: Spotify ska gå att hitta och öppna (Android 11 gömmer andra appar annars). -->
+    <queries>
+        <package android:name="com.spotify.tv.android" />
+        <package android:name="com.spotify.music" />
+    </queries>
+
     <!-- En tv-app: ingen pekskärm, startas från Android TV:s hemskärm. -->
     <uses-feature android:name="android.software.leanback" android:required="true" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
