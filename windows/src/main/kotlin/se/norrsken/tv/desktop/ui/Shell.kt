@@ -277,7 +277,6 @@ fun AppRoot(state: AppState) {
     // Tv: menyn och kategorierna göms medan man är i innehållet — också när
     // minispelaren går, som då ligger som en liten bild i hörnet.
     val drawers = tvLayout
-    var introSkip by remember { mutableStateOf(false) }
     // Filmväggen: starten visar den, och sedan blir den kvar som bakgrund bakom sidorna.
     val wall = remember { PosterWall() }
     PosterWallDriver(state, wall)
@@ -319,7 +318,7 @@ fun AppRoot(state: AppState) {
                 }
                 // Medan starten visas hoppar en knapptryckning över den, och går inte vidare till sidan bakom.
                 if (state.introDone) return@onPreviewKeyEvent false
-                if (event.type == KeyEventType.KeyDown) introSkip = true
+                if (event.type == KeyEventType.KeyDown) state.requestIntroSkip()
                 true
             }
             // Och medan musen rör sig. Bara läser händelserna, tar inga.
@@ -456,7 +455,7 @@ fun AppRoot(state: AppState) {
             val library = state.library
             val nothing = library.movies.isEmpty() && library.series.isEmpty() && library.channels.isEmpty()
             val ready = state.homeShown || (!state.loading && (state.screen != Screen.HOME || nothing)) || state.nowPlaying != null
-            StartIntro(state = state, wall = wall, morph = morph, ready = ready, skip = introSkip, onFinished = { state.introDone = true })
+            StartIntro(state = state, wall = wall, morph = morph, ready = ready, skip = state.introSkipped, onFinished = { state.introDone = true })
         }
         // Skärmsläckaren, överst.
         if (saver.shown) {

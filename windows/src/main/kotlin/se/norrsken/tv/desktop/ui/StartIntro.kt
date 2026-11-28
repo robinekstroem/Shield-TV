@@ -51,8 +51,10 @@ import kotlin.math.sin
  * och lägger sig precis på dem, medan klippen glesnar, väggen tonar ner
  * till bakgrunden, biofälten glider undan och startsidan kommer fram runt
  * omkring. Samma film syns aldrig två gånger, och inget roteras. Ingen
- * logga, ingen text, inget ljud, ingen strålkastare. En knapptryckning
- * eller ett klick hoppar över, eller skyndar på slutet.
+ * logga, ingen text, inget ljud, ingen strålkastare. OK, en tangent eller
+ * ett klick går rakt in i appen: starten tonar bort på ett ögonblick (är
+ * startsidan inte klar väntar den högst en kort stund), och mitt i slutet
+ * blir resten klart direkt.
  *
  * Väggen själv ([PosterWall]) delas med bakgrunden: här ritas den i full
  * styrka, med färgton, mörkare hörn och biofält ovanpå.
@@ -72,15 +74,16 @@ internal fun StartIntro(
     val looks = remember { IntroLooks() }
     val ending = remember { Ending() }
     val frame = remember { OverlayFrame() }
-    var clicked by remember { mutableStateOf(false) }
-    val skipping = skip || clicked
+    val skipping = skip
 
     // Slutet börjar: omslagen får sina kort, och startsidan kommer fram bakom.
+    // [fast]: någon hoppade över — allt tonar bort på en gång, utan flygningen.
     fun begin(fast: Boolean) {
         if (ending.started) return
         ending.started = true
-        ending.rate = if (fast) SKIP_RATE else 1f
-        ending.plain = !wall.lit
+        ending.rate = 1f
+        ending.plain = fast || !wall.lit
+        ending.fade = if (fast) SKIP_FADE_MS else EXIT_PLAIN_MS
         val spots = morph.visibleSpots()
         var lastLanding = 0L
         if (!ending.plain) {
@@ -92,7 +95,7 @@ internal fun StartIntro(
                 lastLanding = max(lastLanding, lands[i])
             }
         }
-        ending.total = if (ending.plain) EXIT_PLAIN_MS else max(WALL_FADE_TO_MS, lastLanding + MORPH_DISSOLVE_MS) + 40L
+        ending.total = if (ending.plain) ending.fade else max(WALL_FADE_TO_MS, lastLanding + MORPH_DISSOLVE_MS) + 40L
         morph.start(MorphPhase.SCATTER)
         state.introRevealing = true
     }
@@ -126,15 +129,18 @@ internal fun StartIntro(
     }
     LaunchedEffect(ready, skipping) {
         if (ending.started) {
-            // Mitt i slutet: en knapptryckning skyndar på det.
+            // Mitt i slutet: en knapptryckning gör klart det på ett ögonblick.
             if (skipping) ending.rate = max(ending.rate, SKIP_RATE)
             return@LaunchedEffect
         }
-        if (!ready) return@LaunchedEffect
         if (skipping) {
+            // Rakt in i appen: så fort startsidan är klar, och efter en kort stund
+            // ändå. Blir den klar under tiden börjar det här om, och går direkt.
+            if (!ready) delay(SKIP_WAIT_MS)
             begin(fast = true)
             return@LaunchedEffect
         }
+        if (!ready) return@LaunchedEffect
         // Omslagen laddas: väggen får tändas först.
         while (!wall.lit && wall.lightingSoon(nowMs())) delay(40)
         if (wall.lit) {
@@ -156,12 +162,12 @@ internal fun StartIntro(
             .fillMaxSize()
             .onGloballyPositioned { frame.place(it) }
             .graphicsLayer {
-                // Utan vägg tonar allt bort på en gång.
-                alpha = if (ending.plain) 1f - progress(morph.clock.longValue, EXIT_PLAIN_MS.toFloat()) else 1f
+                // Utan vägg, eller när någon hoppat över: allt tonar bort på en gång.
+                alpha = if (ending.plain) 1f - progress(morph.clock.longValue, ending.fade.toFloat()) else 1f
                 compositingStrategy = CompositingStrategy.ModulateAlpha
             }
             // Ett klick hoppar över, och går inte vidare till sidan bakom.
-            .pointerInput(Unit) { detectTapGestures { clicked = true } },
+            .pointerInput(Unit) { detectTapGestures { state.requestIntroSkip() } },
     ) {
         // Väggen i full styrka, med färgtonen och hörnen. I slutet tonar
         // den ner till bakgrunden, som är samma vägg, mörk, bakom startsidan.
@@ -217,18 +223,20 @@ private fun wallAlpha(ending: Ending, m: Long): Float =
 /** Hur långt biofälten glidit undan, 0–1. */
 private fun barsOpen(ending: Ending, m: Long): Float = when {
     !ending.started || m < 0L -> 0f
-    ending.plain -> progress(m, EXIT_PLAIN_MS.toFloat())
+    ending.plain -> progress(m, ending.fade.toFloat())
     else -> smoothstep(0f, BARS_MS, m.toFloat())
 }
 
 /**
- * Slutet: väntar på toppen ([armed]), om det börjat, om väggen saknas, hur
- * fort det går och hur länge det varar.
+ * Slutet: väntar på toppen ([armed]), om det börjat, om allt bara tonar bort
+ * ([plain]: väggen saknas, eller någon hoppade över) och på hur länge ([fade]),
+ * hur fort det går och hur länge det varar.
  */
 private class Ending {
     var armed = false
     var started = false
     var plain = false
+    var fade = EXIT_PLAIN_MS
     var rate = 1f
     var total = 0L
 }
@@ -666,8 +674,12 @@ private const val EXIT_PLAIN_MS = 500L
 private const val WALL_FADE_FROM_MS = 140f
 private const val WALL_FADE_TO_MS = 1_150L
 private const val BARS_MS = 700f
-/** En knapptryckning eller ett klick: så mycket fortare går slutet. */
-private const val SKIP_RATE = 1.8f
+/** En knapptryckning eller ett klick mitt i slutet: så mycket fortare går resten. */
+private const val SKIP_RATE = 4f
+/** Hoppar man över tonar starten bort så här fort, rakt in i appen. */
+private const val SKIP_FADE_MS = 300L
+/** Längst så här länge väntar ett överhopp på att startsidan ska bli klar. */
+private const val SKIP_WAIT_MS = 1_500L
 /** Högst så många omslag flyger, och inget till kort mindre än så (bildpunkter). */
 private const val MAX_FLYERS = 18
 private const val MIN_TARGET_PX = 24f

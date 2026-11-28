@@ -249,6 +249,12 @@ class MainActivity : ComponentActivity() {
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
         // Det som hittas i bakgrunden väntar medan man trycker (se AppState.noteInput).
         if (ready && event.action == android.view.KeyEvent.ACTION_DOWN) state.noteInput()
+        // Starten: OK (eller en pil) går rakt in i appen. Tas här, eftersom inget
+        // är markerat medan omslagen visas, och går inte vidare till sidan bakom.
+        if (ready && crashReport == null && !state.introDone && event.keyCode in NAVIGATION_KEYS) {
+            if (event.action == android.view.KeyEvent.ACTION_DOWN) state.requestIntroSkip()
+            return true
+        }
         // Två försök som inte hjälpte: då får tv:n sköta trycket som vanligt,
         // så att fjärrkontrollen aldrig kan fastna här.
         if (ready && crashReport == null && !anyFocus && !state.loading && focusRescues < 2 &&

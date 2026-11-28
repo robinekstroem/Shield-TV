@@ -722,6 +722,15 @@ class AppState {
     /** Startanimationen tonar bort: startsidan kommer fram och dess omslag vänds fram. */
     var introRevealing by mutableStateOf(false)
 
+    /** Någon tryckte (eller klickade) under startanimationen: rakt in i appen. */
+    var introSkipped by mutableStateOf(false)
+        private set
+
+    /** OK, en pil, en tangent eller ett klick under starten: resten hoppas över. */
+    fun requestIntroSkip() {
+        if (!introDone) introSkipped = true
+    }
+
     fun markHomeReady() {
         homeReady.complete(Unit)
         homeShown = true
@@ -3155,6 +3164,12 @@ class AppState {
      * sökfälten får sina tangenter i fred.
      */
     fun handleKey(event: KeyEvent): Boolean {
+        // Starten: en tangent hoppar rakt in i appen, också innan något är
+        // markerat, och går inte vidare till sidan bakom.
+        if (!introDone) {
+            if (event.type == KeyEventType.KeyDown) requestIntroSkip()
+            return true
+        }
         if (event.type != KeyEventType.KeyDown) return false
         val playing = nowPlaying ?: return false
         if (event.key == Key.F11) {
