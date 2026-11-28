@@ -190,6 +190,54 @@ class TmdbClient(private val key: String) {
             ?: TmdbFacts(id = 0, checkedUtc = System.currentTimeMillis(), matcher = MATCHER)
     }
 
+    /**
+     * Filmen med TMDB-id [id], med samma fakta som en sökning ger. Säker,
+     * eftersom id:t redan är känt (regissörernas filmer i Samlingar).
+     */
+    fun movie(id: Int, genreNames: Map<Int, String>): TmdbFacts {
+        val o = get("movie/$id", mapOf("language" to "sv-SE"))
+        // Detaljerna har genrerna som id och namn; sökningens svar bara id:n, som toFacts läser.
+        if (!o.has("genre_ids")) {
+            val ids = JSONArray()
+            val genres = o.optJSONArray("genres")
+            if (genres != null) for (i in 0 until genres.length()) genres.optJSONObject(i)?.let { ids.put(it.optInt("id")) }
+            o.put("genre_ids", ids)
+        }
+        return toFacts("movie", o, genreNames, sure = true)
+    }
+
+    /**
+     * Säsongens avsnitt hos TMDB: namn, handling, bild, datum och längd, på
+     * svenska. Saknas namn eller handling på svenska tas de engelska.
+     */
+    fun season(tvId: Int, season: Int): List<TmdbEpisode> {
+        val swedish = episodesOf(get("tv/$tvId/season/$season", mapOf("language" to "sv-SE")), season)
+        if (swedish.none { it.overview == null || it.name == null }) return swedish
+        val english = runCatching { episodesOf(get("tv/$tvId/season/$season", mapOf("language" to "en-US")), season) }
+            .getOrDefault(emptyList())
+            .associateBy { it.number }
+        return swedish.map { episode ->
+            val other = english[episode.number] ?: return@map episode
+            episode.copy(name = episode.name ?: other.name, overview = episode.overview ?: other.overview)
+        }
+    }
+
+    private fun episodesOf(o: JSONObject, season: Int): List<TmdbEpisode> {
+        val array = o.optJSONArray("episodes") ?: return emptyList()
+        return (0 until array.length()).mapNotNull { array.optJSONObject(it) }.map { e ->
+            TmdbEpisode(
+                season = season,
+                number = e.optInt("episode_number"),
+                // "Avsnitt 3" säger inget: hellre ett riktigt namn på engelska.
+                name = e.optString("name", "").trim().takeUnless { it.isEmpty() || GENERIC_EPISODE.matches(it) },
+                overview = e.optString("overview", "").trim().ifEmpty { null },
+                still = e.optString("still_path", "").ifBlank { null }?.let { IMAGES + "w300" + it },
+                airDate = e.optString("air_date", "").ifBlank { null },
+                runtimeMinutes = e.optInt("runtime", 0).takeIf { it > 0 },
+            )
+        }
+    }
+
     /** [part]: hittad på en del av titeln. Då räknas träffen aldrig som säker. */
     private class Match(val found: JSONObject, val sure: Boolean, val part: Boolean)
 
@@ -561,6 +609,21 @@ class TmdbClient(private val key: String) {
 }
 
 /** En titel på TMDB:s trendlista. kind: "movie" eller "tv". */
+/** Ett avsnitt hos TMDB: det leverantören ofta saknar. */
+data class TmdbEpisode(
+    val season: Int,
+    val number: Int,
+    val name: String?,
+    val overview: String?,
+    val still: String?,
+    /** Datumet det sändes, "1991-12-01", eller null. */
+    val airDate: String?,
+    val runtimeMinutes: Int?,
+)
+
+/** Avsnittsnamn som bara är numret, på några språk: "Avsnitt 3", "Episode 3". */
+private val GENERIC_EPISODE = Regex("""(?i)^(avsnitt|episode|episod|afsnit|jakso|folge|épisode|episodio|del|part|ep\.?)\s*\d+$""")
+
 data class TrendingTitle(
     val kind: String,
     val id: Int,

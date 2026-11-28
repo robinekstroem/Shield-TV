@@ -688,6 +688,16 @@ private fun TmdbCard(state: AppState) {
                 Text(text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                 SecondaryButton("Ta bort nyckeln", onClick = { state.disconnectTmdb() }, icon = Glyphs.Delete)
             }
+            // Omslagen: hämtas av sig själva, och knappen letar igen — också efter det som inte hittades förra gången.
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    coversText(state.collectionCoversProgress),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = palette.textSecondary,
+                    modifier = Modifier.weight(1f),
+                )
+                SecondaryButton("Hämta omslag igen", onClick = { state.refreshCovers() }, icon = Glyphs.Refresh)
+            }
         } else {
             LabeledField("API-nyckel", key, { key = it }, placeholder = "32 tecken från themoviedb.org → Inställningar → API", password = true)
             PrimaryButton("Anslut", onClick = { state.connectTmdb(key) }, icon = Glyphs.Add)
@@ -708,6 +718,16 @@ private fun TmdbCard(state: AppState) {
             color = palette.textTertiary,
         )
     }
+}
+
+/** Raden om omslagen i TMDB-kortet: hur långt samlingarnas filmer kommit, eller vad knappen gör. */
+private fun coversText(progress: Pair<Int, Int>?): String = when {
+    progress == null ->
+        "Omslag som saknas hämtas av sig själva, också till filmerna du saknar i Samlingar. " +
+            "Knappen letar igen, även efter det som inte hittades förra gången."
+    progress.second == 0 -> "Samlingarna: inget nytt att hämta. Titlar utan omslag letas efter igen."
+    progress.first < progress.second -> "Samlingarna: hämtar omslag, ${progress.first} av ${progress.second} filmer."
+    else -> "Samlingarna: klart, ${progress.second} filmer uppslagna."
 }
 
 /** Egna bilder bakom appen, upp till tre. */

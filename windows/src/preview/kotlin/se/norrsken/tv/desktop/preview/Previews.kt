@@ -130,7 +130,22 @@ fun main(args: Array<String>) {
             ),
         )
     }
-    kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.Main) { state.previewLibrary(data.source, data.content, data.guide, tmdb) }
+    // Filmerna som saknas i Jönssonligan, med omslag "från TMDB".
+    val missing = PREVIEW_MISSING_COVERS.mapIndexed { k, (title, year) ->
+        TmdbStore.keyOf("movie", title, year) to TmdbFacts(
+            id = 9200 + k,
+            genres = "Komedi, Kriminal",
+            rating = 5.8 + k * 0.3,
+            votes = 140,
+            overview = "Sickan har en ny plan, Vanheden och Rocky följer med — och allt hänger på att ingen kommer för sent.",
+            poster = "${images.base}/saknas/$k.png",
+            backdrop = "${images.base}/backdrop/${40 + k}.png",
+            year = year,
+            matcher = se.norrsken.tv.desktop.data.TmdbClient.MATCHER,
+            sure = true,
+        )
+    }.toMap()
+    kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.Main) { state.previewLibrary(data.source, data.content, data.guide, tmdb + missing) }
     waitFor("biblioteket", 10_000) { state.library.movies.isNotEmpty() }
     println(
         "Läge: laddar=${state.loading}, källor=${state.sources.size}, filmer=${state.library.movies.size}, " +
@@ -799,6 +814,20 @@ private val PREVIEW_EXTRA_MOVIES = listOf(
     "Snöänglarna" to 2018,
     "Julnatten" to 2021,
     "Pepparkaksstaden" to 2016,
+    // Heter lite annorlunda än i samlingen ("Jönssonligan & Dynamit-Harry"): ska ändå hittas.
+    "Jönssonligan 2 - Dynamit Harry" to 1982,
+)
+
+/**
+ * Jönssonligans filmer som saknas i förhandsbiblioteket, med omslag och
+ * handling som från TMDB: de ska synas på sin plats i samlingen. Namnen
+ * precis som i samlingen (Collections.kt).
+ */
+private val PREVIEW_MISSING_COVERS = listOf(
+    "Jönssonligan dyker upp igen" to 1986,
+    "Jönssonligan & den svarta diamanten" to 1992,
+    "Jönssonligan spelar högt" to 2000,
+    "Jönssonligan & Wall Enberg" to 2026,
 )
 
 /** Julkalendrarna i förhandsbiblioteket: SVT:s, så att de känns igen utan TMDB. */
@@ -1055,6 +1084,7 @@ private class PreviewImages(private val server: HttpServer) {
                 "poster" -> poster(index)
                 "topp" -> poster(index + 60, PREVIEW_TOP_TITLES.getOrNull(index))
                 "extra" -> poster(index + 70, if (index >= 20) PREVIEW_CALENDARS.getOrNull(index - 20)?.first else PREVIEW_EXTRA_MOVIES.getOrNull(index)?.first)
+                "saknas" -> poster(index + 90, PREVIEW_MISSING_COVERS.getOrNull(index)?.first)
                 "backdrop" -> landscape(1280, 720, index)
                 "logo" -> logo(index)
                 else -> error("okänd bild $path")

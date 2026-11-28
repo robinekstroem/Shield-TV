@@ -966,9 +966,14 @@ internal fun SeriesDetail(state: AppState, series: Series) {
                         maxWidth = 540.dp,
                         maxLines = 2,
                     )
+                    // År, genrer och betyg från leverantören, och från TMDB där de saknas.
+                    val seriesTmdb = state.tmdbFor(series)
                     DetailFacts(
-                        parts = listOfNotNull(series.year, series.genre?.takeIf { it.isNotBlank() }),
-                        rating = series.rating,
+                        parts = listOfNotNull(
+                            series.year?.takeIf { it.isNotBlank() } ?: seriesTmdb?.year?.toString(),
+                            series.genre?.takeIf { it.isNotBlank() } ?: seriesTmdb?.genres?.ifBlank { null },
+                        ),
+                        rating = series.rating?.takeIf { it > 0.0 } ?: seriesTmdb?.rating,
                     )
                     // Handlingen på svenska från TMDB när den finns, annars leverantörens text.
                     val shownPlot = state.tmdbFor(series)?.overview?.takeIf { it.isNotBlank() }
@@ -1064,7 +1069,12 @@ private fun EpisodeList(state: AppState, series: Series, episodes: List<XtreamEp
             ) {
                 // Index i nyckeln: vissa paneler skickar samma avsnitts-id två gånger.
                 itemsIndexed(shown, key = { index, episode -> "${episode.id}#$index" }) { _, episode ->
-                    EpisodeRow(episode, series, onClick = { state.playEpisode(series, episode) })
+                    EpisodeRow(
+                        episode,
+                        series,
+                        aired = state.episodeDates[episode.season to episode.episode],
+                        onClick = { state.playEpisode(series, episode) },
+                    )
                 }
             }
             Scrollbar(listState, modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(end = 6.dp, bottom = 12.dp))
@@ -1072,8 +1082,9 @@ private fun EpisodeList(state: AppState, series: Series, episodes: List<XtreamEp
     }
 }
 
+/** Ett avsnitt: bilden, numret, längden och när det sändes ([aired], från TMDB), namnet och handlingen. */
 @Composable
-private fun EpisodeRow(episode: XtreamEpisode, series: Series, onClick: () -> Unit) {
+private fun EpisodeRow(episode: XtreamEpisode, series: Series, aired: String?, onClick: () -> Unit) {
     val palette = LocalPalette.current
     Pressable(onClick = onClick, modifier = Modifier.fillMaxWidth()) { hovered ->
         Row(
@@ -1112,8 +1123,9 @@ private fun EpisodeRow(episode: XtreamEpisode, series: Series, onClick: () -> Un
             Spacer(Modifier.width(18.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 val duration = episode.durationSeconds?.takeIf { it > 0 }?.let { " · ${(it + 30) / 60} min" }.orEmpty()
+                val date = airedText(aired)?.let { " · $it" }.orEmpty()
                 Text(
-                    "Avsnitt ${episode.episode}$duration",
+                    "Avsnitt ${episode.episode}$duration$date",
                     style = MaterialTheme.typography.labelMedium,
                     color = palette.textTertiary,
                 )
@@ -1136,6 +1148,13 @@ private fun EpisodeRow(episode: XtreamEpisode, series: Series, onClick: () -> Un
         }
     }
 }
+
+/** "1991-12-01" som "1 december 1991", eller null. */
+private fun airedText(date: String?): String? =
+    date?.let { runCatching { java.time.LocalDate.parse(it).format(AIRED_FORMAT) }.getOrNull() }
+
+private val AIRED_FORMAT: java.time.format.DateTimeFormatter =
+    java.time.format.DateTimeFormatter.ofPattern("d MMMM yyyy", swedishLocale)
 
 // --- Gemensamt ---------------------------------------------------------------------
 

@@ -250,10 +250,18 @@ internal fun CollectionPage(
         ?: slots.firstOrNull()
     Box(modifier.fillMaxSize()) {
         val movie = spotlight?.movie
+        // En film man saknar: bakgrunden från TMDB, om den hittats där.
+        val missing = if (movie == null && spotlight != null) state.collectionFacts(spotlight.film) else null
         if (movie != null) {
             SpotlightBackdrop(
                 url = state.tmdbFor(movie)?.backdrop,
                 fallback = state.posterCandidates(movie).firstOrNull(),
+                running = state.nowPlaying == null || state.miniPlayer,
+            )
+        } else if (missing != null && (missing.backdrop != null || missing.poster != null)) {
+            SpotlightBackdrop(
+                url = missing.backdrop,
+                fallback = missing.poster,
                 running = state.nowPlaying == null || state.miniPlayer,
             )
         } else {
@@ -328,7 +336,13 @@ internal fun CollectionPage(
                                     showTitle = !tvLayout,
                                 )
                             } else {
-                                MissingPoster(slot, accent, modifier = track, onActive = { if (!tvLayout) hoveredKey = key })
+                                MissingPoster(
+                                    slot,
+                                    poster = state.collectionFacts(slot.film)?.poster,
+                                    accent = accent,
+                                    modifier = track,
+                                    onActive = { if (!tvLayout) hoveredKey = key },
+                                )
                             }
                         }
                     }
@@ -347,6 +361,25 @@ private fun slotKey(franchise: Franchise, slot: CollectionSlot): String =
 private fun SlotInfo(state: AppState, slot: CollectionSlot) {
     val palette = LocalPalette.current
     val movie = slot.movie
+    // Saknas filmen men finns hos TMDB: loggan, betyget och handlingen därifrån, och att den saknas.
+    val missing = if (movie == null) state.collectionFacts(slot.film) else null
+    if (missing != null) {
+        SpotlightInfo(
+            state = state,
+            kind = "movie",
+            tmdbId = missing.id,
+            title = slot.film.title,
+            meta = listOfNotNull(
+                "Nr ${slot.number}",
+                (missing.year ?: slot.film.year).toString(),
+                formatRating(missing.rating),
+                missing.genres.ifBlank { null },
+                "Finns inte i ditt bibliotek",
+            ).joinToString("  ·  "),
+            overview = missing.overview?.ifBlank { null },
+        )
+        return
+    }
     if (movie != null) {
         val tmdb = state.tmdbFor(movie)
         val facts = state.movieFacts[movie.key]
@@ -580,9 +613,13 @@ private fun PosterFan(covers: List<List<String>>, posterWidth: Dp, step: Dp, mod
     }
 }
 
-/** En film i serien som inte finns i biblioteket: på sin plats, nedtonad, med numret och året. */
+/**
+ * En film i serien som inte finns i biblioteket, på sin plats: omslaget från
+ * TMDB ([poster]), lite nedtonat tills det markeras och med "Saknas" längst
+ * ned. Utan omslag numret, titeln och året på seriens färg.
+ */
 @Composable
-private fun MissingPoster(slot: CollectionSlot, accent: Color, modifier: Modifier, onActive: () -> Unit) {
+private fun MissingPoster(slot: CollectionSlot, poster: String?, accent: Color, modifier: Modifier, onActive: () -> Unit) {
     val palette = LocalPalette.current
     val shape = RoundedCornerShape(10.dp)
     Pressable(
@@ -594,39 +631,70 @@ private fun MissingPoster(slot: CollectionSlot, accent: Color, modifier: Modifie
     ) { hovered ->
         LaunchedEffect(hovered) { if (hovered) onActive() }
         Column(Modifier.fillMaxWidth().padding(6.dp)) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(2f / 3f)
-                    .graphicsLayer { alpha = if (hovered) 1f else 0.7f }
-                    .clip(shape)
-                    .background(palette.surface)
-                    .background(Brush.verticalGradient(listOf(accent.copy(alpha = 0.14f), Color.Transparent)))
-                    .border(if (hovered) 2.dp else 1.dp, if (hovered) accent.copy(alpha = 0.85f) else palette.hairline, shape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(
-                    Modifier.padding(14.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+            if (poster != null) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(2f / 3f)
+                        .clip(shape)
+                        .background(palette.surface)
+                        .border(if (hovered) 2.dp else 1.dp, if (hovered) accent.copy(alpha = 0.85f) else palette.hairline, shape),
                 ) {
-                    Text("${slot.number}", style = MaterialTheme.typography.headlineMedium, color = accent.copy(alpha = 0.9f))
-                    Text(
-                        slot.film.title,
-                        style = MaterialTheme.typography.titleSmall,
-                        color = palette.textSecondary,
-                        textAlign = TextAlign.Center,
-                        maxLines = 4,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text("${slot.film.year}", style = MaterialTheme.typography.labelMedium, color = palette.textTertiary)
+                    Artwork(candidates = listOf(poster), modifier = Modifier.fillMaxSize(), maxSide = 360) {
+                        PosterPlaceholder(slot.film.title)
+                    }
+                    // Nedtonat tills det markeras: filmen finns inte i biblioteket.
+                    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = if (hovered) 0.06f else 0.34f)))
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.86f))))
+                            .padding(top = 30.dp, bottom = 11.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "SAKNAS",
+                            style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.6.sp),
+                            color = Color.White.copy(alpha = 0.9f),
+                        )
+                    }
                 }
-                Text(
-                    "SAKNAS",
-                    style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.4.sp),
-                    color = palette.textTertiary,
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
-                )
+            } else {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(2f / 3f)
+                        .graphicsLayer { alpha = if (hovered) 1f else 0.7f }
+                        .clip(shape)
+                        .background(palette.surface)
+                        .background(Brush.verticalGradient(listOf(accent.copy(alpha = 0.14f), Color.Transparent)))
+                        .border(if (hovered) 2.dp else 1.dp, if (hovered) accent.copy(alpha = 0.85f) else palette.hairline, shape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(
+                        Modifier.padding(14.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text("${slot.number}", style = MaterialTheme.typography.headlineMedium, color = accent.copy(alpha = 0.9f))
+                        Text(
+                            slot.film.title,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = palette.textSecondary,
+                            textAlign = TextAlign.Center,
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text("${slot.film.year}", style = MaterialTheme.typography.labelMedium, color = palette.textTertiary)
+                    }
+                    Text(
+                        "SAKNAS",
+                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.4.sp),
+                        color = palette.textTertiary,
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
+                    )
+                }
             }
             if (!tvLayout) {
                 Spacer(Modifier.height(8.dp))

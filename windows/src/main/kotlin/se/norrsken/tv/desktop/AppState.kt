@@ -17,6 +17,7 @@ import se.norrsken.tv.desktop.data.CHRISTMAS_WORDS
 import se.norrsken.tv.desktop.data.DIRECTOR_NAMES
 import se.norrsken.tv.desktop.data.DirectorFilms
 import se.norrsken.tv.desktop.data.DynamicFranchises
+import se.norrsken.tv.desktop.data.FRANCHISES
 import se.norrsken.tv.desktop.data.JulIndex
 import se.norrsken.tv.desktop.data.JulKeys
 import se.norrsken.tv.desktop.data.TmdbListTitle
@@ -51,6 +52,7 @@ import se.norrsken.tv.desktop.data.TmdbKeyException
 import se.norrsken.tv.desktop.data.TmdbClient
 import se.norrsken.tv.desktop.data.TmdbStore
 import se.norrsken.tv.desktop.data.TmdbFacts
+import se.norrsken.tv.desktop.data.TmdbEpisode
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.Mutex
 import se.norrsken.tv.desktop.data.MovieFactsStore
@@ -268,6 +270,10 @@ class AppState {
     private var directors: List<DirectorFilms> = emptyList()
     private var directorsAt = 0L
     private var directorsLoading = false
+    /** Samlingarnas filmer hos TMDB (omslag, bakgrund, handling): hur långt hämtningen kommit, eller null. */
+    var collectionCoversProgress by mutableStateOf<Pair<Int, Int>?>(null)
+        private set
+    private var collectionCoversJob: Job? = null
     var movieQuery by mutableStateOf("")
     var seriesGroup by mutableStateOf<String?>(null)
     var seriesQuery by mutableStateOf("")
@@ -475,6 +481,11 @@ class AppState {
         private set
     var episodes by mutableStateOf<EpisodesState>(EpisodesState.Loading)
         private set
+    /** Seriens avsnitt som visas: när de sändes, från TMDB — (säsong, avsnitt) → "1991-12-01". */
+    var episodeDates by mutableStateOf<Map<Pair<Int, Int>, String>>(emptyMap())
+        private set
+    /** TMDB:s säsonger under körningen: "tv-id:säsong" → avsnitten. */
+    private val tmdbSeasons = HashMap<String, List<TmdbEpisode>>()
     private var episodesJob: Job? = null
 
     var selectedMovie by mutableStateOf<Movie?>(null)
@@ -1015,12 +1026,16 @@ class AppState {
             val index = versions
             val choices = disneyChoices
             disney = withContext(Dispatchers.Default) { DisneyIndex.build(lib, index, choices) }
-            collections = withContext(Dispatchers.Default) { CollectionIndex.build(lib, index) { tmdbFor(it)?.id } }
+            collections = withContext(Dispatchers.Default) {
+                CollectionIndex.build(lib, index, tmdbIdOf = { tmdbFor(it)?.id }, filmTmdbId = { collectionTmdbId(it) })
+            }
             val films = christmasFilms
             val shows = christmasShows
             jul = withContext(Dispatchers.Default) {
                 JulIndex.build(lib, index, films, shows, { tmdbFor(it)?.id }, { tmdbFor(it)?.id })
             }
+            // Filmerna man saknar i samlingarna: omslagen hämtas, en gång per film.
+            refreshCollectionCovers()
         }
     }
 
@@ -1717,6 +1732,138 @@ class AppState {
             saveExtrasSoon()
             scheduleDisney()
         }
+    }
+
+    // --- Samlingarnas filmer hos TMDB ------------------------------------------------------
+
+    /** Var en film i en samling sparas bland TMDB-svaren: som en film i biblioteket med samma namn och år. */
+    private fun collectionFactsKey(film: FranchiseFilm): String = TmdbStore.keyOf("movie", film.title, film.year)
+
+    /**
+     * Det TMDB vet om en film i en samling — omslag, bakgrund, handling och
+     * betyg — också när den inte finns i biblioteket. Bara säkra träffar:
+     * hellre inget omslag än fel film.
+     */
+    fun collectionFacts(film: FranchiseFilm): TmdbFacts? =
+        tmdbFacts[collectionFactsKey(film)]?.takeIf { it.found && it.sure }
+
+    /** Filmens id hos TMDB, om den slagits upp säkert: då hittas den i biblioteket också under ett annat namn. */
+    private fun collectionTmdbId(film: FranchiseFilm): Int? = collectionFacts(film)?.id
+
+    /**
+     * Slår upp samlingarnas filmer hos TMDB, de som inte finns i biblioteket:
+     * först de som saknas i samlingarna man har något ur, så att deras omslag
+     * syns på sin plats, sedan filmseriernas övriga, så att en film som heter
+     * något annat i biblioteket hittas efter TMDB-id. Varje film en gång;
+     * [retry] (knappen i Inställningar) tar också de som inte hittades förra gången.
+     */
+    fun refreshCollectionCovers(retry: Boolean = false) {
+        val apiKey = tmdbKey ?: return
+        if (!tmdbLoaded) return
+        if (collectionCoversJob?.isActive == true) {
+            if (!retry) return
+            collectionCoversJob?.cancel()
+        }
+        val index = collections
+        val known = tmdbFacts
+        collectionCoversJob = scope.launch {
+            afterStartup()
+            val wanted = withContext(Dispatchers.Default) {
+                val shown = index.present()
+                val list = ArrayList<FranchiseFilm>()
+                fun add(franchise: Franchise) {
+                    val owned = index.ownedIn(franchise)
+                    franchise.films.forEachIndexed { position, film -> if (position !in owned) list += film }
+                }
+                shown.forEach { add(it) }
+                FRANCHISES.filter { it !in shown }.forEach { add(it) }
+                list.distinctBy { collectionFactsKey(it) }.filter { film ->
+                    val before = known[collectionFactsKey(film)]
+                    before == null || (retry && !(before.found && before.sure))
+                }
+            }
+            if (wanted.isEmpty()) {
+                if (retry) collectionCoversProgress = 0 to 0
+                return@launch
+            }
+            val client = TmdbClient(apiKey)
+            val genres = withContext(Dispatchers.IO) { runCatching { client.genres("movie") }.getOrDefault(emptyMap()) }
+            var done = 0
+            collectionCoversProgress = 0 to wanted.size
+            val fresh = HashMap<String, TmdbFacts>()
+            var failures = 0
+            var stopped = false
+            var lastPublish = System.currentTimeMillis()
+            val queue = wanted.iterator()
+            coroutineScope {
+                repeat(COVER_WORKERS) {
+                    launch {
+                        while (!stopped && queue.hasNext()) {
+                            restWhileWatching()
+                            if (stopped || !queue.hasNext()) break
+                            val film = queue.next()
+                            val result = withContext(Dispatchers.IO) { runCatching { lookUpFilm(client, film, genres) } }
+                            val facts = result.getOrNull()
+                            if (facts == null) {
+                                val error = result.exceptionOrNull()
+                                if (error is TmdbKeyException || ++failures >= 20) {
+                                    stopped = true
+                                    break
+                                }
+                                delay(if (error is TmdbBusyException) 10_000L else 3_000L)
+                                continue
+                            }
+                            failures = 0
+                            val key = collectionFactsKey(film)
+                            // Ett svar som hittats förut byts inte mot ett sämre.
+                            val before = known[key]
+                            fresh[key] = if (!(facts.found && facts.sure) && before != null && before.found) before else facts
+                            done++
+                            collectionCoversProgress = done to wanted.size
+                            if (timeToPublish(fresh.size, lastPublish)) {
+                                lastPublish = System.currentTimeMillis()
+                                publishTmdb(HashMap(fresh), save = true)
+                                fresh.clear()
+                            }
+                        }
+                    }
+                }
+            }
+            // Samlingarna byggs om med det nya (publishTmdb), och omslagen syns.
+            publishTmdb(fresh, save = true)
+            // Avbrutet (nyckeln, eller TMDB svarar inte): nästa start fortsätter där det slutade.
+            collectionCoversProgress = if (stopped) null else done to wanted.size
+        }
+    }
+
+    /**
+     * En film i en samling hos TMDB: efter id där det är känt (regissörernas),
+     * annars efter namn och år — det första namnet som ger en säker träff.
+     */
+    private fun lookUpFilm(client: TmdbClient, film: FranchiseFilm, genres: Map<Int, String>): TmdbFacts {
+        if (film.tmdbId > 0) return client.movie(film.tmdbId, genres)
+        var loose: TmdbFacts? = null
+        for (raw in film.names) {
+            val facts = client.search("movie", raw.removePrefix("~"), film.year, genres)
+            if (facts.found && facts.sure) return facts
+            if (facts.found && loose == null) loose = facts
+        }
+        return loose ?: TmdbFacts(id = 0, checkedUtc = System.currentTimeMillis(), matcher = TmdbClient.MATCHER)
+    }
+
+    /**
+     * Inställningar → TMDB, "Hämta omslag igen": samlingarnas filmer, också de
+     * som inte hittades förra gången, titlar i biblioteket som saknar omslag,
+     * och listorna (Topp 10, julen, regissörerna).
+     */
+    fun refreshCovers() {
+        if (tmdbKey == null) return
+        refreshCollectionCovers(retry = true)
+        restartTmdbScan(retryCovers = true)
+        refreshTrending(force = true)
+        refreshWeeklyTop(force = true)
+        refreshJul(force = true)
+        refreshDirectors(force = true)
     }
 
     private fun saveExtrasSoon() {
@@ -2810,7 +2957,60 @@ class AppState {
                 )
             }
             if (selectedSeries?.key == series.key) episodes = loaded
+            // Det leverantören saknar om avsnitten — namn, handling, bild, längd och datum — från TMDB.
+            if (loaded is EpisodesState.Loaded) enrichEpisodes(series, loaded.episodes)
         }
+    }
+
+    /**
+     * Fyller i avsnitten från TMDB där leverantören inte har något: namnet när
+     * det bara är numret eller serienamnet, handlingen, bilden och längden.
+     * Datumen sparas för sig ([episodeDates]). Leverantörens egna uppgifter
+     * går alltid före.
+     */
+    private suspend fun enrichEpisodes(series: Series, list: List<XtreamEpisode>) {
+        episodeDates = emptyMap()
+        val apiKey = tmdbKey ?: return
+        // Bara en säker träff: hellre inga avsnittsnamn än en annan series.
+        val tvId = tmdbFor(series)?.takeIf { it.sure }?.id ?: return
+        val client = TmdbClient(apiKey)
+        val found = HashMap<Pair<Int, Int>, TmdbEpisode>()
+        for (season in list.map { it.season }.distinct()) {
+            val cacheKey = "$tvId:$season"
+            val episodes = tmdbSeasons[cacheKey]
+                ?: withContext(Dispatchers.IO) { runCatching { client.season(tvId, season) }.getOrNull() }
+                    ?.also { tmdbSeasons[cacheKey] = it }
+                ?: continue
+            for (episode in episodes) found[episode.season to episode.number] = episode
+        }
+        if (found.isEmpty() || selectedSeries?.key != series.key) return
+        val seriesTitle = titleOf(series)
+        val enriched = list.map { episode ->
+            val extra = found[episode.season to episode.episode] ?: return@map episode
+            episode.copy(
+                title = if (isGenericEpisodeTitle(episode.title, seriesTitle)) extra.name ?: episode.title else episode.title,
+                plot = episode.plot?.takeIf { it.isNotBlank() } ?: extra.overview,
+                thumbnail = episode.thumbnail?.takeIf { it.isNotBlank() } ?: extra.still,
+                durationSeconds = episode.durationSeconds?.takeIf { it > 0 } ?: extra.runtimeMinutes?.let { it * 60 },
+            )
+        }
+        val shown = episodes
+        if (shown !is EpisodesState.Loaded || shown.episodes !== list) return
+        episodes = EpisodesState.Loaded(enriched)
+        episodeCache[series.key] = enriched
+        episodeDates = found.entries.mapNotNull { (key, value) -> value.airDate?.let { key to it } }.toMap()
+    }
+
+    /**
+     * Ett avsnittsnamn som inte säger något: tomt, bara "Avsnitt 3", serienamnet
+     * eller "Sunes jul S01E03". Då får TMDB:s namn gå före.
+     */
+    private fun isGenericEpisodeTitle(title: String, seriesTitle: String): Boolean {
+        var rest = TitleCleaner.normalize(title)
+        val name = TitleCleaner.normalize(seriesTitle)
+        if (name.isNotEmpty()) rest = rest.replace(name, "")
+        rest = GENERIC_EPISODE_PARTS.replace(rest, "")
+        return rest.length < 2
     }
 
     fun closeSeries() {
@@ -3877,10 +4077,10 @@ class AppState {
         saveSettings()
     }
 
-    private fun restartTmdbScan() {
+    private fun restartTmdbScan(retryCovers: Boolean = false) {
         tmdbJob?.cancel()
         tmdbJob = null
-        startTmdbScan()
+        startTmdbScan(retryCovers)
     }
 
     /**
@@ -3888,21 +4088,31 @@ class AppState {
      * några i sekunden. Samma film i flera kategorier slås upp en gång. Det
      * som hämtats sparas; nästa gång tas bara nya titlar.
      */
-    private fun startTmdbScan() {
+    private fun startTmdbScan(retryCovers: Boolean = false) {
         val key = tmdbKey ?: return
         if (!tmdbLoaded || tmdbJob?.isActive == true) return
         val movies = library.movies
         val series = library.series
         tmdbJob = scope.launch {
             afterStartup()
+            // [retryCovers]: titlarna utan eget omslag, som TMDB inte gav något omslag förra gången.
+            val withoutArt = HashSet<String>()
             val wanted: List<Triple<String, String, Int?>> = withContext(Dispatchers.Default) {
                 // Titlar utan eget omslag först: för dem är TMDB enda chansen till en bild.
                 val movieTitles = movies
                     .sortedWith(compareBy<Movie> { if (hasOwnArt(it.poster)) 1 else 0 }.thenByDescending { it.rating ?: -1.0 })
-                    .map { m -> TitleCleaner.searchTitle(m.name).let { (title, year) -> Triple("movie", title, year) } }
+                    .map { m ->
+                        TitleCleaner.searchTitle(m.name).let { (title, year) -> Triple("movie", title, year) }.also { t ->
+                            if (retryCovers && !hasOwnArt(m.poster)) withoutArt += TmdbStore.keyOf(t.first, t.second, t.third)
+                        }
+                    }
                 val seriesTitles = series
                     .sortedWith(compareBy<Series> { if (hasOwnArt(it.cover)) 1 else 0 }.thenByDescending { it.rating ?: -1.0 })
-                    .map { s -> TitleCleaner.searchTitle(s.name).let { (title, year) -> Triple("tv", title, year ?: s.year?.toIntOrNull()) } }
+                    .map { s ->
+                        TitleCleaner.searchTitle(s.name).let { (title, year) -> Triple("tv", title, year ?: s.year?.toIntOrNull()) }.also { t ->
+                            if (retryCovers && !hasOwnArt(s.cover)) withoutArt += TmdbStore.keyOf(t.first, t.second, t.third)
+                        }
+                    }
                 (movieTitles + seriesTitles)
                     .filter { it.second.isNotBlank() }
                     .distinctBy { TmdbStore.keyOf(it.first, it.second, it.third) }
@@ -3931,7 +4141,12 @@ class AppState {
             val (missing, outdated) = withContext(Dispatchers.Default) {
                 val keyed = wanted.map { it to TmdbStore.keyOf(it.first, it.second, it.third) }
                 val unseen = keyed.filter { (_, key) -> key !in known }.map { it.first }
-                val older = keyed.filter { (_, key) -> known[key]?.let { f -> f.found && f.matcher < TmdbClient.MATCHER } == true }.map { it.first }
+                val older = keyed.filter { (_, key) ->
+                    val before = known[key] ?: return@filter false
+                    (before.found && before.matcher < TmdbClient.MATCHER) ||
+                        // Knappen i Inställningar: utan omslag förra gången, söks igen.
+                        (key in withoutArt && (!before.found || before.poster == null))
+                }.map { it.first }
                 unseen to older
             }
             var done = wanted.size - missing.size - outdated.size
@@ -3982,7 +4197,8 @@ class AppState {
                             val factsKey = TmdbStore.keyOf(kind, title, year)
                             val before = known[factsKey]
                             fresh[factsKey] = if (!facts.found && before != null && before.found) {
-                                before.copy(matcher = TmdbClient.MATCHER, sure = false)
+                                // Söktes igen för omslagets skull (Inställningar) och gav inget: det gamla svaret står kvar.
+                                if (before.matcher >= TmdbClient.MATCHER) before else before.copy(matcher = TmdbClient.MATCHER, sure = false)
                             } else {
                                 facts
                             }
@@ -4155,6 +4371,10 @@ private const val INPUT_QUIET_MS = 4_000L
 private const val PROVIDER_VOTES = 30
 /** Uppslag hos TMDB samtidigt. TMDB tål runt 50 i sekunden; sex ger ett par dussin. */
 private const val TMDB_WORKERS = 6
+/** Det som inte säger något i ett avsnittsnamn: "s01e03", "avsnitt3", "säsong1", siffror. */
+private val GENERIC_EPISODE_PARTS = Regex("""s\d+e\d+|season\d*|säsong\d*|avsnitt\d*|episode\d*|ep\d+|del\d+|part\d+|\d+""")
+/** Samlingarnas filmer hos TMDB: så många uppslag samtidigt. */
+private const val COVER_WORKERS = 3
 /** Minsta tid mellan två ombyggnader av versionerna medan TMDB-svar strömmar in. */
 private const val VERSIONS_PAUSE_MS = 5_000L
 /** Startelvan släpps oftast en timme före avspark: appen börjar titta efter den lite innan. */

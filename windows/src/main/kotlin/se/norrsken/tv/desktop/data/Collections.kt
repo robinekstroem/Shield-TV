@@ -91,30 +91,85 @@ class CollectionIndex private constructor(private val owned: Map<String, Map<Int
 
         /**
          * Går igenom filmerna en gång. Gömda versioner hoppas över: en film per
-         * titel räcker. Regissörernas filmer hittas också efter TMDB-id ([tmdbIdOf]).
+         * titel räcker. Filmerna hittas efter namn och år, och efter TMDB-id:
+         * bibliotekets ([tmdbIdOf]) mot samlingarnas — regissörernas egna och
+         * filmseriernas där de slagits upp ([filmTmdbId]). Det som ändå saknas
+         * får en lösare jämförelse ([matchLoosely]), så att en film som heter
+         * lite annorlunda i biblioteket ändå hittas.
          */
-        fun build(library: Library, versions: VersionIndex, tmdbIdOf: (Movie) -> Int? = { null }): CollectionIndex {
+        fun build(
+            library: Library,
+            versions: VersionIndex,
+            tmdbIdOf: (Movie) -> Int? = { null },
+            filmTmdbId: (FranchiseFilm) -> Int? = { null },
+        ): CollectionIndex {
             val dynamic = DynamicFranchises.current
             val owned = HashMap<String, HashMap<Int, Movie>>()
+            val used = HashSet<String>()
             fun own(franchise: Franchise, film: FranchiseFilm, movie: Movie) {
                 val position = franchise.positionOf(film)
-                if (position >= 0) owned.getOrPut(franchise.id) { HashMap() }.putIfAbsent(position, movie)
+                if (position < 0) return
+                if (owned.getOrPut(franchise.id) { HashMap() }.putIfAbsent(position, movie) == null) used += movie.key
             }
+            // Filmseriernas filmer efter TMDB-id, de som slagits upp.
+            val byTmdb = HashMap<Int, MutableList<Pair<Franchise, FranchiseFilm>>>()
+            for (franchise in FRANCHISES) {
+                for (film in franchise.films) {
+                    val id = film.tmdbId.takeIf { it > 0 } ?: filmTmdbId(film) ?: continue
+                    byTmdb.getOrPut(id) { ArrayList(1) } += franchise to film
+                }
+            }
+            val loose = ArrayList<LooseTitle>()
             for (movie in library.movies) {
                 if (versions.isHidden(movie)) continue
                 val name = collectionName(versions.titleOf(movie))
                 val year = versions.yearOf(movie)
+                if (year != null && name.isNotEmpty()) loose += LooseTitle(movie, year, squeeze(name.replace(" ", "")))
                 for (candidate in NAMES[name].orEmpty()) {
                     if (fits(candidate, year)) own(candidate.franchise, candidate.film, movie)
                 }
-                if (dynamic.list.isEmpty()) continue
                 for (candidate in dynamic.names[name].orEmpty()) {
                     if (fits(candidate, year)) own(candidate.franchise, candidate.film, movie)
                 }
                 val id = tmdbIdOf(movie) ?: continue
+                for ((franchise, film) in byTmdb[id].orEmpty()) own(franchise, film, movie)
                 for ((franchise, film) in dynamic.byTmdb[id].orEmpty()) own(franchise, film, movie)
             }
+            matchLoosely(loose, owned, used, ::own)
             return CollectionIndex(owned)
+        }
+
+        /**
+         * Filmseriernas filmer som fortfarande saknas: finns en titel samma år
+         * (ett års marginal, två för de gamla) som liknar namnet ([looselyNamed]),
+         * är det den — "Jönssonligan 2 - Dynamit Harry" är "Jönssonligan &
+         * Dynamit-Harry". Bara filmserierna: regissörernas titlar är ofta korta
+         * och vanliga. En titel som redan hör till en samling tas inte igen.
+         */
+        private fun matchLoosely(
+            loose: List<LooseTitle>,
+            owned: Map<String, Map<Int, Movie>>,
+            used: Set<String>,
+            own: (Franchise, FranchiseFilm, Movie) -> Unit,
+        ) {
+            if (loose.isEmpty()) return
+            val byYear = loose.groupBy { it.year }
+            for (franchise in FRANCHISES) {
+                for (film in franchise.films) {
+                    if (owned[franchise.id]?.containsKey(franchise.positionOf(film)) == true) continue
+                    val names = LOOSE_NAMES[film] ?: continue
+                    val margin = if (film.year < 1970) 2 else 1
+                    search@ for (year in film.year - margin..film.year + margin) {
+                        for (title in byYear[year].orEmpty()) {
+                            if (title.movie.key in used) continue
+                            if (names.any { looselyNamed(it, title.squeezed) }) {
+                                own(franchise, film, title.movie)
+                                break@search
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         /** Året ska stämma, med ett års marginal (två för de gamla). Utan år räcker namnet, utom för "~"-namnen. */
@@ -125,8 +180,52 @@ class CollectionIndex private constructor(private val owned: Map<String, Map<Int
         }
 
         private val NAMES: Map<String, List<FranchiseCandidate>> by lazy { namesOf(FRANCHISES) }
+
+        /** Filmseriernas namn för den lösa jämförelsen: orden, med dubbla bokstäver som en. */
+        private val LOOSE_NAMES: Map<FranchiseFilm, List<List<String>>> by lazy {
+            val map = HashMap<FranchiseFilm, List<List<String>>>()
+            for (franchise in FRANCHISES) {
+                for (film in franchise.films) {
+                    val names = film.names.mapNotNull { raw ->
+                        if (raw.startsWith("~")) return@mapNotNull null
+                        val words = collectionName(raw).split(' ').filter { it.isNotEmpty() }.map { squeeze(it) }
+                        words.takeIf { it.sumOf { word -> word.length } >= LOOSE_MIN_LETTERS }
+                    }
+                    if (names.isNotEmpty()) map[film] = names
+                }
+            }
+            map
+        }
     }
 }
+
+/** En titel i biblioteket för den lösa jämförelsen: året, och namnet utan mellanrum och dubbla bokstäver. */
+private class LooseTitle(val movie: Movie, val year: Int, val squeezed: String)
+
+/**
+ * Titeln [title] liknar namnet med orden [words]: alla orden finns i den,
+ * också ihopskrivna ("Dynamitharry"), och titeln är inte mycket längre än
+ * namnet — "Rocky Horror" är inte "Rocky". Allt utan mellanrum och med
+ * dubbla bokstäver som en, så att "Jönsonligan" är "Jönssonligan".
+ */
+internal fun looselyNamed(words: List<String>, title: String): Boolean {
+    val letters = words.sumOf { it.length }
+    if (letters < title.length * LOOSE_MIN_SHARE) return false
+    return words.all { it in title }
+}
+
+/** Dubbla bokstäver som en: "jonssonligan" blir "jonsonligan". */
+internal fun squeeze(text: String): String {
+    val out = StringBuilder(text.length)
+    for (c in text) if (out.isEmpty() || out[out.length - 1] != c) out.append(c)
+    return out.toString()
+}
+
+/** Kortare namn än så jämförs inte löst: "Rocky" och "Alien" finns i för många titlar. */
+private const val LOOSE_MIN_LETTERS = 6
+
+/** Så stor del av titeln namnets bokstäver ska vara. */
+private const val LOOSE_MIN_SHARE = 0.6
 
 /** En möjlig träff: filmen i samlingen, och om namnet kräver året. */
 internal class FranchiseCandidate(val franchise: Franchise, val film: FranchiseFilm, val ambiguous: Boolean)
